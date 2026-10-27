@@ -5,7 +5,7 @@ one only lists them in [.claude-plugin/marketplace.json](.claude-plugin/marketpl
 
 | Plugin | What it is |
 | --- | --- |
-| [feature-workflow](https://github.com/vladsavelyev/feature-workflow) | Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate. |
+| [ship](https://github.com/vladsavelyev/ship) | Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate. |
 
 ## Setup
 
