@@ -1,0 +1,7 @@
+{
+  "name": "sync",
+  "description": "Keeps the vlad-skills marketplace and its installed plugins updated from GitHub at every session start.",
+  "author": {
+    "name": "Vlad Savelyev"
+  }
+}

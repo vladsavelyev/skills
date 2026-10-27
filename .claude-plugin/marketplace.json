@@ -14,6 +14,11 @@
         "source": "github",
         "repo": "vladsavelyev/ship"
       }
+    },
+    {
+      "name": "sync",
+      "description": "Keeps this marketplace and its installed plugins updated from GitHub at every session start.",
+      "source": "./plugins/sync"
     }
   ]
 }
