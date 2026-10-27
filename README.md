@@ -18,7 +18,8 @@ curl -fsSL https://raw.githubusercontent.com/vladsavelyev/skills/main/bootstrap.
 
 It adds the marketplace and installs every plugin it lists. After that, the `sync` plugin's
 SessionStart hook updates the marketplace and its installed plugins in the background at every
-session start; updates apply from the next session. A failed sync is printed at the next session
+session start; updates apply from the next session, so a push reaches an environment within
+two session starts. A failed sync is printed at the next session
 start. (Claude Code's own marketplace `autoUpdate` never fired in testing, hence the hook.)
 
 ## Adding a plugin
