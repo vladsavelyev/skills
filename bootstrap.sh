@@ -5,7 +5,7 @@ set -eu
 
 claude plugin marketplace add vladsavelyev/skills
 
-manifest="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/marketplaces/vlad-skills/.claude-plugin/marketplace.json"
-for plugin in $(jq -r '.plugins[].name' "$manifest"); do
+root=$(claude plugin marketplace list --json | jq -er '.[] | select(.name == "vlad-skills") | .installLocation')
+for plugin in $(jq -r '.plugins[].name' "$root/.claude-plugin/marketplace.json"); do
   claude plugin install "$plugin@vlad-skills"
 done

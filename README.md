@@ -7,6 +7,7 @@ one only lists them in [.claude-plugin/marketplace.json](.claude-plugin/marketpl
 | --- | --- |
 | [ship](https://github.com/vladsavelyev/ship) | Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate. |
 | [sync](plugins/sync) | Keeps this marketplace and its installed plugins updated at every session start. |
+| [pr-comments](plugins/pr-comments) | Attribution, tone and safety checks for comments an agent posts on GitHub for me. Adapted from [t3dotgg/tstack](https://github.com/t3dotgg/tstack)'s `leaving-pr-comments`. |
 
 ## Setup
 
@@ -17,10 +18,10 @@ curl -fsSL https://raw.githubusercontent.com/vladsavelyev/skills/main/bootstrap.
 ```
 
 It adds the marketplace and installs every plugin it lists. After that, the `sync` plugin's
-SessionStart hook updates the marketplace and its installed plugins in the background at every
-session start; updates apply from the next session, so a push reaches an environment within
-two session starts. A failed sync is printed at the next session
-start. (Claude Code's own marketplace `autoUpdate` never fired in testing, hence the hook.)
+SessionStart hook updates every plugin the marketplace lists in the background at every session
+start, installing any that are new. Updates apply from the next session, so a push reaches an
+environment within two session starts. A failed sync is printed at the next session start.
+(Claude Code's own marketplace `autoUpdate` never fired in testing, hence the hook.)
 
 ## Adding a plugin
 

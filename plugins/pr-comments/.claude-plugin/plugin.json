@@ -1,0 +1,7 @@
+{
+  "name": "pr-comments",
+  "description": "Attribution, tone and safety checks for comments an agent posts on GitHub on the user's behalf.",
+  "author": {
+    "name": "Vlad Savelyev"
+  }
+}

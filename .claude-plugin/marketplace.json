@@ -19,6 +19,11 @@
       "name": "sync",
       "description": "Keeps this marketplace and its installed plugins updated from GitHub at every session start.",
       "source": "./plugins/sync"
+    },
+    {
+      "name": "pr-comments",
+      "description": "Attribution, tone and safety checks for comments an agent posts on GitHub on the user's behalf.",
+      "source": "./plugins/pr-comments"
     }
   ]
 }
