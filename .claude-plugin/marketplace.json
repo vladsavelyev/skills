@@ -12,8 +12,7 @@
       "description": "Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate.",
       "source": {
         "source": "github",
-        "repo": "vladsavelyev/feature-workflow",
-        "ref": "plugin"
+        "repo": "vladsavelyev/feature-workflow"
       }
     }
   ]
