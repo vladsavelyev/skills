@@ -25,6 +25,7 @@ start. (Claude Code's own marketplace `autoUpdate` never fired in testing, hence
 ## Adding a plugin
 
 Give the repo a `.claude-plugin/plugin.json`, add an entry to `marketplace.json`, and run
-`claude plugin validate .`. A plugin without a `version` is versioned by commit, so every push
+`claude plugin validate .`. List a repo by its HTTPS URL (`"source": "url"`), not the `github`
+shorthand: plugin updates clone the shorthand over SSH, which fails where there's no GitHub key. A plugin without a `version` is versioned by commit, so every push
 counts as an update. Small skills that don't deserve their own repo can go under `plugins/<name>/`
 here, with `"source": "./plugins/<name>"`.

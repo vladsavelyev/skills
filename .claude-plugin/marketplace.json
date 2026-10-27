@@ -11,8 +11,8 @@
       "name": "ship",
       "description": "Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate.",
       "source": {
-        "source": "github",
-        "repo": "vladsavelyev/ship"
+        "source": "url",
+        "url": "https://github.com/vladsavelyev/ship.git"
       }
     },
     {
