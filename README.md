@@ -6,6 +6,7 @@ one only lists them in [.claude-plugin/marketplace.json](.claude-plugin/marketpl
 | Plugin | What it is |
 | --- | --- |
 | [ship](https://github.com/vladsavelyev/ship) | Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate. |
+| [sync](plugins/sync) | Keeps this marketplace and its installed plugins updated at every session start. |
 
 ## Setup
 
@@ -15,8 +16,10 @@ Once per environment (needs `claude`, `jq`, and `uv` for the plugins' CLIs):
 curl -fsSL https://raw.githubusercontent.com/vladsavelyev/skills/main/bootstrap.sh | sh
 ```
 
-It adds the marketplace with auto-update on, and installs every plugin it lists. After that,
-Claude Code pulls new commits of the marketplace and its plugins at startup.
+It adds the marketplace and installs every plugin it lists. After that, the `sync` plugin's
+SessionStart hook updates the marketplace and its installed plugins in the background at every
+session start; updates apply from the next session. A failed sync is printed at the next session
+start. (Claude Code's own marketplace `autoUpdate` never fired in testing, hence the hook.)
 
 ## Adding a plugin
 
