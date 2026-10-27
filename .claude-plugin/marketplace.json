@@ -1,0 +1,20 @@
+{
+  "name": "vlad-skills",
+  "owner": {
+    "name": "Vlad Savelyev"
+  },
+  "metadata": {
+    "description": "Vlad's Claude Code skills and plugins"
+  },
+  "plugins": [
+    {
+      "name": "feature-workflow",
+      "description": "Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate.",
+      "source": {
+        "source": "github",
+        "repo": "vladsavelyev/feature-workflow",
+        "ref": "plugin"
+      }
+    }
+  ]
+}

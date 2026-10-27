@@ -1,0 +1,26 @@
+# skills
+
+My Claude Code plugins, as a marketplace (`vlad-skills`). Each plugin lives in its own repo; this
+one only lists them in [.claude-plugin/marketplace.json](.claude-plugin/marketplace.json).
+
+| Plugin | What it is |
+| --- | --- |
+| [feature-workflow](https://github.com/vladsavelyev/feature-workflow) | Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate. |
+
+## Setup
+
+Once per environment (needs `claude`, `jq`, and `uv` for the plugins' CLIs):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/vladsavelyev/skills/main/bootstrap.sh | sh
+```
+
+It adds the marketplace with auto-update on, and installs every plugin it lists. After that,
+Claude Code pulls new commits of the marketplace and its plugins at startup.
+
+## Adding a plugin
+
+Give the repo a `.claude-plugin/plugin.json`, add an entry to `marketplace.json`, and run
+`claude plugin validate .`. A plugin without a `version` is versioned by commit, so every push
+counts as an update. Small skills that don't deserve their own repo can go under `plugins/<name>/`
+here, with `"source": "./plugins/<name>"`.
