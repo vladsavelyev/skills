@@ -1,0 +1,7 @@
+{
+  "name": "babysit-pr",
+  "description": "Watch a PR through CI and bot reviews in T3 Code, fix or dismiss findings, and keep it current with its base branch.",
+  "author": {
+    "name": "Vlad Savelyev"
+  }
+}

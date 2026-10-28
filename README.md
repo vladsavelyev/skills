@@ -8,6 +8,7 @@ one only lists them in [.claude-plugin/marketplace.json](.claude-plugin/marketpl
 | [ship](https://github.com/vladsavelyev/ship) | Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate. |
 | [sync](plugins/sync) | Keeps this marketplace and its installed plugins updated at every session start. |
 | [pr-comments](plugins/pr-comments) | Attribution, tone and safety checks for comments an agent posts on GitHub for me. Adapted from [t3dotgg/tstack](https://github.com/t3dotgg/tstack)'s `leaving-pr-comments`. |
+| [babysit-pr](plugins/babysit-pr) | Watch a PR through CI and bot reviews in T3 Code, fix or dismiss findings, and keep it current with its (possibly stacked) base branch. Adapted from tstack's `babysit-pr`. |
 
 ## Setup
 
