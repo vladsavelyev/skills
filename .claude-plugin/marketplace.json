@@ -24,6 +24,11 @@
       "name": "pr-comments",
       "description": "Attribution, tone and safety checks for comments an agent posts on GitHub on the user's behalf.",
       "source": "./plugins/pr-comments"
+    },
+    {
+      "name": "babysit-pr",
+      "description": "Watch a PR through CI and bot reviews in T3 Code, fix or dismiss findings, and keep it current with its base branch.",
+      "source": "./plugins/babysit-pr"
     }
   ]
 }
