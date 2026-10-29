@@ -53,10 +53,6 @@ its checks with `gh api repos/<owner>/<repo>/commits/<sha>/check-runs`.
   a flake; fix a real failure.
 - For a finding not worth addressing, reply with the reason and resolve the thread. Post every
   comment and reply with the `pr-comments:pr-comments` skill.
-- If the repo has `.macroscope/check-run-agents/*.md`, read those rules before replying to a
-  Macroscope finding; its findings cite them.
-- CodeRabbit is advisory: treat its findings like any other, but never wait for it or hold a merge
-  for it.
 - Screenshots or videos help reviewers when you have a way to upload them.
 
 Keep the PR the size the user's goal needs. Review loops grow a PR one cheap-looking fix at a time.
