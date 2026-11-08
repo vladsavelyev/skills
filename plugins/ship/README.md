@@ -84,7 +84,7 @@ review subcommand.
 ```sh
 feature start add-oauth --body "Users want Google login."   # branch + worktree + draft PR
 # ... work, commit, push; then, to ship:
-feature adopt --init-labels                    # tracking issue; links the open PR
+feature adopt                                  # labels, tracking issue; links the open PR
 feature assess --risk high --complexity med --why "Token handling; refresh flow has ordering"
 # Sol reviews PR #123 at the printed depth, the skill dedups vs tracked problems, then:
 feature problem add --title "…" --sev high    # file each genuinely-new problem

@@ -161,9 +161,6 @@ def cmd_start(args: argparse.Namespace) -> None:
 
 def cmd_adopt(args: argparse.Namespace) -> None:
     """Wire an already-existing branch into tracking (no new branch/worktree)."""
-    if args.init_labels:
-        github.init_labels()
-
     name = args.branch or current_branch()
     if feature_issue(name) is not None:
         sys.exit(f"Branch '{name}' is already tracked (issue #{feature_issue(name)}).")
@@ -189,6 +186,9 @@ def cmd_adopt(args: argparse.Namespace) -> None:
         )
     if parent_branch(name) != base:
         set_parent_branch(name, base)
+    # Adopting is the first thing that needs the labels, and creating them is idempotent, so make
+    # sure of them every time instead of asking the agent to guess whether this repo has them.
+    github.init_labels()
     issue = _open_feature_issue(name, base, args.title)
 
     if pr is not None:
@@ -896,7 +896,6 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch", help="Branch to adopt (default: current)")
     c.add_argument("--base", help="Base branch (default: git-town parent, else the open PR's base, else main)")
     c.add_argument("--title", help="Issue title (default: derived from branch name)")
-    c.add_argument("--init-labels", action="store_true", help="Create workflow labels first")
     c.set_defaults(func=cmd_adopt)
 
     c = sub.add_parser("prompt", help="Record the latest prompt")

@@ -123,11 +123,12 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
     monkeypatch.setattr(github, "link_pr_to_feature", lambda number, issue: True)
     monkeypatch.setattr(github, "comment", lambda issue, text: None)
+    monkeypatch.setattr(github, "init_labels", lambda: None)
     return did
 
 
 def _adopt_args(base: str | None = None):
-    return cli.argparse.Namespace(branch="child", base=base, title=None, init_labels=False)
+    return cli.argparse.Namespace(branch="child", base=base, title=None)
 
 
 def test_adopt_takes_the_pr_base_when_git_town_has_no_parent(monkeypatch):

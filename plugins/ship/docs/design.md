@@ -249,7 +249,7 @@ problems: 1 (#46 sev:high token refresh race)."*
 
 - `gh` authenticated (`gh auth status`).
 - `git-town` installed (`brew install git-town`) and initialized in the repo (`git town config`).
-- Labels created once per repo: `feature adopt --init-labels` does this.
+- Labels: `feature adopt` creates or updates them every time (idempotent).
 - A Project named "Features" (optional, for the board) with a label-based auto-add workflow.
 
 ## CLI reference
@@ -260,7 +260,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>`, a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
 | `feature assess --risk <low\|med\|high> --complexity <low\|med\|high> --why <text>` | Size the PR from its diff (S/M/L/XL), derive the review depth (`assess.py`), and write all of it into a marked section of the PR body. Prints the depth. |
-| `feature adopt [--branch <b>] [--base <branch>] [--init-labels]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
+| `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |

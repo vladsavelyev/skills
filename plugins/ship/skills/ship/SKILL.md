@@ -29,7 +29,7 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
 
 | Situation | Command |
 | --- | --- |
-| Track the branch | `feature adopt` (`--init-labels` the first time in a repo) |
+| Track the branch | `feature adopt` (also creates the workflow labels if the repo lacks them) |
 | Resume | `feature status`. If it warns merged-but-not-closed-out, run `feature merge` first. |
 | Record the user's request | `feature prompt "<request>"` |
 | Link the PR | `feature pr <number>` |
@@ -50,8 +50,7 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
    that the caller must open one against the parent branch. The **worktree** is the checkout that
    has its branch (`git worktree list`). If none has it, run `gh pr checkout <PR#>` inside a new
    `git worktree add --detach .claude/worktrees/<branch>` from the main checkout.
-   - Untracked branch (`feature status` says so): `feature adopt` (add `--init-labels` if the repo
-     lacks the labels). It links the open PR and takes the PR's base as the parent, or refuses if
+   - Untracked branch (`feature status` says so): `feature adopt`. It links the open PR and takes the PR's base as the parent, or refuses if
      the branch's git-town parent differs.
    - Tracked branch with no PR linked: `feature pr <PR#>`.
    - The PR's base isn't the tracked parent: don't review. Report the mismatch.
@@ -78,8 +77,9 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
    Use `ultra` only when the user asked for it. The `task` is the brief below, and nothing about
    tracked problems or earlier rounds: Sol must find without them. If the wait times out, keep
    waiting (`t3_thread_wait` on the child thread) until it finishes; never cancel it or review
-   yourself instead. If Sol isn't available, stop and report that; don't substitute another
-   reviewer.
+   yourself instead. If Sol isn't listed, or its task comes back failed (an auth or gateway
+   error, a crash), stop: record no review, put Sol's error verbatim in the report, and don't
+   substitute another reviewer.
    ```
    Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>`. The PR's branch is
    checked out at <worktree abs path>; read code only there, never another checkout. Read-only:
