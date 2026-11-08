@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Ship a feature branch — assess the PR's size, risk and complexity, write that into the PR body, have Sol review it at the matching depth, file the findings as tracked problems, and check the merge gate. Also resumes a tracked feature or closes one out after merge. Use for any request to ship, review a PR or branch, or check whether it can merge; an untracked branch gets tracked first.
+description: Ship a feature branch — have Sol review the PR at a depth sized from its diff, record Sol's grade of its risk and complexity in the PR body, file the findings as tracked problems, and check the merge gate. Also resumes a tracked feature or closes one out after merge. Use for any request to ship, review a PR or branch, or check whether it can merge; an untracked branch gets tracked first.
 context: fork
 background: false
 ---
@@ -33,8 +33,8 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
 | Resume | `feature status`. If it warns merged-but-not-closed-out, run `feature merge` first. |
 | Record the user's request | `feature prompt "<request>"` |
 | Link the PR | `feature pr <number>` |
-| Assess the PR | `feature assess --risk low\|med\|high --complexity low\|med\|high --why "<sentence>"` |
-| Record a review | `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary "<sentence>"` |
+| Depth for the next round | `feature depth` |
+| Record a review | `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list --blocking\|--open`, `add`, `resolve <#> --commit <sha>`, `defer\|reject\|block <#> --reason "…"` |
 | Review budget | `feature budget [--set <n> \| --auto]` |
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
@@ -55,27 +55,16 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
    - Tracked branch with no PR linked: `feature pr <PR#>`.
    - The PR's base isn't the tracked parent: don't review. Report the mismatch.
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
-2. **Assess.** Read the PR description and the whole diff (`gh pr diff <PR#>`; over 300 files
-   GitHub refuses it, so use `git diff origin/<base>...HEAD` in the worktree), then run
-   `feature assess`. The CLI measures size from the diff and turns size, risk and complexity
-   into the review depth (the reviewer's reasoning effort), writes all of it into the PR body,
-   and prints the depth. Judge honestly; the depth is only as good as these calls:
-   - **risk** is what a missed bug would cost. `high`: data loss or corruption, security or
-     auth, money, migrations or stored formats, concurrency, shared infra or deploys, anything
-     hard to roll back. `med`: user-visible behaviour on a main path, public APIs, error
-     handling. `low`: docs, tests, tooling, internal refactors with good coverage. A PR touching
-     a path in `git config --get-all feature.sensitive-path` is at least `med`.
-   - **complexity** is how hard the change is to get right. `high`: subtle state, ordering,
-     caching, new invariants, many interacting parts. `med`: real logic in a few places. `low`:
-     mechanical or local.
-   - `--why`: one or two sentences naming what drives the risk and the complexity.
-   Re-assess every round: fixes change the diff.
+2. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
+   review it comes from the diff stats and the paths touched; after one, from the last review's
+   grade. Don't read the diff to second-guess it. Go higher only when the user asked for a deeper
+   review (`ultra` only on request), and say so in the report.
 3. **Have Sol find, blind.** Sol is the Codex provider's Sol model in T3. Load the T3 tools with
    ToolSearch, call `orchestrator_capabilities` with `search: "sol"`, and take the newest Sol
    model the `codex` provider lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`,
    `timeoutMs: 3600000`, and
    `target: {providerInstanceId: "codex", model: <sol model>, options: {reasoningEffort: <depth>}}`.
-   Use `ultra` only when the user asked for it. The `task` is the brief below, and nothing about
+   The `task` is the brief below, and nothing about
    tracked problems or earlier rounds: Sol must find without them. If the wait times out, keep
    waiting (`t3_thread_wait` on the child thread) until it finishes; never cancel it or review
    yourself instead. If Sol isn't listed, or its task comes back failed (an auth or gateway
@@ -95,6 +84,15 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
    wrong result on a realistic path; med = a real bug on a narrower path; low = anything else);
    file:line; a concrete failure scenario (inputs or state → wrong outcome); the smallest fix.
    If you find nothing, say so plainly.
+
+   Then grade the PR as a whole, each with low/med/high, plus one or two sentences on what
+   drives both:
+   - risk, what a missed bug would cost. high: data loss or corruption, security or auth, money,
+     migrations or stored formats, concurrency, shared infra or deploys, anything hard to roll
+     back. med: user-visible behaviour on a main path, public APIs, error handling. low: docs,
+     tests, tooling, internal refactors with good coverage.
+   - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
+     invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
 4. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
 5. **Verify and dedup each finding** against the real code:
@@ -115,7 +113,10 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
 6. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
    the repro, `file:line` and the suggested smallest fix.
 7. **Record**: `feature review record --sha $(git rev-parse HEAD) …`. Write `--summary` as a real
-   sentence about what was reviewed and found, never a bare "clean pass".
+   sentence about what was reviewed and found, never a bare "clean pass". Pass the effort Sol ran
+   at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`; raise a grade if the
+   findings show Sol underrated it, never lower one. The CLI writes the grade into the PR body and
+   sizes the next round's depth from it.
 
 ## Gate verdict
 
@@ -129,7 +130,8 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
 
 ## Rules
 
-- Never lower a severity, or a risk or complexity call, to open the gate or buy a cheaper review.
+- Never lower a severity, or Sol's risk or complexity grade, to open the gate or buy a cheaper
+  review.
   Defer with a reason instead.
 - Never `feature merge --force`. Never merge for the human.
 - Close fixed problems with `problem resolve`, not a `Closes #a, #b` PR line (GitHub links only the
@@ -144,7 +146,7 @@ End with only this, filled in:
 ```
 Feature: <name>  Branch: <branch>  PR: <url or none>  Worktree: <abs path>
 Did: <one line>
-Assessment: size <S|M|L|XL>, risk <…>, complexity <…> → Sol at <depth>   (or not run)
+Review: Sol <model> at <depth>; graded risk <…>, complexity <…>; next round at <depth>   (or not run)
 Gate: <verdict, or not run>
 Blocking: #<n> [sev] <title> — <file:line>, fix: <smallest fix>   (one per line, or none)
 Next:

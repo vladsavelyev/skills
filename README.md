@@ -5,7 +5,7 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 
 | Plugin | What it is |
 | --- | --- |
-| [ship](plugins/ship) | `start`: a feature's branch, worktree and draft PR. `ship`: assess the PR, have Sol review it at the matching depth, track the problems, gate the merge. |
+| [ship](plugins/ship) | `start`: a feature's branch, worktree and draft PR. `ship`: have Sol review the PR at a depth sized from it, track the problems, gate the merge. |
 | [sync](plugins/sync) | Keeps this marketplace and its installed plugins updated at every session start. |
 | [pr-comments](plugins/pr-comments) | Attribution, tone and safety checks for comments an agent posts on GitHub for me. Adapted from [t3dotgg/tstack](https://github.com/t3dotgg/tstack)'s `leaving-pr-comments`. |
 | [babysit-pr](plugins/babysit-pr) | Watch a PR through CI and bot reviews in T3 Code, fix or dismiss findings, and keep it current with its (possibly stacked) base branch. Adapted from tstack's `babysit-pr`. |

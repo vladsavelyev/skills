@@ -247,29 +247,32 @@ def cmd_pr(args: argparse.Namespace) -> None:
     print(f"Linked PR #{args.number} to feature #{issue}")
 
 
-def cmd_assess(args: argparse.Namespace) -> None:
-    """Size the PR from its diff, take the agent's risk and complexity calls, and write all three
-    plus the review depth they imply into the PR body. Prints the depth for the reviewer."""
+def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
+    """(depth, size, files, lines, why) for the next review round of a linked PR."""
+    files, lines = github.pr_diff_stats(state["pr"])
+    size = assess.size_bucket(files, lines)
+    grade = assess.last_grade(state["review_history"])
+    if grade is not None:
+        depth = assess.review_depth(size=size, risk=grade["risk"], complexity=grade["complexity"])
+        why = f"the last review graded it risk {grade['risk']}, complexity {grade['complexity']}"
+        return depth, size, files, lines, why
+    paths = github.pr_changed_paths(state["pr"], expected=files)
+    hits = budget.sensitive_matches(paths, sensitive_patterns())
+    risk = assess.path_risk(paths, hits)
+    complexity = "low" if risk == "low" else "med"
+    depth = assess.review_depth(size=size, risk=risk, complexity=complexity)
+    why = f"no review yet; risk {risk} from the paths touched" + (f" ({', '.join(hits[:3])})" if hits else "")
+    return depth, size, files, lines, why
+
+
+def cmd_depth(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
     _, state, _ = _load_state(branch)
-    pr = state["pr"]
-    if pr is None:
+    if state["pr"] is None:
         sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
-    files, lines = github.pr_diff_stats(pr)
-    size = assess.size_bucket(files, lines)
-    depth = assess.review_depth(size=size, risk=args.risk, complexity=args.complexity)
-    text = assess.render(
-        size=size,
-        changed_files=files,
-        changed_lines=lines,
-        risk=args.risk,
-        complexity=args.complexity,
-        depth=depth,
-        why=args.why,
-    )
-    github.set_pr_assessment(pr, text)
-    print(f"PR #{pr}: size {size} ({files} files, {lines} lines), risk {args.risk}, complexity {args.complexity}")
+    depth, size, files, lines, why = _next_depth(state)
     print(f"Review depth: {depth}")
+    print(f"  size {size} ({files} files, {lines} lines); {why}")
 
 
 def cmd_review_record(args: argparse.Namespace) -> None:
@@ -303,6 +306,8 @@ def cmd_review_record(args: argparse.Namespace) -> None:
         summary=args.summary,
     )
     run_num = entry["run"]
+    entry["depth"] = args.depth
+    entry["grade"] = {"risk": args.risk, "complexity": args.complexity, "why": args.why}
 
     # ORDER IS THE RETRY STRATEGY: every fallible call happens BEFORE the single state write, so a
     # failure anywhere leaves the round unrecorded and re-running the command records it exactly
@@ -310,6 +315,18 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
     triaged = _triage(issue)
+    next_depth, size, files, lines, _ = _next_depth(state)
+    github.set_pr_assessment(
+        state["pr"],
+        assess.render(
+            size=size,
+            changed_files=files,
+            changed_lines=lines,
+            grade=entry["grade"],
+            reviewed_at=args.depth,
+            next_depth=next_depth,
+        ),
+    )
     rounds, pinned, _ = _resolve_budget(state)
     decision = gate.evaluate(
         blocking_open=len(triaged.blocking),
@@ -926,12 +943,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_pr)
 
-    c = sub.add_parser("assess", help="Write size/risk/complexity + review depth into the PR body")
-    c.add_argument("--risk", required=True, choices=assess.LEVELS)
-    c.add_argument("--complexity", required=True, choices=assess.LEVELS)
-    c.add_argument("--why", required=True, help="One or two sentences: what drives the risk and complexity")
+    c = sub.add_parser("depth", help="Reasoning effort for the next review round")
     c.add_argument("--branch")
-    c.set_defaults(func=cmd_assess)
+    c.set_defaults(func=cmd_depth)
 
     # The `ship` skill has Sol (a T3 delegate) review the PR, dedups its findings against tracked
     # problems, files new ones via `problem add`, and records the run here. There is no headless
@@ -955,6 +969,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Count of previously-closed BLOCKING (high/med) problems re-opened this run — a churn signal",
     )
     r.add_argument("--summary", required=True)
+    r.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="Effort Sol ran at")
+    r.add_argument("--risk", required=True, choices=assess.LEVELS, help="The reviewer's grade of the PR's risk")
+    r.add_argument("--complexity", required=True, choices=assess.LEVELS, help="The reviewer's grade of its complexity")
+    r.add_argument("--why", required=True, help="One or two sentences: what drives that risk and complexity")
     r.add_argument("--branch")
     r.set_defaults(func=cmd_review_record)
 

@@ -259,7 +259,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | Command | Does |
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>` (the base must be on origin), a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
-| `feature assess --risk <low\|med\|high> --complexity <low\|med\|high> --why <text>` | Size the PR from its diff (S/M/L/XL), derive the review depth (`assess.py`), and write all of it into a marked section of the PR body. Prints the depth. |
+| `feature depth [--branch <b>]` | Print the reasoning effort for the next review round (`assess.py`): size from the diff stats; risk from the paths touched (sensitive → high, docs/tests only → low) until a review has graded the PR, then the last grade's risk and complexity. |
 | `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
@@ -292,9 +292,9 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
    1. track the PR: worktree for its branch; `feature adopt` if untracked (links the open PR,
       takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
       PR's base isn't the tracked parent
-   2. read the diff, `feature assess --risk --complexity` ─▶ depth, written into the PR body
+   2. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
    3. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
-      ─▶ raw findings (Sol never sees tracked state)
+      ─▶ raw findings + Sol's grade of risk and complexity (Sol never sees tracked state)
    4. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ reproducible?      no ─▶ drop (false positive)
        ├─ caused by THIS PR? no ─▶ sev:low, or file + `problem defer` (never blocking)
@@ -304,7 +304,7 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
               ├─ matches a REJECTED one     ─▶ skip, unless the repro answers the rejection
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
    5. `feature review record --new-blocking <high+med filed & regressed> --new-low <n>
-                             --regressions <blocking reopened>`   (refuses if no PR linked;
+                             --regressions <blocking reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
    6. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
 ```
@@ -349,12 +349,16 @@ thread that is handed only the PR number and worktree path, so run 1 and run 5 f
 rigor. Sol is also a different model family from the agent that wrote the code, so it doesn't
 share the author's blind spots.
 
-**Why the depth is assessed.** A review round used to cost the same for a two-line docs fix and a
-migration. Now the fork judges risk and complexity, the CLI measures size, and `assess.py` maps
-the three to Sol's reasoning effort (`low` … `max`; `ultra` only on request). The mapping is code,
-not prose, so the same calls always buy the same depth, and the assessment lands in the PR body
-where the human sees what the review was sized on. The caller, which fixes the problems, never
-sees the skill's instructions or the raw findings, only the report.
+**Why the depth is sized, and by whom.** A review round used to cost the same for a two-line docs
+fix and a migration, so Sol's reasoning effort is sized per round (`assess.py`). The first version
+had the fork read the whole diff to judge risk and complexity before Sol ran. That spent the most
+expensive, most context-heavy read on the least important decision, ahead of Sol reading the same
+diff properly, and `gh pr diff` refuses PRs over 300 files anyway. Now the first round is sized
+without reading the diff: size from its stats, risk from the paths it touches. Sol, which reads
+every line, grades risk and complexity as part of its review; the grade is recorded with the round,
+written into the PR body for the human, and sizes every later round. A cheap first guess that was
+too low gets corrected by the reviewer that found out. The mapping is code, not prose, so the same
+inputs always buy the same depth.
 
 **Why a subagent, not a headless `claude`.** An earlier design spawned `claude -p "/code-review"`
 as a *subprocess* and forced its findings into a JSON schema. That second, long-lived `claude`

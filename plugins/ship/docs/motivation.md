@@ -120,10 +120,15 @@ issue with the branch, so every feature carried review machinery from its first 
 anyone thought about review. Starting a feature now needs only a branch, a worktree and a draft PR
 (`feature start`, the `start` skill); the tracking issue appears when the user asks to ship, via
 `feature adopt`. At the same time the finder moved from Claude's `/code-review` in the fork to
-**Sol** (Codex, delegated through T3), at a reasoning effort derived from an assessment of the PR's
-size, risk and complexity that is written into the PR body. A reviewer from another model family
-doesn't share the author's blind spots, and sizing the depth stops a docs fix and a migration from
-costing the same review. The fork still triages; Sol only finds.
+**Sol** (Codex, delegated through T3), at a reasoning effort sized per round. A reviewer from
+another model family doesn't share the author's blind spots, and sizing the depth stops a docs fix
+and a migration from costing the same review. The fork still triages; Sol finds.
+
+The first sizing had the fork read the whole diff to judge risk and complexity, then pick the
+effort. We dropped it within the same PR: it spent an Opus read of the full diff on choosing a
+number, right before Sol read it again, and broke on PRs over 300 files. Round one is now sized from
+diff stats and paths alone, and Sol grades risk and complexity as part of its review; that grade
+goes into the PR body and sizes the rounds after it.
 
 The through-line of all three subprocess/reviewer corrections: **don't reimplement or spawn what the
 surrounding tools already provide.** Delegate stacking to git-town, reviewing to `/code-review`, and run the review in the

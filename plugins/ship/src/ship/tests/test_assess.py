@@ -63,3 +63,27 @@ def test_assessment_is_replaced_in_place():
 
 def test_assessment_on_empty_body():
     assert github.with_assessment("", "x") == "<!-- ship:assessment -->\nx\n<!-- /ship:assessment -->\n"
+
+
+def test_path_risk_high_on_a_sensitive_hit():
+    assert assess.path_risk(["README.md", "src/auth/x.py"], ["src/auth/x.py"]) == "high"
+
+
+def test_path_risk_low_for_docs_and_tests_only():
+    assert assess.path_risk(["README.md", "docs/a/b.md", "src/pkg/tests/test_x.py", "web/a.spec.ts"], []) == "low"
+
+
+def test_path_risk_med_for_code():
+    assert assess.path_risk(["README.md", "src/pkg/core.py"], []) == "med"
+
+
+def test_last_grade_skips_ungraded_entries():
+    g = {"risk": "high", "complexity": "low", "why": "w"}
+    history = [
+        {"run": 1, "grade": {"risk": "low", "complexity": "low", "why": "x"}},
+        {"run": 2, "grade": g},
+        {"event": "base-advanced"},
+        {"run": 3},
+    ]
+    assert assess.last_grade(history) == g
+    assert assess.last_grade([{"run": 1}]) is None

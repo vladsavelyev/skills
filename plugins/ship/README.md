@@ -2,8 +2,8 @@
 
 A CLI + SessionStart hook for running multiple Claude features in parallel. A feature starts as
 a branch, a worktree and a draft PR (the `start` skill); when it's shipped (the `ship` skill) it
-gets a GitHub tracking issue, an assessment of its size, risk and complexity in the PR body, and a
-review by Sol (Codex, via T3) at the depth that assessment implies. Features can be **stacked** on each
+gets a GitHub tracking issue and a review by Sol (Codex, via T3) at a reasoning effort sized from
+the PR, and Sol's grade of the PR's risk and complexity goes into the PR body. Features can be **stacked** on each
 other (via git-town). Review-found problems are tracked as GitHub sub-issues, and a **merge
 gate** blocks until the *blocking* ones are resolved and a review comes back clean. A new Claude
 session on an existing branch reconstructs full context (base branch, last prompt, last review,
@@ -73,7 +73,7 @@ chmod +x ~/.local/bin/feature
   ```
 
 Reviews are run by **Sol**, delegated through T3 Code (`delegate_task` to the Codex provider) at
-the reasoning effort `feature assess` picked. Sol gets the **PR by number** and nothing about
+the reasoning effort `feature depth` picked. Sol gets the **PR by number** and nothing about
 earlier rounds, so each re-run finds blind; the `ship` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run
 via this CLI. A linked PR is required — the PR diff defines the review scope (correct even for
 stacked branches), and `feature review record` refuses to run without one. There is no headless
@@ -85,11 +85,12 @@ review subcommand.
 feature start add-oauth --body "Users want Google login."   # branch + worktree + draft PR
 # ... work, commit, push; then, to ship:
 feature adopt                                  # labels, tracking issue; links the open PR
-feature assess --risk high --complexity med --why "Token handling; refresh flow has ordering"
-# Sol reviews PR #123 at the printed depth, the skill dedups vs tracked problems, then:
+feature depth                                  # effort for Sol: from stats + paths, later Sol's grade
+# Sol reviews PR #123 at that depth, the skill dedups vs tracked problems, then:
 feature problem add --title "…" --sev high    # file each genuinely-new problem
 feature review record --sha $(git rev-parse HEAD) --new-blocking 2 --new-low 3 \
-    --summary "Token refresh race + unchecked PKCE verifier; 3 nits filed as low"
+    --summary "Token refresh race + unchecked PKCE verifier; 3 nits filed as low" \
+    --depth xhigh --risk high --complexity med --why "Token handling; refresh has ordering"
 feature problem list --blocking                # what actually holds the merge
 # ... fix the blocking ones, then:
 feature problem resolve 46 --commit abc1234
@@ -108,10 +109,10 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <b>] [--title <t>]` | Branch (off the fetched remote base) + worktree + empty first commit, pushed, + draft PR. No tracking issue. |
 | `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking: tracking issue, linked PR. |
-| `feature assess --risk <l\|m\|h> --complexity <l\|m\|h> --why <t>` | Size the PR from its diff, derive the review depth, write the assessment into the PR body. |
+| `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
-| `feature review record --sha <s> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary <t>` | Record an in-session review run (moves the gate) and print the resulting verdict. |
+| `feature review record --sha <s> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary <t> --depth <d> --risk <r> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade into the PR body) and print the resulting verdict. |
 | `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (anything but `low` blocks the gate). |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue as fixed. |
 | `feature problem defer <number> --reason <why>` | Real problem, shipped unfixed: stays open, stops blocking, reason recorded. |
@@ -162,7 +163,7 @@ session on a tracked branch gets its context injected.
 
 ## Claude skill
 
-`skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (assess, Sol review,
+`skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (Sol review at a sized depth,
 triage, gate, close-out). Keep it in sync with the CLI:
 when you add or change a command, update the SKILL.md in the same commit.
 
