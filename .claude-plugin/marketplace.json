@@ -10,10 +10,7 @@
     {
       "name": "ship",
       "description": "Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate.",
-      "source": {
-        "source": "url",
-        "url": "https://github.com/vladsavelyev/ship.git"
-      }
+      "source": "./plugins/ship"
     },
     {
       "name": "sync",

@@ -1,11 +1,11 @@
 # skills
 
-My Claude Code plugins, as a marketplace (`vlad-skills`). Each plugin lives in its own repo; this
-one only lists them in [.claude-plugin/marketplace.json](.claude-plugin/marketplace.json).
+My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives here under
+`plugins/<name>/` and is listed in [.claude-plugin/marketplace.json](.claude-plugin/marketplace.json).
 
 | Plugin | What it is |
 | --- | --- |
-| [ship](https://github.com/vladsavelyev/ship) | Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate. |
+| [ship](plugins/ship) | Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate. |
 | [sync](plugins/sync) | Keeps this marketplace and its installed plugins updated at every session start. |
 | [pr-comments](plugins/pr-comments) | Attribution, tone and safety checks for comments an agent posts on GitHub for me. Adapted from [t3dotgg/tstack](https://github.com/t3dotgg/tstack)'s `leaving-pr-comments`. |
 | [babysit-pr](plugins/babysit-pr) | Watch a PR through CI and bot reviews in T3 Code, fix or dismiss findings, and keep it current with its (possibly stacked) base branch. Adapted from tstack's `babysit-pr`. |
@@ -26,8 +26,10 @@ environment within two session starts. A failed sync is printed at the next sess
 
 ## Adding a plugin
 
-Give the repo a `.claude-plugin/plugin.json`, add an entry to `marketplace.json`, and run
-`claude plugin validate .`. List a repo by its HTTPS URL (`"source": "url"`), not the `github`
-shorthand: plugin updates clone the shorthand over SSH, which fails where there's no GitHub key. A plugin without a `version` is versioned by commit, so every push
-counts as an update. Small skills that don't deserve their own repo can go under `plugins/<name>/`
-here, with `"source": "./plugins/<name>"`.
+Put it under `plugins/<name>/` with a `.claude-plugin/plugin.json`, add an entry to
+`marketplace.json` with `"source": "./plugins/<name>"`, and run `claude plugin validate .`. A
+plugin without a `version` is versioned by commit, so every push counts as an update.
+
+To list a plugin that lives in another repo, use its HTTPS URL (`"source": "url"`), not the
+`github` shorthand: plugin updates clone the shorthand over SSH, which fails where there's no
+GitHub key.
