@@ -119,18 +119,24 @@ def local_only_commits(base: str, remote: str, cwd: str | None = None) -> list[s
 
 
 def remote_ref(branch: str, cwd: str | None = None) -> str | None:
-    """Fetch `branch` from origin and return `origin/<branch>`, or None if origin doesn't have it. Branching off the fetched ref means a stale local base
-    can't put an old starting point under the new branch, and the main checkout isn't touched."""
+    """Fetch `branch` from origin and return `origin/<branch>`, or None if origin doesn't have it.
+    Branching off the fetched ref means a stale local base can't put an old starting point under
+    the new branch, and the main checkout isn't touched. The refspec names the destination
+    explicitly: a plain `git fetch origin <branch>` only updates `origin/<branch>` when the
+    configured fetch refspec covers it, which a single-branch clone's doesn't."""
     if not run(["git", "ls-remote", "--heads", "origin", branch], cwd=cwd):
         return None
-    run(["git", "fetch", "--quiet", "origin", branch], cwd=cwd)
+    run(["git", "fetch", "--quiet", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}"], cwd=cwd)
     return f"origin/{branch}"
 
 
-def start_commit_and_push(name: str, worktree: str) -> None:
+def start_commit_and_push(name: str, base_ref: str, worktree: str) -> None:
     """An empty first commit, pushed with upstream set: GitHub won't open a PR for a branch with no
-    commits of its own, and the draft PR is wanted from the start."""
-    run(["git", "commit", "--allow-empty", "--quiet", "-m", f"Start {name}"], cwd=worktree)
+    commits of its own, and the draft PR is wanted from the start. Safe to repeat, so a start that
+    failed halfway resumes: the commit is only made while the branch has none past `base_ref`, and
+    pushing an up-to-date branch changes nothing."""
+    if run(["git", "rev-list", "--count", f"{base_ref}..HEAD"], cwd=worktree) == "0":
+        run(["git", "commit", "--allow-empty", "--quiet", "-m", f"Start {name}"], cwd=worktree)
     run(["git", "push", "--quiet", "-u", "origin", name], cwd=worktree)
 
 

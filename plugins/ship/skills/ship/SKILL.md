@@ -55,7 +55,8 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
    - Tracked branch with no PR linked: `feature pr <PR#>`.
    - The PR's base isn't the tracked parent: don't review. Report the mismatch.
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
-2. **Assess.** Read the PR description and the whole diff (`gh pr diff <PR#>`), then run
+2. **Assess.** Read the PR description and the whole diff (`gh pr diff <PR#>`; over 300 files
+   GitHub refuses it, so use `git diff origin/<base>...HEAD` in the worktree), then run
    `feature assess`. The CLI measures size from the diff and turns size, risk and complexity
    into the review depth (the reviewer's reasoning effort), writes all of it into the PR body,
    and prints the depth. Judge honestly; the depth is only as good as these calls:
@@ -81,7 +82,8 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
    error, a crash), stop: record no review, put Sol's error verbatim in the report, and don't
    substitute another reviewer.
    ```
-   Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>`. The PR's branch is
+   Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>` (over 300 files that
+   fails; use `git diff origin/<base>...HEAD` in the checkout instead). The PR's branch is
    checked out at <worktree abs path>; read code only there, never another checkout. Read-only:
    no edits, commits, pushes or GitHub comments.
 
