@@ -11,7 +11,7 @@ You run in a forked subagent. Do the one job the caller asked for (create, adopt
 review, gate or close out), then end with the **report** below. The caller never sees this file,
 so the report must tell it everything it needs.
 
-The `feature` CLI (repo `/Users/kbww511/git/ship`, design in `docs/design.md`) keeps all
+The `feature` CLI (`plugins/ship` in the `vladsavelyev/skills` repo, design in its `docs/design.md`) keeps all
 state in GitHub + git config. A feature is a branch, a worktree under the main checkout's
 `.claude/worktrees/<name>/`, and a tracking issue. Review findings become sub-issues. The merge gate
 opens when nothing blocking is open and the last review covers HEAD.

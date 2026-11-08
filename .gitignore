@@ -1,0 +1,2 @@
+# Feature worktrees (ship) live here; they are checkouts, never content.
+.claude/worktrees/
