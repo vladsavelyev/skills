@@ -132,12 +132,16 @@ def cmd_start(args: argparse.Namespace) -> None:
     base = args.base or "main"
     name = args.name
 
+    # The draft PR targets `base` on GitHub, so it must exist there.
+    remote = remote_ref(base)
+    if remote is None:
+        sys.exit(f"'{base}' is not on origin, so no PR can target it. Push it first.")
     # Branch off an *intentional* base: local `base` must not sit ahead of its remote. A drifted
     # local base (e.g. unpushed commits on `main`) silently leaks into the branch, and since the
     # PR diff is computed against the remote base, those commits surface as unrelated changes in
     # the PR. Abort with the fix rather than produce a mis-scoped branch. `--allow-local-base`
-    # opts in when branching off local-only work is deliberate (e.g. a not-yet-pushed base).
-    stray = local_only_commits(base)
+    # opts in when branching off local-only work is deliberate.
+    stray = local_only_commits(base, remote)
     if stray and not args.allow_local_base:
         sys.exit(
             f"Refusing to branch off '{base}': it is {len(stray)} commit(s) ahead of its "
@@ -146,7 +150,7 @@ def cmd_start(args: argparse.Namespace) -> None:
             f"Push '{base}' first, or pass --allow-local-base if branching off local-only commits "
             f"is intentional."
         )
-    start_point = base if stray else (remote_ref(base) or base)
+    start_point = base if stray else remote
 
     worktree_path = create_branch_and_worktree(name, base, start_point)
     start_commit_and_push(name, worktree_path)

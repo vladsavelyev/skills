@@ -19,8 +19,8 @@ later, when the user asks to ship it (`Skill(ship:ship)`).
    freshly fetched remote base, without touching the main checkout, then makes an empty first
    commit, pushes, and opens the draft PR against the base. It refuses a local base with
    unpushed commits, which would leak into the PR (`--allow-local-base` overrides when that's
-   deliberate). For a `vladsavelyev/*` repo, prefix the command with
-   `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
+   deliberate), and a base that isn't on origin (push it first). For a `vladsavelyev/*` repo,
+   prefix the command with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
 4. **Move in**: `EnterWorktree` with `path: <worktree>` from the output (never `name:`). Editing
    from the main checkout edits the base branch.
 5. Link the draft PR in T3 if the harness offers it (`link_pull_request`).

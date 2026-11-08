@@ -117,8 +117,9 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
 
 ## Gate verdict
 
-- `OPEN` (0): safe to merge. Mark a draft PR ready (`gh pr ready <PR#>`). Name the debt that
-  ships. The human merges.
+- `OPEN` (0): safe to merge. Name the debt that ships. If the PR is still a draft, mark it ready
+  (`gh pr ready <PR#>`) only when the caller asked to ship; for a plain review, say in `Next`
+  that it's still a draft. The human merges.
 - `REVIEW_AGAIN` (10): the caller fixes the blocking problems, then calls this skill again.
 - `NEEDS_DECISION` (20): no more rounds. `feature escalate` with exactly one recommendation: ship
   it (defer the rest with reasons), buy one round (`feature budget --set`, only with a concrete
