@@ -9,6 +9,7 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 | [sync](plugins/sync) | Keeps this marketplace and its installed plugins updated at every session start. |
 | [pr-comments](plugins/pr-comments) | Attribution, tone and safety checks for comments an agent posts on GitHub for me. Adapted from [t3dotgg/tstack](https://github.com/t3dotgg/tstack)'s `leaving-pr-comments`. |
 | [babysit-pr](plugins/babysit-pr) | Watch a PR through CI and bot reviews in T3 Code, fix or dismiss findings, and keep it current with its (possibly stacked) base branch. Adapted from tstack's `babysit-pr`. |
+| [fleet](plugins/fleet) | Keep the per-user Claude Code setup (version, skill repos, plugins, `~/.claude/CLAUDE.md`, settings) the same on every machine I work from. Moved from navari-stack's `nstack fleet`. |
 
 ## Setup
 
