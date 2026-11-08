@@ -87,3 +87,16 @@ def test_last_grade_skips_ungraded_entries():
     ]
     assert assess.last_grade(history) == g
     assert assess.last_grade([{"run": 1}]) is None
+
+
+def test_description_replaces_prose_and_keeps_our_sections():
+    body = github.with_assessment("Old motivation.\n\nCloses #7 <!-- ship -->\n", "grade")
+    out = github.with_description(body, "New motivation.\n")
+    assert (
+        out
+        == "New motivation.\n\n<!-- ship:assessment -->\ngrade\n<!-- /ship:assessment -->\n\nCloses #7 <!-- ship -->\n"
+    )
+
+
+def test_description_on_a_body_without_our_sections():
+    assert github.with_description("Old.", "New.") == "New.\n"

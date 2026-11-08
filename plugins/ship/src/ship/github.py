@@ -208,6 +208,21 @@ def set_pr_assessment(pr: int, text: str) -> None:
     run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=with_assessment(body, text))
 
 
+def with_description(body: str, text: str) -> str:
+    """`body` with its prose replaced by `text`, keeping the sections this workflow owns (the
+    assessment and the feature reference line) after it."""
+    ours = [m.group(0).strip() for m in (_ASSESS_RE.search(body), _FEATURE_REF_RE.search(body)) if m]
+    return "\n\n".join([text.strip(), *ours]) + "\n"
+
+
+def set_pr_description(pr: int, text: str, title: str | None) -> None:
+    body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
+    cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
+    if title:
+        cmd += ["--title", title]
+    run(cmd, input_text=with_description(body, text))
+
+
 def create_draft_pr(*, branch: str, base: str, title: str, body: str, cwd: str) -> str:
     """Open a draft PR for `branch` against `base`; returns its URL."""
     return run(

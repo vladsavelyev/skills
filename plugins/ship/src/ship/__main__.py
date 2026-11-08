@@ -250,6 +250,18 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
     return depth, size, files, lines, why
 
 
+def cmd_describe(args: argparse.Namespace) -> None:
+    branch = args.branch or current_branch()
+    _, state, _ = _load_state(branch)
+    if state["pr"] is None:
+        sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
+    text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
+    if not text.strip():
+        sys.exit("Refusing to set an empty PR description.")
+    github.set_pr_description(state["pr"], text, args.title)
+    print(f"Updated the description of PR #{state['pr']}")
+
+
 def cmd_depth(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
     _, state, _ = _load_state(branch)
@@ -927,6 +939,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("number", type=int)
     c.add_argument("--branch")
     c.set_defaults(func=cmd_pr)
+
+    c = sub.add_parser("describe", help="Replace the PR description, keeping the sections the CLI owns")
+    c.add_argument("--body-file", required=True, help="File with the new description, or '-' for stdin")
+    c.add_argument("--title", help="New PR title")
+    c.add_argument("--branch")
+    c.set_defaults(func=cmd_describe)
 
     c = sub.add_parser("depth", help="Reasoning effort for the next review round")
     c.add_argument("--branch")

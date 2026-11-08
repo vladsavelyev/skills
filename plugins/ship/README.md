@@ -112,6 +112,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <b>] [--title <t>]` | Branch (off the fetched remote base) + worktree + empty first commit, pushed, + draft PR. No tracking issue. |
 | `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking: tracking issue, linked PR. |
+| `feature describe --body-file <f\|-> [--title <t>]` | Replace the PR's description (and title), keeping the sections the CLI owns. |
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |

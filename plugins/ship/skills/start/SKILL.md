@@ -10,7 +10,7 @@ later, when the user asks to ship it (`Skill(ship:ship)`).
 
 1. **Name it** short and plain: `snowflake-nl2sql`, not `feature/snowflake-nl2sql-instructions`.
 2. **Write the PR description**: the motivation in one to three informal sentences, from what the
-   user asked for. No "Summary" header, no test plan.
+   user asked for. No "Summary" header, no test plan. `ship` rewrites it once the code exists.
 3. **Start it**, from anywhere in the repo:
    ```
    feature start <name> --body "<motivation>" [--base <parent-branch>] [--title "<PR title>"]

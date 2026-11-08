@@ -34,6 +34,7 @@ prefix them with `GH_TOKEN=$(gh auth token --user <owner>)`.
 | Resume | `feature status`. If it warns merged-but-not-closed-out, run `feature merge` first. |
 | Record the user's request | `feature prompt "<request>"` |
 | Link the PR | `feature pr <number>` |
+| Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
 | Record a review | `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list --blocking\|--open`, `add`, `resolve <#> --commit <sha>`, `defer\|reject\|block <#> --reason "…"` |
@@ -56,11 +57,19 @@ prefix them with `GH_TOKEN=$(gh auth token --user <owner>)`.
    - Tracked branch with no PR linked: `feature pr <PR#>`.
    - The PR's base isn't the tracked parent: don't review. Report the mismatch.
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
-2. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
+2. **Describe the PR.** A branch from `feature start` got its title and description before any
+   code existed. When they no longer fit what the branch does (always on its first ship), rewrite
+   them from the original motivation in the PR body and the commit messages
+   (`git log --format='%s%n%b' origin/<base>..HEAD`); don't read the diff for this. The
+   description is the motivation in one to three informal sentences plus, if it isn't obvious,
+   what changed; no "Summary" header, no test plan. The title says what the PR does, in plain
+   words. `feature describe` keeps the CLI's own sections of the body. Sol and step 6 read this
+   description to know the PR's intent, so it comes first.
+3. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
    review it comes from the diff stats and the paths touched; after one, from the last review's
    grade. Don't read the diff to second-guess it. Go higher only when the user asked for a deeper
    review (`ultra` only on request), and say so in the report.
-3. **Have Sol find, blind.** Sol is the Codex provider's Sol model in T3. Load the T3 tools with
+4. **Have Sol find, blind.** Sol is the Codex provider's Sol model in T3. Load the T3 tools with
    ToolSearch, call `orchestrator_capabilities` with `search: "sol"`, and take the newest Sol
    model the `codex` provider lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`,
    `timeoutMs: 3600000`, and
@@ -96,8 +105,8 @@ prefix them with `GH_TOKEN=$(gh auth token --user <owner>)`.
    - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
      invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
-4. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
-5. **Verify and dedup each finding** against the real code:
+5. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
+6. **Verify and dedup each finding** against the real code:
    - Can't reproduce it concretely → drop it.
    - Outside the PR's intent (other paths, rare cases, small perf) → `low`. So is code, a test or
      a guard the intent doesn't need.
@@ -112,9 +121,9 @@ prefix them with `GH_TOKEN=$(gh auth token --user <owner>)`.
      silently wrong result on a realistic path; `med` = real bug on a narrower path; `low` =
      everything else. Only `low` is non-blocking, and an unlabelled problem blocks, so always
      pass `--sev`.
-6. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
+7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
    the repro, `file:line` and the suggested smallest fix.
-7. **Record**: `feature review record --sha $(git rev-parse HEAD) …`. Write `--summary` as a real
+8. **Record**: `feature review record --sha $(git rev-parse HEAD) …`. Write `--summary` as a real
    sentence about what was reviewed and found, never a bare "clean pass". Pass the effort Sol ran
    at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`; raise a grade if the
    findings show Sol underrated it, never lower one. The CLI writes the grade into the PR body and

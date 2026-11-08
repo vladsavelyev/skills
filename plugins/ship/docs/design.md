@@ -259,6 +259,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | Command | Does |
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>` (the base must be on origin), a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
+| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description's prose (and optionally the title), keeping the assessment section and the feature reference line. `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
 | `feature depth [--branch <b>]` | Print the reasoning effort for the next review round (`assess.py`): size from the diff stats; risk from the paths touched (sensitive → high, docs/tests only → low) until a review has graded the PR, then the last grade's risk and complexity. |
 | `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
@@ -292,10 +293,11 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
    1. track the PR: worktree for its branch; `feature adopt` if untracked (links the open PR,
       takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
       PR's base isn't the tracked parent
-   2. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
-   3. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
+   2. `feature describe` ─▶ title + description from the motivation and commit messages
+   3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
+   4. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
       ─▶ raw findings + Sol's grade of risk and complexity (Sol never sees tracked state)
-   4. NOW load tracked state, and for each finding decide (real code + problems):
+   5. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ reproducible?      no ─▶ drop (false positive)
        ├─ caused by THIS PR? no ─▶ sev:low, or file + `problem defer` (never blocking)
        └─ duplicate of a tracked problem? (judged by MEANING)
@@ -303,10 +305,10 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
               ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
               ├─ matches a REJECTED one     ─▶ skip, unless the repro answers the rejection
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
-   5. `feature review record --new-blocking <high+med filed & regressed> --new-low <n>
+   6. `feature review record --new-blocking <high+med filed & regressed> --new-low <n>
                              --regressions <blocking reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
-   6. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
+   7. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
 ```
 
 **Why scope the review through the PR.** The finder is handed the **PR number**, not a diff
