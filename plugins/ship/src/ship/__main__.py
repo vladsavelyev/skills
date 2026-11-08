@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from datetime import UTC, datetime
 
-from . import budget, gate, github, problems
+from . import assess, budget, gate, github, problems
 from .gitwiring import (
     branch_head_sha,
     create_branch_and_worktree,
@@ -21,10 +21,12 @@ from .gitwiring import (
     git_town_sync,
     local_only_commits,
     parent_branch,
+    remote_ref,
     run_head_sha,
     sensitive_patterns,
     set_feature_issue,
     set_parent_branch,
+    start_commit_and_push,
     worktree_for_branch,
 )
 from .state import (
@@ -52,7 +54,7 @@ def _resolve_issue(branch: str) -> int:
     if issue is None:
         sys.exit(
             f"No feature issue wired for branch '{branch}'. "
-            f"Run `feature create` first, or set branch.{branch}.feature-issue."
+            f"Run `feature adopt` first, or set branch.{branch}.feature-issue."
         )
     return issue
 
@@ -124,10 +126,9 @@ def _open_feature_issue(name: str, base: str, title: str | None) -> int:
     return issue
 
 
-def cmd_create(args: argparse.Namespace) -> None:
-    if args.init_labels:
-        github.init_labels()
-
+def cmd_start(args: argparse.Namespace) -> None:
+    """Branch + worktree + draft PR. No tracking issue: that waits for `adopt`, when the feature
+    is shipped, since most of a feature's life needs nothing but the branch and its PR."""
     base = args.base or "main"
     name = args.name
 
@@ -136,25 +137,26 @@ def cmd_create(args: argparse.Namespace) -> None:
     # PR diff is computed against the remote base, those commits surface as unrelated changes in
     # the PR. Abort with the fix rather than produce a mis-scoped branch. `--allow-local-base`
     # opts in when branching off local-only work is deliberate (e.g. a not-yet-pushed base).
-    if not args.allow_local_base:
-        stray = local_only_commits(base)
-        if stray:
-            sys.exit(
-                f"Refusing to branch off '{base}': it is {len(stray)} commit(s) ahead of its "
-                f"remote, which would leak into the PR diff.\n"
-                f"  Local-only commits: {', '.join(stray)}\n"
-                f"Push or reset '{base}' to match its remote first (e.g. `git -C <repo> push` or "
-                f"`git fetch && git reset --hard @{{u}}` on '{base}'), then retry.\n"
-                f"Or pass --allow-local-base if branching off local-only commits is intentional."
-            )
+    stray = local_only_commits(base)
+    if stray and not args.allow_local_base:
+        sys.exit(
+            f"Refusing to branch off '{base}': it is {len(stray)} commit(s) ahead of its "
+            f"remote, which would leak into the PR diff.\n"
+            f"  Local-only commits: {', '.join(stray)}\n"
+            f"Push '{base}' first, or pass --allow-local-base if branching off local-only commits "
+            f"is intentional."
+        )
+    start_point = base if stray else (remote_ref(base) or base)
 
-    worktree_path = create_branch_and_worktree(name, base)
-    issue = _open_feature_issue(name, base, args.title)
+    worktree_path = create_branch_and_worktree(name, base, start_point)
+    start_commit_and_push(name, worktree_path)
+    title = args.title or name.replace("-", " ").capitalize()
+    url = github.create_draft_pr(branch=name, base=base, title=title, body=args.body, cwd=worktree_path)
 
-    print(f"Created feature '{name}'")
-    print(f"  base branch : {base}")
+    print(f"Started feature '{name}'")
+    print(f"  base branch : {base} (from {start_point})")
     print(f"  worktree    : {worktree_path}")
-    print(f"  issue       : #{issue}")
+    print(f"  draft PR    : {url}")
 
 
 def cmd_adopt(args: argparse.Namespace) -> None:
@@ -225,6 +227,31 @@ def cmd_pr(args: argparse.Namespace) -> None:
     github.link_pr_to_feature(args.number, issue)
     github.comment(issue, f"🔗 Linked PR #{args.number}.")
     print(f"Linked PR #{args.number} to feature #{issue}")
+
+
+def cmd_assess(args: argparse.Namespace) -> None:
+    """Size the PR from its diff, take the agent's risk and complexity calls, and write all three
+    plus the review depth they imply into the PR body. Prints the depth for the reviewer."""
+    branch = args.branch or current_branch()
+    _, state, _ = _load_state(branch)
+    pr = state["pr"]
+    if pr is None:
+        sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
+    files, lines = github.pr_diff_stats(pr)
+    size = assess.size_bucket(files, lines)
+    depth = assess.review_depth(size=size, risk=args.risk, complexity=args.complexity)
+    text = assess.render(
+        size=size,
+        changed_files=files,
+        changed_lines=lines,
+        risk=args.risk,
+        complexity=args.complexity,
+        depth=depth,
+        why=args.why,
+    )
+    github.set_pr_assessment(pr, text)
+    print(f"PR #{pr}: size {size} ({files} files, {lines} lines), risk {args.risk}, complexity {args.complexity}")
+    print(f"Review depth: {depth}")
 
 
 def cmd_review_record(args: argparse.Namespace) -> None:
@@ -853,17 +880,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="feature", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
 
-    c = sub.add_parser("create", help="Create branch + worktree + feature issue")
+    c = sub.add_parser("start", help="Create branch + worktree + draft PR (no tracking issue yet)")
     c.add_argument("name", help="Feature/branch name (short, e.g. add-oauth)")
     c.add_argument("--base", help="Base branch to stack on (default: main)")
-    c.add_argument("--title", help="Issue title (default: derived from name)")
-    c.add_argument("--init-labels", action="store_true", help="Create workflow labels first")
+    c.add_argument("--title", help="PR title (default: derived from name)")
+    c.add_argument("--body", required=True, help="PR description: the motivation, briefly")
     c.add_argument(
         "--allow-local-base",
         action="store_true",
         help="Branch off the base even if it has local-only (unpushed) commits",
     )
-    c.set_defaults(func=cmd_create)
+    c.set_defaults(func=cmd_start)
 
     c = sub.add_parser("adopt", help="Wire an EXISTING branch into tracking (no new worktree)")
     c.add_argument("--branch", help="Branch to adopt (default: current)")
@@ -882,7 +909,14 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_pr)
 
-    # Reviews run in-session: the `ship` skill's subagent reviews the PR, dedups against tracked
+    c = sub.add_parser("assess", help="Write size/risk/complexity + review depth into the PR body")
+    c.add_argument("--risk", required=True, choices=assess.LEVELS)
+    c.add_argument("--complexity", required=True, choices=assess.LEVELS)
+    c.add_argument("--why", required=True, help="One or two sentences: what drives the risk and complexity")
+    c.add_argument("--branch")
+    c.set_defaults(func=cmd_assess)
+
+    # The `ship` skill has Sol (a T3 delegate) review the PR, dedups its findings against tracked
     # problems, files new ones via `problem add`, and records the run here. There is no headless
     # `review run` — spawning a second long-lived `claude` subprocess got reaped by the session
     # manager.

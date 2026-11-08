@@ -97,9 +97,10 @@ than read with guessed-at defaults.
 ## Lifecycle
 
 ```
-feature create ─┐
+feature start (branch + worktree + draft PR, untracked)
+                │  ship
                 ▼
-        planning/in-progress ──(open PR)──▶ in-review
+feature adopt ──▶ in-review  (tracking issue; PR linked)
                                               │
                           ┌───────────────────┤ review record  (files problems, bumps run)
                           ▼                    ▼
@@ -248,7 +249,7 @@ problems: 1 (#46 sev:high token refresh race)."*
 
 - `gh` authenticated (`gh auth status`).
 - `git-town` installed (`brew install git-town`) and initialized in the repo (`git town config`).
-- Labels created once per repo: `feature create --init-labels` does this.
+- Labels created once per repo: `feature adopt --init-labels` does this.
 - A Project named "Features" (optional, for the board) with a label-based auto-add workflow.
 
 ## CLI reference
@@ -257,8 +258,9 @@ All commands are `feature <cmd>` (or the `feature` console script).
 
 | Command | Does |
 | --- | --- |
-| `feature create <name> [--base <branch>] [--init-labels] [--allow-local-base]` | Create branch (stacked on `--base` via git-town, else main), worktree under `.claude/worktrees/<name>/`, feature issue with state block, and wire git config. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given. |
-| `feature adopt [--branch <b>] [--base <branch>] [--init-labels]` | Wire an *existing* branch into tracking (no new branch/worktree) — the on-ramp for branches created before adopting this system. |
+| `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>`, a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
+| `feature assess --risk <low\|med\|high> --complexity <low\|med\|high> --why <text>` | Size the PR from its diff (S/M/L/XL), derive the review depth (`assess.py`), and write all of it into a marked section of the PR body. Prints the depth. |
+| `feature adopt [--branch <b>] [--base <branch>] [--init-labels]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
@@ -290,9 +292,10 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
    1. track the PR: worktree for its branch; `feature adopt` if untracked (links the open PR,
       takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
       PR's base isn't the tracked parent
-   2. Skill(code-review, "high <PR#>, read only under <worktree>") ─▶ raw findings
-      (NO tracked state loaded yet)
-   3. NOW load tracked state, and for each finding decide (real code + problems):
+   2. read the diff, `feature assess --risk --complexity` ─▶ depth, written into the PR body
+   3. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
+      ─▶ raw findings (Sol never sees tracked state)
+   4. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ reproducible?      no ─▶ drop (false positive)
        ├─ caused by THIS PR? no ─▶ sev:low, or file + `problem defer` (never blocking)
        └─ duplicate of a tracked problem? (judged by MEANING)
@@ -300,10 +303,10 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
               ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
               ├─ matches a REJECTED one     ─▶ skip, unless the repro answers the rejection
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
-   4. `feature review record --new-blocking <high+med filed & regressed> --new-low <n>
+   5. `feature review record --new-blocking <high+med filed & regressed> --new-low <n>
                              --regressions <blocking reopened>`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
-   5. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
+   6. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
 ```
 
 **Why scope the review through the PR.** The finder is handed the **PR number**, not a diff
@@ -337,12 +340,20 @@ the finder, which starts in the session's primary directory.
 `feature status` surfaces the worktree path (`git worktree list` → the entry whose `branch` is
 this feature's).
 
-**Why the finder runs in a fresh subagent.** The gate's safety property is that the *final*
+**Why the finder is a fresh agent.** The gate's safety property is that the *final*
 review is a genuine independent sweep. If the finder ran in the caller's own context, the second
 and later runs in a session would be poisoned: the agent remembers the earlier runs, so instead
 of rediscovering issues blind it drifts into "confirm #12 and #14 got fixed" — a verification
-mindset that misses bugs the fixes themselves introduced. Each round is a new fork with a clean
-context, so run 1 and run 5 find with equal rigor. The caller, which fixes the problems, never
+mindset that misses bugs the fixes themselves introduced. Each round delegates to a new Sol
+thread that is handed only the PR number and worktree path, so run 1 and run 5 find with equal
+rigor. Sol is also a different model family from the agent that wrote the code, so it doesn't
+share the author's blind spots.
+
+**Why the depth is assessed.** A review round used to cost the same for a two-line docs fix and a
+migration. Now the fork judges risk and complexity, the CLI measures size, and `assess.py` maps
+the three to Sol's reasoning effort (`low` … `max`; `ultra` only on request). The mapping is code,
+not prose, so the same calls always buy the same depth, and the assessment lands in the PR body
+where the human sees what the review was sized on. The caller, which fixes the problems, never
 sees the skill's instructions or the raw findings, only the report.
 
 **Why a subagent, not a headless `claude`.** An earlier design spawned `claude -p "/code-review"`

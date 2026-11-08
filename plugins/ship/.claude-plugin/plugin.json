@@ -1,6 +1,6 @@
 {
   "name": "ship",
-  "description": "Feature branches with worktrees, PRs, issue-tracked review problems and a merge gate.",
+  "description": "Start features (branch, worktree, draft PR); ship them with a sized Sol review, issue-tracked problems and a merge gate.",
   "author": {
     "name": "Vlad Savelyev"
   },

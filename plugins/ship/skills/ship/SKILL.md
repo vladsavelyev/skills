@@ -1,35 +1,39 @@
 ---
 name: ship
-description: Start, stack, adopt, resume or review a feature branch and check its merge gate. Use for any request to review a PR or branch; an untracked one gets tracked first.
+description: Ship a feature branch — assess the PR's size, risk and complexity, write that into the PR body, have Sol review it at the matching depth, file the findings as tracked problems, and check the merge gate. Also resumes a tracked feature or closes one out after merge. Use for any request to ship, review a PR or branch, or check whether it can merge; an untracked branch gets tracked first.
 context: fork
 background: false
 ---
 
 # ship
 
-You run in a forked subagent. Do the one job the caller asked for (create, adopt, resume,
-review, gate or close out), then end with the **report** below. The caller never sees this file,
+You run in a forked subagent. Do the one job the caller asked for (a review round, a gate check,
+a resume or a close-out), then end with the **report** below. The caller never sees this file,
 so the report must tell it everything it needs.
 
-The `feature` CLI (`plugins/ship` in the `vladsavelyev/skills` repo, design in its `docs/design.md`) keeps all
-state in GitHub + git config. A feature is a branch, a worktree under the main checkout's
-`.claude/worktrees/<name>/`, and a tracking issue. Review findings become sub-issues. The merge gate
-opens when nothing blocking is open and the last review covers HEAD.
+The `feature` CLI (`plugins/ship` in the `vladsavelyev/skills` repo, design in its
+`docs/design.md`) keeps all state in GitHub + git config. A tracked feature is a branch, its
+worktree under the main checkout's `.claude/worktrees/<name>/`, its PR, and a tracking issue.
+Review findings become sub-issues. The merge gate opens when nothing blocking is open and the last
+review covers HEAD. Features begin untracked (`Skill(ship:start)`: branch, worktree, draft PR);
+this skill adopts them on the first ship.
 
 **Work in the feature worktree.** The main checkout has the same files on the base branch, so
-reading or running there gives wrong answers. `cd` to the worktree (`feature status` prints it as
-`Worktree`) before anything else, and never read from the main checkout or another worktree.
+reading or running there gives wrong answers. Prefix every command with `cd <worktree> &&`
+(the shell's cwd resets between calls), and never read from the main checkout or another worktree.
+
+For a `vladsavelyev/*` repo, prefix every `gh`, `git push` and `feature` call that writes to
+GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
 
 ## Commands
 
 | Situation | Command |
 | --- | --- |
-| New feature | `feature create <name> [--base <branch>]` (`--init-labels` first time in a repo). Aborts if the base has unpushed commits; `--allow-local-base` overrides. |
-| Stack on another feature | `feature create <child> --base <parent-branch>` |
-| Track an existing branch | `feature adopt` |
+| Track the branch | `feature adopt` (`--init-labels` the first time in a repo) |
 | Resume | `feature status`. If it warns merged-but-not-closed-out, run `feature merge` first. |
 | Record the user's request | `feature prompt "<request>"` |
 | Link the PR | `feature pr <number>` |
+| Assess the PR | `feature assess --risk low\|med\|high --complexity low\|med\|high --why "<sentence>"` |
 | Record a review | `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary "<sentence>"` |
 | Problems | `feature problem list --blocking\|--open`, `add`, `resolve <#> --commit <sha>`, `defer\|reject\|block <#> --reason "…"` |
 | Review budget | `feature budget [--set <n> \| --auto]` |
@@ -42,20 +46,56 @@ reading or running there gives wrong answers. `cd` to the worktree (`feature sta
 ## Review round
 
 1. **Track the PR.** Take the PR the caller named, else the current branch's open PR
-   (`gh pr view --json number,headRefName,baseRefName`). No PR → don't review; report that the
-   caller must open one against the parent branch. The **worktree** is the checkout that has its
-   branch (`git worktree list`). If none has it, run `gh pr checkout <PR#>` inside a new
-   `git worktree add --detach .claude/worktrees/<branch>` from the main checkout. Prefix every
-   command with `cd <worktree> &&`, because the shell's cwd resets between calls.
+   (`gh pr view --json number,headRefName,baseRefName,isDraft`). No PR → don't review; report
+   that the caller must open one against the parent branch. The **worktree** is the checkout that
+   has its branch (`git worktree list`). If none has it, run `gh pr checkout <PR#>` inside a new
+   `git worktree add --detach .claude/worktrees/<branch>` from the main checkout.
    - Untracked branch (`feature status` says so): `feature adopt` (add `--init-labels` if the repo
-     lacks the labels). It links the open PR and takes the PR's base as the parent, or refuses if the branch's git-town parent differs. Then report that.
+     lacks the labels). It links the open PR and takes the PR's base as the parent, or refuses if
+     the branch's git-town parent differs.
    - Tracked branch with no PR linked: `feature pr <PR#>`.
    - The PR's base isn't the tracked parent: don't review. Report the mismatch.
-2. **Find blind, before loading any tracked state.** Run
-   `Skill(code-review, "high <PR#>. Read code only under <worktree abs path>, never the main checkout or another worktree.")`,
-   with no `--comment` or `--fix`.
-3. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
-4. **Verify and dedup each finding** against the real code:
+   - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
+2. **Assess.** Read the PR description and the whole diff (`gh pr diff <PR#>`), then run
+   `feature assess`. The CLI measures size from the diff and turns size, risk and complexity
+   into the review depth (the reviewer's reasoning effort), writes all of it into the PR body,
+   and prints the depth. Judge honestly; the depth is only as good as these calls:
+   - **risk** is what a missed bug would cost. `high`: data loss or corruption, security or
+     auth, money, migrations or stored formats, concurrency, shared infra or deploys, anything
+     hard to roll back. `med`: user-visible behaviour on a main path, public APIs, error
+     handling. `low`: docs, tests, tooling, internal refactors with good coverage. A PR touching
+     a path in `git config --get-all feature.sensitive-path` is at least `med`.
+   - **complexity** is how hard the change is to get right. `high`: subtle state, ordering,
+     caching, new invariants, many interacting parts. `med`: real logic in a few places. `low`:
+     mechanical or local.
+   - `--why`: one or two sentences naming what drives the risk and the complexity.
+   Re-assess every round: fixes change the diff.
+3. **Have Sol find, blind.** Sol is the Codex provider's Sol model in T3. Load the T3 tools with
+   ToolSearch, call `orchestrator_capabilities` with `search: "sol"`, and take the newest Sol
+   model the `codex` provider lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`,
+   `timeoutMs: 3600000`, and
+   `target: {providerInstanceId: "codex", model: <sol model>, options: {reasoningEffort: <depth>}}`.
+   Use `ultra` only when the user asked for it. The `task` is the brief below, and nothing about
+   tracked problems or earlier rounds: Sol must find without them. If the wait times out, keep
+   waiting (`t3_thread_wait` on the child thread) until it finishes; never cancel it or review
+   yourself instead. If Sol isn't available, stop and report that; don't substitute another
+   reviewer.
+   ```
+   Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>`. The PR's branch is
+   checked out at <worktree abs path>; read code only there, never another checkout. Read-only:
+   no edits, commits, pushes or GitHub comments.
+
+   Find real defects this PR introduces: wrong results, crashes, data loss, security holes,
+   broken edge cases on realistic paths, races, missing error handling, regressions in callers
+   of changed code. Check each against the code before reporting it. Skip style and taste.
+
+   For each finding give: a title; severity (high = data loss, security hole, crash or silently
+   wrong result on a realistic path; med = a real bug on a narrower path; low = anything else);
+   file:line; a concrete failure scenario (inputs or state → wrong outcome); the smallest fix.
+   If you find nothing, say so plainly.
+   ```
+4. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
+5. **Verify and dedup each finding** against the real code:
    - Can't reproduce it concretely → drop it.
    - Outside the PR's intent (other paths, rare cases, small perf) → `low`. So is code, a test or
      a guard the intent doesn't need.
@@ -66,18 +106,19 @@ reading or running there gives wrong answers. `cd` to the worktree (`feature sta
    - Same as a REJECTED problem → skip, unless the new repro answers the rejection reason. Then
      `block` it. A problem disputed twice goes to the human: escalate with both sides.
    - Not caused by this PR → never blocking. File it `--sev low`, or defer it.
-   - Re-judge severity yourself, whatever label the finder gave: `high` = data loss, security
-     hole, crash, or silently wrong result on a realistic path; `med` = real bug on a narrower
-     path; `low` = everything else. Only `low` is non-blocking, and an unlabelled problem blocks,
-     so always pass `--sev`.
-5. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
+   - Re-judge severity yourself, whatever Sol said: `high` = data loss, security hole, crash, or
+     silently wrong result on a realistic path; `med` = real bug on a narrower path; `low` =
+     everything else. Only `low` is non-blocking, and an unlabelled problem blocks, so always
+     pass `--sev`.
+6. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
    the repro, `file:line` and the suggested smallest fix.
-6. **Record**: `feature review record --sha $(git rev-parse HEAD) …`. Write `--summary` as a real
+7. **Record**: `feature review record --sha $(git rev-parse HEAD) …`. Write `--summary` as a real
    sentence about what was reviewed and found, never a bare "clean pass".
 
 ## Gate verdict
 
-- `OPEN` (0): safe to merge. Name the debt that ships. The human merges.
+- `OPEN` (0): safe to merge. Mark a draft PR ready (`gh pr ready <PR#>`). Name the debt that
+  ships. The human merges.
 - `REVIEW_AGAIN` (10): the caller fixes the blocking problems, then calls this skill again.
 - `NEEDS_DECISION` (20): no more rounds. `feature escalate` with exactly one recommendation: ship
   it (defer the rest with reasons), buy one round (`feature budget --set`, only with a concrete
@@ -85,11 +126,12 @@ reading or running there gives wrong answers. `cd` to the worktree (`feature sta
 
 ## Rules
 
-- Never lower a severity to open the gate. Defer with a reason instead.
+- Never lower a severity, or a risk or complexity call, to open the gate or buy a cheaper review.
+  Defer with a reason instead.
 - Never `feature merge --force`. Never merge for the human.
 - Close fixed problems with `problem resolve`, not a `Closes #a, #b` PR line (GitHub links only the
   first number).
-- Don't hand-edit the JSON block in a feature issue.
+- Don't hand-edit the JSON block in a feature issue, or the assessment section in a PR body.
 - The CLI fails fast. Report its errors, don't work around them.
 
 ## Report
@@ -99,6 +141,7 @@ End with only this, filled in:
 ```
 Feature: <name>  Branch: <branch>  PR: <url or none>  Worktree: <abs path>
 Did: <one line>
+Assessment: size <S|M|L|XL>, risk <…>, complexity <…> → Sol at <depth>   (or not run)
 Gate: <verdict, or not run>
 Blocking: #<n> [sev] <title> — <file:line>, fix: <smallest fix>   (one per line, or none)
 Next:
@@ -106,13 +149,13 @@ Next:
 ```
 
 Always include these caller rules in `Next` when they apply:
-- After `create`, or if the caller may not be in the worktree: "Call `EnterWorktree` with
-  `path: <worktree>` (never `name:`) before editing. Editing from the main checkout edits the base
-  branch."
+- If the caller may not be in the worktree: "Call `EnterWorktree` with `path: <worktree>` (never
+  `name:`) before editing. Editing from the main checkout edits the base branch."
 - With blocking problems: "Fix each with the smallest change; prefer deleting or narrowing over new
-  code, and don't grow the diff to appease the reviewer. Commit, then `feature problem resolve <#>
-  --commit <sha>`. If a finding is wrong, `feature problem reject <#> --reason "<evidence>"`
-  instead of changing code. Then call `Skill(ship:ship)` for the next round."
+  code, and don't grow the diff to appease the reviewer. Commit and push, then `feature problem
+  resolve <#> --commit <sha>`. If a finding is wrong, `feature problem reject <#> --reason
+  "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for the next round, without
+  asking the user."
 - With `OPEN`: "Tell the user it's safe to merge and what debt ships. After they merge, call
   `Skill(ship:ship)` to close out."
 - With `NEEDS_DECISION`: "Stop. Present the recommendation to the user."

@@ -142,6 +142,39 @@ def link_pr_to_feature(pr: int, issue: int) -> bool:
     return True
 
 
+_ASSESS_BEGIN = "<!-- ship:assessment -->"
+_ASSESS_END = "<!-- /ship:assessment -->"
+_ASSESS_RE = re.compile(re.escape(_ASSESS_BEGIN) + r".*?" + re.escape(_ASSESS_END), re.S)
+
+
+def with_assessment(body: str, text: str) -> str:
+    """`body` with its assessment section set to `text`: replaced in place if there is one,
+    otherwise added just above our feature reference line (or at the end, before it's linked)."""
+    section = f"{_ASSESS_BEGIN}\n{text.strip()}\n{_ASSESS_END}"
+    if _ASSESS_RE.search(body):
+        return _ASSESS_RE.sub(lambda _: section, body, count=1)
+    ref = _FEATURE_REF_RE.search(body)
+    if ref:
+        head = body[: ref.start()].rstrip()
+        return f"{head}\n\n{section}\n\n{body[ref.start() :]}" if head else f"{section}\n\n{body[ref.start() :]}"
+    stripped = body.rstrip()
+    return f"{stripped}\n\n{section}\n" if stripped else f"{section}\n"
+
+
+def set_pr_assessment(pr: int, text: str) -> None:
+    body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
+    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=with_assessment(body, text))
+
+
+def create_draft_pr(*, branch: str, base: str, title: str, body: str, cwd: str) -> str:
+    """Open a draft PR for `branch` against `base`; returns its URL."""
+    return run(
+        ["gh", "pr", "create", "--draft", "--head", branch, "--base", base, "--title", title, "--body-file", "-"],
+        cwd=cwd,
+        input_text=body,
+    )
+
+
 # How many PRs to ask about per aliased GraphQL query. Well under any complexity limit, and it
 # keeps a repo with hundreds of tracked features to a handful of round trips.
 _PR_BATCH = 50

@@ -1,7 +1,9 @@
 # ship
 
-A CLI + SessionStart hook for running multiple Claude features in parallel: each feature gets
-a branch, a worktree, a PR, and a GitHub tracking issue. Features can be **stacked** on each
+A CLI + SessionStart hook for running multiple Claude features in parallel. A feature starts as
+a branch, a worktree and a draft PR (the `start` skill); when it's shipped (the `ship` skill) it
+gets a GitHub tracking issue, an assessment of its size, risk and complexity in the PR body, and a
+review by Sol (Codex, via T3) at the depth that assessment implies. Features can be **stacked** on each
 other (via git-town). Review-found problems are tracked as GitHub sub-issues, and a **merge
 gate** blocks until the *blocking* ones are resolved and a review comes back clean. A new Claude
 session on an existing branch reconstructs full context (base branch, last prompt, last review,
@@ -36,7 +38,7 @@ claude plugin marketplace add vladsavelyev/skills
 claude plugin install ship@vlad-skills
 ```
 
-The plugin ships the `ship` skill, the SessionStart hook, and the `feature` CLI. Its `bin/` is on
+The plugin ships the `start` and `ship` skills, the SessionStart hook, and the `feature` CLI. Its `bin/` is on
 the agent's PATH, and `bin/feature` runs the CLI from the plugin's own checkout via `uv run`, so
 the CLI always matches the skill it was shipped with.
 
@@ -70,9 +72,9 @@ chmod +x ~/.local/bin/feature
   git config --add feature.sensitive-path 'migrations/*'
   ```
 
-Reviews run **in-session** (not as a spawned `claude` subprocess): the agent already in a Claude
-Code session reviews the feature's **PR by number** in a fresh subagent so each re-run finds
-blind, then dedups the findings against tracked problems, files the new ones, and records the run
+Reviews are run by **Sol**, delegated through T3 Code (`delegate_task` to the Codex provider) at
+the reasoning effort `feature assess` picked. Sol gets the **PR by number** and nothing about
+earlier rounds, so each re-run finds blind; the `ship` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run
 via this CLI. A linked PR is required — the PR diff defines the review scope (correct even for
 stacked branches), and `feature review record` refuses to run without one. There is no headless
 review subcommand.
@@ -80,10 +82,11 @@ review subcommand.
 ## Quick start
 
 ```sh
-feature create add-oauth --init-labels        # branch + worktree + tracking issue
-feature prompt "Add PKCE support"              # record what you asked Claude to do
-gh pr create ... && feature pr 123             # link the PR (required before any review)
-# review in-session: finder subagent reviews PR #123, parent dedups vs tracked problems, then:
+feature start add-oauth --body "Users want Google login."   # branch + worktree + draft PR
+# ... work, commit, push; then, to ship:
+feature adopt --init-labels                    # tracking issue; links the open PR
+feature assess --risk high --complexity med --why "Token handling; refresh flow has ordering"
+# Sol reviews PR #123 at the printed depth, the skill dedups vs tracked problems, then:
 feature problem add --title "…" --sev high    # file each genuinely-new problem
 feature review record --sha $(git rev-parse HEAD) --new-blocking 2 --new-low 3 \
     --summary "Token refresh race + unchecked PKCE verifier; 3 nits filed as low"
@@ -97,18 +100,15 @@ feature review record --sha $(git rev-parse HEAD) --new-blocking 0 --new-low 1 \
 feature gate                                   # exit 0 = safe to merge, 20 = ask a human
 ```
 
-Adopt a branch you already have:
-
-```sh
-feature adopt --init-labels
-```
+`feature adopt` works the same for a branch that was never started with `feature start`.
 
 ## Commands
 
 | Command | Does |
 | --- | --- |
-| `feature create <name> [--base <b>] [--init-labels]` | Branch + worktree + tracking issue; wire git config. |
-| `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking. |
+| `feature start <name> --body <motivation> [--base <b>] [--title <t>]` | Branch (off the fetched remote base) + worktree + empty first commit, pushed, + draft PR. No tracking issue. |
+| `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking: tracking issue, linked PR. |
+| `feature assess --risk <l\|m\|h> --complexity <l\|m\|h> --why <t>` | Size the PR from its diff, derive the review depth, write the assessment into the PR body. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
 | `feature review record --sha <s> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary <t>` | Record an in-session review run (moves the gate) and print the resulting verdict. |
@@ -162,7 +162,8 @@ session on a tracked branch gets its context injected.
 
 ## Claude skill
 
-`skills/ship/SKILL.md` teaches Claude Code how to drive this CLI. Keep it in sync with the CLI:
+`skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (assess, Sol review,
+triage, gate, close-out). Keep it in sync with the CLI:
 when you add or change a command, update the SKILL.md in the same commit.
 
 ## Development
