@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Ship a feature branch — have Sol review the PR at a depth sized from its diff, record Sol's grade of its risk and complexity in the PR body, file the findings as tracked problems, and check the merge gate. Also resumes a tracked feature or closes one out after merge. Use for any request to ship, review a PR or branch, or check whether it can merge; an untracked branch gets tracked first.
+description: Use when the user asks to ship, review a PR or branch, check whether it can merge, or close out a merged feature.
 context: fork
 background: false
 ---

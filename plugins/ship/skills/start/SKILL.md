@@ -1,6 +1,6 @@
 ---
 name: start
-description: Start a new feature — a short-named branch off main (or off a parent branch, to stack), its own worktree, and a draft PR. Use when the user begins new work or asks for a new branch, feature or worktree.
+description: Use when the user starts new work — a new feature, branch, worktree or draft PR.
 ---
 
 # start
