@@ -15,12 +15,8 @@ later, when the user asks to ship it (`Skill(ship:ship)`).
    ```
    feature start <name> --body "<motivation>" [--base <parent-branch>] [--title "<PR title>"]
    ```
-   `--base` stacks it on another feature's branch; the default is `main`. It branches off the
-   freshly fetched remote base, without touching the main checkout, then makes an empty first
-   commit, pushes, and opens the draft PR against the base. It refuses a local base with
-   unpushed commits, which would leak into the PR (`--allow-local-base` overrides when that's
-   deliberate), and a base that isn't on origin (push it first). For a `vladsavelyev/*` repo,
-   prefix the command with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
+   `--base` stacks it on another feature's branch; the default is `main`. If it refuses, its
+   message says what to do.
 4. **Move in**: `EnterWorktree` with `path: <worktree>` from the output (never `name:`). Editing
    from the main checkout edits the base branch.
 5. Link the draft PR in T3 if the harness offers it (`link_pull_request`).

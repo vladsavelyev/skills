@@ -5,6 +5,7 @@ The `addSubIssue` mutation is still preview-ish; its behavior is pinned here.
 """
 
 import json
+import os
 import re
 
 from .shell import run
@@ -62,6 +63,47 @@ def _node_id(number: int) -> str:
     if not out:
         raise ValueError(f"Could not resolve node id for issue #{number}")
     return out
+
+
+_GITHUB_OWNER_RE = re.compile(r"github\.com[:/]([^/]+)/")
+
+
+def remote_owner(url: str) -> str | None:
+    """The owner in a GitHub remote URL (https or ssh), or None for a non-GitHub remote."""
+    m = _GITHUB_OWNER_RE.search(url)
+    return m.group(1) if m else None
+
+
+def matching_account(owner: str, accounts: list[dict]) -> str | None:
+    """The logged-in, non-active gh account named like the repo's owner, if there is one."""
+    return next(
+        (
+            a["login"]
+            for a in accounts
+            if a["login"].lower() == owner.lower() and not a["active"] and a["state"] == "success"
+        ),
+        None,
+    )
+
+
+def use_owner_account() -> None:
+    """Point every `gh` and `git` call this process makes at the gh account named like the repo's
+    owner, when one is logged in but isn't the active account.
+
+    Personal repos (`<me>/*`) need the personal account while the machine-wide active account is a
+    work one that other sessions rely on, so switching accounts is out. An exported `GH_TOKEN`
+    reaches both `gh` and `git push` (through gh's credential helper) for this process only. An
+    explicit `GH_TOKEN` already in the environment wins.
+    """
+    if "GH_TOKEN" in os.environ:
+        return
+    owner = remote_owner(run(["git", "remote", "get-url", "origin"]))
+    if owner is None:
+        return
+    hosts = json.loads(run(["gh", "auth", "status", "--json", "hosts"]))["hosts"]
+    login = matching_account(owner, hosts.get("github.com", []))
+    if login is not None:
+        os.environ["GH_TOKEN"] = run(["gh", "auth", "token", "--user", login])
 
 
 def _owner_repo() -> tuple[str, str]:

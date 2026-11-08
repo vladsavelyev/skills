@@ -10,6 +10,7 @@ import io
 import subprocess
 from contextlib import redirect_stdout
 
+from . import github
 from .__main__ import cmd_status
 from .gitwiring import current_branch, feature_issue
 from .state import StaleSchema
@@ -32,6 +33,7 @@ def main() -> None:
 
     if feature_issue(branch) is None:
         return  # not a tracked feature; nothing to inject
+    github.use_owner_account()
 
     buf = io.StringIO()
     try:

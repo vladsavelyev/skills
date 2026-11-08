@@ -1052,6 +1052,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    github.use_owner_account()
     args.func(args)
 
 
