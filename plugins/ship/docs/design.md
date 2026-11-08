@@ -1,0 +1,382 @@
+# Parallel feature workflow
+
+A system for working on many features in parallel with Claude: each feature gets a
+branch, a matching PR, a matching worktree, and a GitHub tracking issue. Features can be
+**stacked** on each other. Review-found problems are tracked as sub-issues, and the *blocking*
+ones must be resolved (or explicitly disposed of) before the PR merges. Reviews are budgeted, so
+a loop that won't converge ends in a recorded human decision rather than another expensive round.
+A new Claude session on an existing branch reconstructs full context (base branch, last prompt,
+last review, blocking problems) from GitHub.
+
+> Status: alpha. The CLI lives in the `ship` package. See "CLI reference" below.
+> For *why* it's designed this way (and what we tried and rejected), see
+> [motivation.md](motivation.md).
+
+## Why this design
+
+The hard requirements and the choices they force:
+
+| Requirement | Choice | Why |
+| --- | --- | --- |
+| Org-wide access to status/reviews | **GitHub Issues** as source of truth | Everyone already authenticates to GitHub; no new infra, free notifications/search/permissions. |
+| Machine-readable feature state | **Fenced JSON block** in the feature issue body, between HTML-comment markers | Humans read a normal issue; Claude reads/writes one deterministic block. |
+| Per-problem status + timeline | **Sub-issues** under the feature issue | Native parent/child, each problem gets its own state, assignee, and history. |
+| Human dashboard | **GitHub Projects** (auto-add by label) | A board/table view *over* the issues — never the source of truth (GraphQL is painful, sub-item modeling weak). |
+| Stacked branches | **git-town** | Stores the parent-branch pointer in git config (`git-town-branch.<name>.parent`) — exactly the "base branch" a session bootstrap needs. Open-source, no account. |
+| One workspace per feature | **git worktrees** under `.claude/worktrees/<branch>/` | Project convention (`.claude/rules/project-rules.md`). |
+
+**Source of truth = GitHub Issues. Projects is the view. git config holds the wiring.**
+
+### What we deliberately do *not* do
+
+- We don't store state in a file on the feature branch — rebases/merges across a stack churn
+  it and cause conflicts. State lives in the issue (remote), keyed to the branch.
+- We don't treat Projects as the store — it's a lens, auto-populated by label.
+- We don't reinvent stacking — git-town owns parent pointers and restacking.
+
+## Data model
+
+```
+GitHub Project "Features"  ──auto-adds by label──┐
+                                                 ▼
+Feature issue #45  [feature]  "Add OAuth login"
+├─ body: <!--FEATURE-STATE:BEGIN--> ```json {…} ``` <!--FEATURE-STATE:END-->
+├─ linked PR #123
+├─ sub-issue #46  [problem][sev:high]  "Token refresh race"   OPEN
+└─ sub-issue #47  [problem][sev:med]   "Missing PKCE"          CLOSED (fixed abc1234)
+
+git config (per branch, local wiring):
+  git-town-branch.<branch>.parent          ← base branch (stacking)
+  branch.<branch>.feature-issue            ← issue number (exact bootstrap lookup)
+```
+
+### Feature-state JSON (in the issue body)
+
+```json
+{
+  "schema": 2,
+  "branch": "feat-add-oauth",
+  "base": "feat-user-model",
+  "pr": 123,
+  "status": "in-review",
+  "review_budget": null,
+  "review_runs": 2,
+  "review_history": [
+    {"run": 1, "sha": "9fe0011", "new_blocking": 2, "new_low": 3, "regressions": 0, "summary": "…"},
+    {"run": 2, "sha": "abc1234", "new_blocking": 0, "new_low": 1, "regressions": 0, "summary": "…"}
+  ],
+  "last_prompt": "Add PKCE support to the OAuth flow",
+  "last_review": {
+    "run": 2,
+    "sha": "abc1234",
+    "new_blocking": 0,
+    "new_low": 1,
+    "regressions": 0,
+    "summary": "No new blocking issues; one naming nit filed. Token-refresh race from run 1 is fixed."
+  },
+  "updated": "2026-07-13T10:22:00Z"
+}
+```
+
+`status` ∈ `planning | in-progress | in-review | needs-decision | ready | merged | abandoned`
+(the last two are terminal: the PR merged, or it was closed without ever merging). The block is
+delimited by `<!--FEATURE-STATE:BEGIN-->` / `<!--FEATURE-STATE:END-->` so it can be replaced
+idempotently no matter what humans add around it. Never blind-string-replace.
+
+`review_budget` is `null` for "auto-size from the PR diff at query time" (so a growing branch earns
+its extra round without anyone re-running a command) or an integer a human pinned with
+`feature budget --set`. `review_history` is the append-only audit log the gate reads the
+convergence trend from; `feature sync` appends an `{"event": "base-advanced", …}` marker to it,
+and everything before the newest marker is excluded from both the trend and the budget count —
+new base code legitimately buys a fresh round. `last_review` is only the *currently valid* clean-pass
+evidence, and is nulled on invalidation, which is why it duplicates the last history entry.
+
+Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
+than read with guessed-at defaults.
+
+## Lifecycle
+
+```
+feature create ─┐
+                ▼
+        planning/in-progress ──(open PR)──▶ in-review
+                                              │
+                          ┌───────────────────┤ review record  (files problems, bumps run)
+                          ▼                    ▼
+                  problem add            problem resolve / defer / reject
+                          │                    │
+                          └────────┬───────────┘
+                                   ▼
+                    gate: 0 blocking problems AND last_review.new_blocking == 0
+                       ├─ yes ──────────────▶ ready ──▶ (human merges) ──▶ merged
+                       └─ no ──┬─ budget left, converging ──▶ REVIEW_AGAIN (loop)
+                               └─ budget spent or churning ──▶ needs-decision (human)
+```
+
+### The merge gate (pure query, three outcomes)
+
+| Verdict | Exit | When |
+| --- | --- | --- |
+| `OPEN` | 0 | Zero **blocking** problems open, and the last valid review covered the current branch head. |
+| `REVIEW_AGAIN` | 10 | Blocking work outstanding, review budget remains, and the trend is converging. |
+| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. A human decides. |
+
+The codes skip 1 and 2 deliberately: those already mean "the command failed" (`sys.exit(message)`
+and argparse both use them), so reusing them would make a lost git-config key or a `gh` 503 read as
+"spend another review round", and a mistyped flag read as "escalate to a human".
+
+**Only blocking problems hold the gate.** A problem blocks if it is open, is not explicitly
+`sev:low`, and is not `deferred`. Stated that way round on purpose: severity is the value the
+gate depends on, so an unlabelled problem — a human filing a sub-issue through the GitHub UI without
+picking a label — fails *safe* and holds the merge. `sev:low` is tracked debt that ships. The two dispositions —
+`deferred` (real, deliberately not fixed here) and `rejected` (not a real problem) — each require a
+reason that is posted on the sub-issue, so shipping known debt is an explicit, auditable act rather
+than a silent severity downgrade. Deferred problems stay **open** on purpose and are named in the
+merge comment: debt you can't see isn't tracked.
+
+Only `deferred` suppresses blocking. `rejected` expresses itself by *closing* the issue, so an OPEN
+issue still carrying the label means someone overturned the rejection — a later round rediscovering
+it with a real repro — and it blocks like anything else. `feature problem block` is the explicit way
+to revoke a deferral; without an inverse, a disposition would be permanent, and a rediscovered
+problem could never get back in front of the gate.
+
+**Why not "zero findings".** The original gate demanded a review run that found *nothing*. The
+reviewer is built to report at every altitude — real defects, nits, pre-existing issues in files the
+PR merely touches — so a zero-finding run is an event that essentially never happens, and the loop
+had no other exit than `feature merge --force`, which recorded no rationale. The safety property the
+condition was actually protecting is narrower: *a fix must not introduce a new defect*.
+
+**Why coverage rather than a count.** The obvious repair — require the last review to report
+`new_blocking == 0` — reads a *count*, and a count goes stale the moment a problem is disposed of.
+Deferring the remaining findings (the sanctioned "ship it as debt" path) leaves the old nonzero count
+in place, so the gate stayed shut with no way to reopen it: the escape hatch didn't work, and neither
+did buying another round, because the churn signal was re-derived from the same unchanged history and
+checked first. The condition is therefore **coverage**: `last_review.sha` must match the branch head.
+That asks what the safety property actually cares about — *has this code been reviewed?* — and gets
+both cases right. A fix commits, so the head moves and a fresh review is required; a deferral doesn't
+commit, so the existing review still stands and the human's decision takes effect. It also closes a
+hole the count rule never covered: commits landing *after* a clean review used to keep the gate open
+on code no review had seen. Counts stay in `review_history`, where the convergence trend reads them.
+
+An explicitly pinned budget (`feature budget --set`) also outranks the churn signal while rounds
+remain, because churn exists to escalate *early* — a human who has seen that escalation and chosen to
+spend another round has already answered it.
+
+**Why a budget.** A review round is the most expensive thing this workflow does (a full independent
+sweep by a subagent). `budget.py` sizes it from the diff: base 2 rounds, +1 for a large diff
+(>15 files or >500 changed lines), +1 if the PR touches a path the repo declared sensitive
+(`git config --add feature.sensitive-path '<glob>'`), capped at 4. A human can pin it with
+`feature budget --set <n>` — the "this feature matters more than its size suggests" input no agent
+can infer.
+
+**Why churn detection.** Waiting for the budget to run out wastes rounds on a loop that is clearly
+stuck, so the gate escalates early on either of two signals: the last round re-opened
+previously-closed problems (the fixes are reintroducing known bugs — a design problem, not a
+review-more problem), or blocking findings stopped decreasing round over round.
+
+`feature sync` upholds the coverage condition across base changes: the sync commit moves the head,
+which alone would already invalidate the review, and sync additionally clears `last_review` and
+appends an invalidation marker to `review_history` — the gate reopens, the round count resets to the runs after
+the marker (new code deserves a fresh budget), and a fresh review + `review record` is required.
+
+The gate is still a pure query: `feature gate` never mutates state. Parking a feature at
+`needs-decision` is an explicit act — `feature escalate --reason "…"` — which posts the current gate
+state and the agent's recommendation to the tracking issue.
+
+### Closing the loop after the merge
+
+The tracking issue must close when the work lands, and the *only* mechanism for that was
+`feature merge` — a command a human runs **after** clicking merge in the GitHub UI, by which point
+the PR has left the screen and the branch is deleted. It was skipped essentially every time: the
+first repo to use this workflow reached 17 open tracking issues whose PRs had merged, some weeks
+earlier, all still claiming `in-review`. A step that depends on remembering, at the one moment
+attention has moved on, is not a mechanism.
+
+So the linkage is now GitHub-native and self-firing: `feature pr` writes `Closes #<issue>` into the
+PR body (marked with an invisible `<!-- ship -->` comment (PRs linked before the rename carry `<!-- feature-workflow -->`, which is still recognised) so it can never be confused
+with the PR's own hand-written `Closes #<problem>` lines, which re-linking must not disturb), and
+merging closes the tracking issue with nobody in the loop. The original design chose a non-closing
+`Part of #<issue>` deliberately — the umbrella issue outlives the PR, and its problem sub-issues can
+still be open — but "closed with open children" is a state GitHub renders fine, and a closed issue
+whose debt is a sub-issue list beats an open issue nobody reads.
+
+Two gaps remain, and `feature reconcile` covers both:
+
+- GitHub only honours the keyword on a merge into the **default branch**, so a stacked feature
+  merged into its parent never auto-closes.
+- The auto-close writes no *record*: the state block stays at `in-review`, and nothing names the
+  debt that shipped.
+
+`reconcile` is a repo-wide sweep — one paginated query for every `feature`-labelled issue, one
+aliased GraphQL query for all their PRs' states — that closes out the merged ones (recording what
+shipped, blocking problems included, honestly) and repairs the reference on still-open PRs. It
+touches **no git at all**, on purpose: the features that need it most are the oldest, whose branches
+and worktrees are long gone, and any git-dependent path (including `feature migrate`, which resolves
+its issue through `branch.<name>.feature-issue`) can no longer reach them. For the same reason it
+reads `pr`/`status` out of the state block without the usual schema check, and migrates a schema-1
+block itself on the way to closing it out — the alternative is a permanently unreachable orphan.
+
+A PR **closed without merging** is the same orphan from the other side: an open tracking issue for
+work that will never land. Those close too, at `status: abandoned` — a second terminal status, added
+because `merged` would put a claim in the permanent record that is simply false, and leaving them
+`in-review` was the status quo that produced the graveyard. The note states only what is known (the
+tracked PR closed unmerged) and says how to correct the record if the work resumed elsewhere; the
+feature's still-open problem sub-issues are *named, not closed*, since whether a finding was moot or
+pre-existing is a reviewer's call. One case is exempted: if the branch has since been re-proposed
+under a new open PR, the feature is alive, so the sweep hands back the number to `feature pr`
+instead of burying work in flight.
+
+`feature merge` additionally verifies that the PR *actually merged* before writing `merged` into the
+record, since the gate opens before the merge, not after it, and `feature status` flags a merged PR
+whose feature never closed out — which puts the reminder in front of the next session on the branch.
+
+## Session bootstrap
+
+A `SessionStart` hook runs `feature status` for the current branch and injects the result into
+context. Resolution is exact, not fuzzy:
+
+1. `branch` ← `git rev-parse --abbrev-ref HEAD`
+2. `base` ← `git config git-town-branch.<branch>.parent`
+3. `issue` ← `git config branch.<branch>.feature-issue`
+4. Fetch the issue, parse the state block, list open sub-issues.
+
+Result injected: *"On `feat-add-oauth`, based on `feat-user-model`, PR #123, status in-review.
+Last prompt: '…'. Last review (run 2): 0 new blocking. Reviews 2/3. Gate REVIEW_AGAIN. Blocking
+problems: 1 (#46 sev:high token refresh race)."*
+
+## Prerequisites
+
+- `gh` authenticated (`gh auth status`).
+- `git-town` installed (`brew install git-town`) and initialized in the repo (`git town config`).
+- Labels created once per repo: `feature create --init-labels` does this.
+- A Project named "Features" (optional, for the board) with a label-based auto-add workflow.
+
+## CLI reference
+
+All commands are `feature <cmd>` (or the `feature` console script).
+
+| Command | Does |
+| --- | --- |
+| `feature create <name> [--base <branch>] [--init-labels] [--allow-local-base]` | Create branch (stacked on `--base` via git-town, else main), worktree under `.claude/worktrees/<name>/`, feature issue with state block, and wire git config. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given. |
+| `feature adopt [--branch <b>] [--base <branch>] [--init-labels]` | Wire an *existing* branch into tracking (no new branch/worktree) — the on-ramp for branches created before adopting this system. |
+| `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
+| `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
+| `feature prompt <text>` | Record the latest prompt into the state block. |
+| `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary <text>` | Record an in-session review run: append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
+| `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. `high`/`med` block the gate; `low` doesn't. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
+| `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
+| `feature problem defer <number> --reason <why>` | Real problem, deliberately not fixed in this PR: labels it `deferred`, posts the reason, keeps it **open** but out of the blocking set. |
+| `feature problem reject <number> --reason <why>` | Not a real problem (false positive / by design): labels it `rejected` and closes it with the reasoning. |
+| `feature problem block <number> --reason <why>` | Revoke a disposition — drops `deferred`, re-opens if closed — so the problem holds the merge again. The inverse of `defer`, needed because a later round can rediscover a deferred problem with a repro that changes the call. |
+| `feature problem list [--open] [--blocking]` | List problem sub-issues with severity and disposition. `--blocking` shows only what holds the gate. |
+| `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
+| `feature escalate --reason <text> [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human. |
+| `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`deferred`/`rejected` are newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
+| `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION` (1 and 2 stay "the command itself failed"). |
+| `feature merge [--branch <b>] [--force]` | Final transition: verify the gate **and that the PR actually merged**, set status `merged`, close the feature issue (or just comment, if the PR's `Closes` reference already closed it). Does not merge the PR itself. |
+| `feature reconcile [--branch <b>] [--dry-run]` | Repo-wide sweep for features the close-out never reached: closes out every feature whose PR merged, closes as `abandoned` those whose PR was closed unmerged (unless the branch has a newer open PR, which it reports instead), and repairs the issue reference on still-open PRs. GitHub-only (no git), so it reaches features whose branch is long deleted. |
+| `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If the base advanced, invalidates the last review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
+
+## The in-session review
+
+Each review round is one call of the `ship` skill, which runs as a forked subagent
+(`context: fork`) inside the agent's own Claude Code process, not as a spawned `claude`
+subprocess. The caller never loads the skill's instructions; it gets back a short report with the
+gate verdict and its next steps (fix, resolve, call the skill again). A fresh fork per round is
+what keeps the finder blind:
+
+```
+caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
+   1. track the PR: worktree for its branch; `feature adopt` if untracked (links the open PR,
+      takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
+      PR's base isn't the tracked parent
+   2. Skill(code-review, "high <PR#>, read only under <worktree>") ─▶ raw findings
+      (NO tracked state loaded yet)
+   3. NOW load tracked state, and for each finding decide (real code + problems):
+       ├─ reproducible?      no ─▶ drop (false positive)
+       ├─ caused by THIS PR? no ─▶ sev:low, or file + `problem defer` (never blocking)
+       └─ duplicate of a tracked problem? (judged by MEANING)
+              ├─ matches an OPEN issue      ─▶ skip (already tracked)
+              ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
+              ├─ matches a REJECTED one     ─▶ skip, unless the repro answers the rejection
+              └─ distinct                   ─▶ `feature problem add --sev high|med|low`
+   4. `feature review record --new-blocking <high+med filed & regressed> --new-low <n>
+                             --regressions <blocking reopened>`   (refuses if no PR linked;
+                             idempotent per sha, so a retry after a failed call spends no extra round)
+   5. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
+```
+
+**Why scope the review through the PR.** The finder is handed the **PR number**, not a diff
+range. A PR's diff is `git diff <pr-base>...HEAD` (three-dot, from the merge-base). Verified
+empirically on a stacked scenario: with branch A off `main` and B off A, `git diff main...B`
+includes A's commits (wrong scope for reviewing B), while `git diff A...B` is B's own work alone.
+So the review is correct **iff B's PR is opened against its parent A**, not `main` — the PR base
+is the scope boundary, which is why opening the PR against the parent branch is load-bearing, not
+cosmetic. `feature review record` enforces this: it hard-refuses when no PR is linked (no well-defined
+scope), AND when the PR's `baseRefName` ≠ the feature's tracked parent (base resolved the same
+way `feature status` does — git-town pointer, then recorded base) — a PR accidentally opened
+against `main` for a stacked feature is caught before it can record a wrongly-scoped review.
+Push + open the PR against the parent + `feature pr <n>` is a precondition of the review loop,
+not an afterthought.
+
+**Why the finder runs before tracked state is loaded.** The finder must find blind — no memory of
+prior runs, no list of already-filed problems to "just confirm." Rather than load that state and
+then instruct the agent not to pass it along (a rule it must remember to honor every run), the
+ordering enforces it structurally: the fork runs the finder FIRST, with only the PR number in
+hand, and loads `feature status` / open problems only afterward for its own dedup. There is
+nothing to leak because the leakable context doesn't exist yet.
+
+**Why the finder is pinned to the feature worktree.** Feature worktrees live *under* the main
+checkout (`.claude/worktrees/<name>`), so the main checkout's path is a prefix of the worktree
+path and holds the same files on a *different* branch (the base). A finder that drifts to "the
+repo root" — a stray `cd`, a glob from the wrong cwd — ends up reading the pre-feature code while
+the PR diff is from the feature branch, producing phantom findings and missing real ones. The
+fork therefore runs every command in the feature worktree, and hands the finder that absolute
+path with the instruction to read code only there: a `cd` in the fork's shell doesn't carry into
+the finder, which starts in the session's primary directory.
+`feature status` surfaces the worktree path (`git worktree list` → the entry whose `branch` is
+this feature's).
+
+**Why the finder runs in a fresh subagent.** The gate's safety property is that the *final*
+review is a genuine independent sweep. If the finder ran in the caller's own context, the second
+and later runs in a session would be poisoned: the agent remembers the earlier runs, so instead
+of rediscovering issues blind it drifts into "confirm #12 and #14 got fixed" — a verification
+mindset that misses bugs the fixes themselves introduced. Each round is a new fork with a clean
+context, so run 1 and run 5 find with equal rigor. The caller, which fixes the problems, never
+sees the skill's instructions or the raw findings, only the report.
+
+**Why a subagent, not a headless `claude`.** An earlier design spawned `claude -p "/code-review"`
+as a *subprocess* and forced its findings into a JSON schema. That second, long-lived `claude`
+process was reaped by the session manager after ~10 minutes with SIGTERM→SIGKILL — the
+review never finished. Verified empirically: no jetsam (OOM) events fired, and short `claude -p`
+calls succeed; only the long review child was killed, and only when spawned as a grandchild of a
+managed session. A subagent is a sub-task *inside the already-alive session process* — there is
+no second `claude` to reap — so it keeps the reaping fix while restoring reviewer independence.
+
+**Dedup is semantic, not string-based.** An even earlier design fingerprinted `sha1(file +
+title)`, but two reviews word the same bug differently every time, so a title fingerprint almost
+never matched across runs — breaking both dedup and regression detection. Instead the agent,
+which is reading the real code, judges *by meaning* whether each finding is the same underlying
+bug as an already-tracked problem: matches an OPEN issue → skip; matches a CLOSED issue →
+regression (reopen, count as new); distinct → file. It also confirms reproducibility so false
+positives never reach the gate.
+
+`feature review record --new-blocking <n>` takes the count of genuinely-new *blocking* problems plus
+blocking regressions; a clean pass is `--new-blocking 0`, which (with zero open blocking sub-issues)
+opens the gate. `--new-low` doesn't gate anything — it keeps the record honest about what a "clean"
+round actually found. `--regressions` counts re-opened *blocking* problems only, and feeds the churn
+signal: a re-opened low-severity nit is not evidence the design is wrong, and escalating on one would
+contradict the rule that low severity never gates.
+
+**Severity is now load-bearing, so it's auditable.** An agent could open the gate by calling
+everything `sev:low`, so the defenses are made of records, not restrictions: every disposition
+demands a reason posted on the issue, `feature status`/`gate`/`merge` always print the non-blocking
+debt that ships, and per-severity counts land in `review_history` for every round. A human reading
+the tracking issue can see a review that filed five lows and no highs.
+
+## Open questions / follow-ups
+
+- `addSubIssue` GraphQL is still preview-ish; behavior is pinned in the CLI wrapper.
+- Whether to mirror problems to PR review threads (native resolved-thread UX) — deferred.
+- Whether to version state in git (orphan `feature-state` branch) as a diffable backup —
+  deferred; Issues + API history cover the current need.

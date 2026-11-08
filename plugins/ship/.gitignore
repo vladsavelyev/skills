@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Feature worktrees live here (see docs/design.md); they are checkouts, never content.
+.claude/worktrees/
