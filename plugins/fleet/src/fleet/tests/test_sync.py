@@ -1,0 +1,110 @@
+"""`fleet`: what of CLAUDE.md and the settings it copies, and what each machine keeps."""
+
+import pytest
+
+from fleet import sync as fleet
+
+SHARED = "# Rules\n\nshared text\n\n" + fleet.MARKER + "\n"
+
+
+def test_split_claude_md_keeps_the_marker_with_the_shared_part():
+    shared, own = fleet.split_claude_md(SHARED + "\n### This machine\nlocal\n", "here")
+    assert shared == SHARED
+    assert own == "\n### This machine\nlocal\n"
+
+
+def test_split_claude_md_without_a_marker_refuses():
+    with pytest.raises(RuntimeError, match="has no line"):
+        fleet.split_claude_md("# Rules\n### This machine\n", "host")
+
+
+def test_merge_settings_copies_shared_keys_and_keeps_machine_ones():
+    source = {
+        "model": "opus",
+        "env": {"KEY": "new", "ONLY_HERE": "x"},
+        "hooks": {"Stop": ["osascript"], "PostToolUse": ["fmt"]},
+        "statusLine": {"type": "command", "command": "bash-only"},
+    }
+    target = {
+        "model": "sonnet",
+        "env": {"KEY": "old", "DISPLAY": ":99", "STALE": "y"},
+        "hooks": {"PostToolUse": ["old-fmt"]},
+        "statusLine": {"type": "command", "command": "posix"},
+        "theme": "dark",
+    }
+    merged = fleet.merge_settings(source, target, ["env.DISPLAY", "hooks.Stop", "statusLine"])
+    assert merged == {
+        "model": "opus",
+        "env": {"KEY": "new", "ONLY_HERE": "x", "DISPLAY": ":99"},
+        "hooks": {"PostToolUse": ["fmt"]},
+        "statusLine": {"type": "command", "command": "posix"},
+    }
+
+
+def test_merge_settings_of_identical_files_is_a_no_op():
+    settings = {"a": 1, "env": {"X": "1"}, "permissions": {"deny": ["rm"]}}
+    assert fleet.flatten(fleet.merge_settings(settings, settings, [])) == fleet.flatten(settings)
+
+
+def test_merge_settings_keeps_an_empty_object_from_the_source():
+    assert fleet.merge_settings({"env": {}}, {"env": {"X": "1"}}, []) == {"env": {}}
+
+
+def test_load_config_without_a_file_says_what_to_create():
+    with pytest.raises(RuntimeError, match="no fleet configured"):
+        fleet.load_config()
+
+
+def test_load_config_without_hosts_refuses():
+    fleet.CONFIG_PATH.parent.mkdir(parents=True)
+    fleet.CONFIG_PATH.write_text("hosts = []\n")
+    with pytest.raises(RuntimeError, match="`hosts` is empty"):
+        fleet.load_config()
+
+
+def test_load_config_reads_the_file():
+    fleet.CONFIG_PATH.parent.mkdir(parents=True)
+    fleet.CONFIG_PATH.write_text('hosts = ["u@h"]\nhelpers = ["git-pr-context"]\n')
+    assert fleet.load_config() == fleet.Config(hosts=["u@h"], helpers=["git-pr-context"])
+
+
+LAPTOP = fleet.Identity("laptop", "Darwin arm64", None)
+EC2 = fleet.Identity("ip-10-0-0-1", "Linux x86_64", "ubuntu@ec2.example")
+
+
+def test_machine_section_on_the_source_names_it_and_its_hosts():
+    section = fleet.machine_section(LAPTOP, [LAPTOP, EC2])
+    assert section.startswith(fleet.SECTION_START + "\n") and section.endswith(fleet.SECTION_END + "\n")
+    assert "`laptop` (Darwin arm64), the fleet's source of truth" in section
+    assert "- `laptop` (Darwin arm64): source of truth ← this one" in section
+    assert "- `ip-10-0-0-1` (Linux x86_64): `ssh ubuntu@ec2.example`\n" in section
+    assert "none of it is synced" in section
+
+
+def test_machine_section_on_a_host_says_where_to_make_shared_changes():
+    section = fleet.machine_section(EC2, [LAPTOP, EC2])
+    assert "reached from `laptop` as `ssh ubuntu@ec2.example`" in section
+    assert "make those changes on `laptop`" in section
+    assert "`ssh ubuntu@ec2.example` ← this one" in section
+
+
+def test_with_machine_section_puts_a_new_section_above_the_hand_written_text():
+    section = fleet.machine_section(LAPTOP, [LAPTOP, EC2])
+    assert fleet.with_machine_section("\n### Environments\nmine\n", section, "here") == (
+        section + "\n### Environments\nmine\n"
+    )
+
+
+def test_with_machine_section_replaces_only_the_generated_section():
+    old = fleet.machine_section(LAPTOP, [LAPTOP])
+    new = fleet.machine_section(LAPTOP, [LAPTOP, EC2])
+    own = "\n" + old + "\n### Environments\nmine\n"
+    assert fleet.with_machine_section(own, new, "here") == "\n" + new + "\n### Environments\nmine\n"
+    assert fleet.with_machine_section(fleet.with_machine_section(own, new, "here"), new, "here") == (
+        fleet.with_machine_section(own, new, "here")
+    )
+
+
+def test_with_machine_section_without_an_end_marker_refuses():
+    with pytest.raises(RuntimeError, match="but no"):
+        fleet.with_machine_section(fleet.SECTION_START + "\nhalf\n", "x", "host")
