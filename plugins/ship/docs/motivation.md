@@ -29,7 +29,7 @@ across a stack. Per-branch wiring (base branch, issue number) lives in git confi
 
 **Don't reinvent stacking — delegate to git-town.** git-town stores the parent pointer in
 `git-town-branch.<name>.parent`, which is exactly the "base branch" a session bootstrap needs.
-We verified the interop empirically: our `create`/`adopt` write that key, and `git town
+We verified the interop empirically: our `start`/`adopt` write that key, and `git town
 config get-parent` / `git town branch` read it back and render the full stack. `feature sync`
 is likewise a thin wrapper over `git town sync` (recursive ancestor sync); we do **not**
 implement restacking ourselves.
@@ -114,6 +114,21 @@ And we didn't add per-round scope narrowing (review only the fix commits on roun
 it would roughly halve the tokens: it trades away the property that makes stacked reviews correct by
 construction — the finder gets a PR *number*, and the PR's base defines the diff. That one is still
 open, deliberately.
+
+**6. One skill for everything → `start` and `ship`.** The original skill created the tracking
+issue with the branch, so every feature carried review machinery from its first minute, long before
+anyone thought about review. Starting a feature now needs only a branch, a worktree and a draft PR
+(`feature start`, the `start` skill); the tracking issue appears when the user asks to ship, via
+`feature adopt`. At the same time the finder moved from Claude's `/code-review` in the fork to
+**Sol** (Codex, delegated through T3), at a reasoning effort sized per round. A reviewer from
+another model family doesn't share the author's blind spots, and sizing the depth stops a docs fix
+and a migration from costing the same review. The fork still triages; Sol finds.
+
+The first sizing had the fork read the whole diff to judge risk and complexity, then pick the
+effort. We dropped it within the same PR: it spent an Opus read of the full diff on choosing a
+number, right before Sol read it again, and broke on PRs over 300 files. Round one is now sized from
+diff stats and paths alone, and Sol grades risk and complexity as part of its review; that grade
+goes into the PR body and sizes the rounds after it.
 
 The through-line of all three subprocess/reviewer corrections: **don't reimplement or spawn what the
 surrounding tools already provide.** Delegate stacking to git-town, reviewing to `/code-review`, and run the review in the

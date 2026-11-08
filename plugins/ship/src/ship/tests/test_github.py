@@ -158,3 +158,21 @@ def test_pr_changed_paths_refuses_a_truncated_listing(monkeypatch):
     monkeypatch.setattr(github, "run", fake_run)
     with pytest.raises(RuntimeError, match="3 changed files but the files listing returned 2"):
         github.pr_changed_paths(7, expected=3)
+
+
+def test_remote_owner_parses_https_and_ssh():
+    assert github.remote_owner("https://github.com/vladsavelyev/skills.git") == "vladsavelyev"
+    assert github.remote_owner("git@github.com:AstraZeneca/navari.git") == "AstraZeneca"
+    assert github.remote_owner("https://gitlab.com/x/y.git") is None
+
+
+def test_matching_account_only_picks_a_logged_in_inactive_namesake():
+    accounts = [
+        {"login": "kbww511_azu", "active": True, "state": "success"},
+        {"login": "VladSavelyev", "active": False, "state": "success"},
+    ]
+    assert github.matching_account("vladsavelyev", accounts) == "VladSavelyev"
+    assert github.matching_account("kbww511_azu", accounts) is None  # already active
+    assert github.matching_account("AstraZeneca", accounts) is None
+    broken = [{"login": "vladsavelyev", "active": False, "state": "error"}]
+    assert github.matching_account("vladsavelyev", broken) is None

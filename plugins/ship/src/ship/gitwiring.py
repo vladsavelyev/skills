@@ -104,20 +104,37 @@ def set_feature_issue(branch: str, issue: int, cwd: str | None = None) -> None:
     run(["git", "config", f"branch.{branch}.feature-issue", str(issue)], cwd=cwd)
 
 
-def local_only_commits(base: str, cwd: str | None = None) -> list[str]:
-    """Short SHAs on local `base` that its upstream remote branch does not contain.
+def local_only_commits(base: str, remote: str, cwd: str | None = None) -> list[str]:
+    """Short SHAs on local `base` that the fetched `remote` ref (`origin/<base>`) does not contain.
 
-    Empty when `base` is in sync with its remote, has no upstream, or doesn't exist locally.
-    These commits would leak into the PR diff — which is computed against the *remote* base —
-    of every branch cut from `base`, so `feature create` refuses to branch off a non-empty
-    result. `git for-each-ref` reports an absent upstream as an empty field (exit 0), so
-    "no upstream" is a legitimate empty answer, not an error to swallow.
+    Compared against the remote ref itself, not the configured upstream: a base pushed without
+    `-u` has no upstream, and reading that as "in sync" would let `feature start` branch off the
+    remote and silently drop the local commits. Empty when there is no local `base` at all (only
+    the remote one), which `git for-each-ref` reports as empty output.
     """
-    upstream = run(["git", "for-each-ref", "--format=%(upstream:short)", f"refs/heads/{base}"], cwd=cwd)
-    if not upstream:
+    if not run(["git", "for-each-ref", "--format=%(refname)", f"refs/heads/{base}"], cwd=cwd):
         return []
-    out = run(["git", "rev-list", "--abbrev-commit", f"{upstream}..{base}"], cwd=cwd)
+    out = run(["git", "rev-list", "--abbrev-commit", f"{remote}..{base}"], cwd=cwd)
     return out.splitlines() if out else []
+
+
+def remote_ref(branch: str, cwd: str | None = None) -> str | None:
+    """Fetch `branch` from origin and return `origin/<branch>`, or None if origin doesn't have it.
+    Branching off the fetched ref means a stale local base can't put an old starting point under
+    the new branch, and the main checkout isn't touched. The refspec names the destination
+    explicitly: a plain `git fetch origin <branch>` only updates `origin/<branch>` when the
+    configured fetch refspec covers it, which a single-branch clone's doesn't."""
+    if not run(["git", "ls-remote", "--heads", "origin", branch], cwd=cwd):
+        return None
+    run(["git", "fetch", "--quiet", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}"], cwd=cwd)
+    return f"origin/{branch}"
+
+
+def start_commit_and_push(name: str, worktree: str) -> None:
+    """An empty first commit, pushed with upstream set: GitHub won't open a PR for a branch with no
+    commits of its own, and the draft PR is wanted from the start."""
+    run(["git", "commit", "--allow-empty", "--quiet", "-m", f"Start {name}"], cwd=worktree)
+    run(["git", "push", "--quiet", "-u", "origin", name], cwd=worktree)
 
 
 def sensitive_patterns(cwd: str | None = None) -> list[str]:
@@ -133,8 +150,9 @@ def sensitive_patterns(cwd: str | None = None) -> list[str]:
     return raw.splitlines() if raw else []
 
 
-def create_branch_and_worktree(name: str, base: str, cwd: str | None = None) -> str:
-    """Create branch `name` off `base` in a worktree under WORKTREE_ROOT/<name>.
+def create_branch_and_worktree(name: str, base: str, start_point: str, cwd: str | None = None) -> str:
+    """Create branch `name` at `start_point` in a worktree under WORKTREE_ROOT/<name>, with `base`
+    as its git-town parent.
 
     Registers the parent pointer with git-town so the stack is tracked. Returns the
     worktree path. Aborts if the worktree path already exists.
@@ -144,8 +162,7 @@ def create_branch_and_worktree(name: str, base: str, cwd: str | None = None) -> 
     if worktree_path.exists():
         raise FileExistsError(f"Worktree path already exists: {worktree_path}")
 
-    # Create the branch + worktree off the base branch.
-    run(["git", "worktree", "add", "-b", name, str(worktree_path), base], cwd=cwd)
+    run(["git", "worktree", "add", "--no-track", "-b", name, str(worktree_path), start_point], cwd=cwd)
 
     # Register the stack parent with git-town (idempotent; sets the config key we read back).
     set_parent_branch(name, base, cwd=cwd)

@@ -5,6 +5,7 @@ The `addSubIssue` mutation is still preview-ish; its behavior is pinned here.
 """
 
 import json
+import os
 import re
 
 from .shell import run
@@ -62,6 +63,47 @@ def _node_id(number: int) -> str:
     if not out:
         raise ValueError(f"Could not resolve node id for issue #{number}")
     return out
+
+
+_GITHUB_OWNER_RE = re.compile(r"github\.com[:/]([^/]+)/")
+
+
+def remote_owner(url: str) -> str | None:
+    """The owner in a GitHub remote URL (https or ssh), or None for a non-GitHub remote."""
+    m = _GITHUB_OWNER_RE.search(url)
+    return m.group(1) if m else None
+
+
+def matching_account(owner: str, accounts: list[dict]) -> str | None:
+    """The logged-in, non-active gh account named like the repo's owner, if there is one."""
+    return next(
+        (
+            a["login"]
+            for a in accounts
+            if a["login"].lower() == owner.lower() and not a["active"] and a["state"] == "success"
+        ),
+        None,
+    )
+
+
+def use_owner_account() -> None:
+    """Point every `gh` and `git` call this process makes at the gh account named like the repo's
+    owner, when one is logged in but isn't the active account.
+
+    Personal repos (`<me>/*`) need the personal account while the machine-wide active account is a
+    work one that other sessions rely on, so switching accounts is out. An exported `GH_TOKEN`
+    reaches both `gh` and `git push` (through gh's credential helper) for this process only. An
+    explicit `GH_TOKEN` already in the environment wins.
+    """
+    if "GH_TOKEN" in os.environ:
+        return
+    owner = remote_owner(run(["git", "remote", "get-url", "origin"]))
+    if owner is None:
+        return
+    hosts = json.loads(run(["gh", "auth", "status", "--json", "hosts"]))["hosts"]
+    login = matching_account(owner, hosts.get("github.com", []))
+    if login is not None:
+        os.environ["GH_TOKEN"] = run(["gh", "auth", "token", "--user", login])
 
 
 def _owner_repo() -> tuple[str, str]:
@@ -140,6 +182,54 @@ def link_pr_to_feature(pr: int, issue: int) -> bool:
     new_body = f"{stripped}\n\n{ref}\n" if stripped else f"{ref}\n"
     run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=new_body)
     return True
+
+
+_ASSESS_BEGIN = "<!-- ship:assessment -->"
+_ASSESS_END = "<!-- /ship:assessment -->"
+_ASSESS_RE = re.compile(re.escape(_ASSESS_BEGIN) + r".*?" + re.escape(_ASSESS_END), re.S)
+
+
+def with_assessment(body: str, text: str) -> str:
+    """`body` with its assessment section set to `text`: replaced in place if there is one,
+    otherwise added just above our feature reference line (or at the end, before it's linked)."""
+    section = f"{_ASSESS_BEGIN}\n{text.strip()}\n{_ASSESS_END}"
+    if _ASSESS_RE.search(body):
+        return _ASSESS_RE.sub(lambda _: section, body, count=1)
+    ref = _FEATURE_REF_RE.search(body)
+    if ref:
+        head = body[: ref.start()].rstrip()
+        return f"{head}\n\n{section}\n\n{body[ref.start() :]}" if head else f"{section}\n\n{body[ref.start() :]}"
+    stripped = body.rstrip()
+    return f"{stripped}\n\n{section}\n" if stripped else f"{section}\n"
+
+
+def set_pr_assessment(pr: int, text: str) -> None:
+    body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
+    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=with_assessment(body, text))
+
+
+def with_description(body: str, text: str) -> str:
+    """`body` with its prose replaced by `text`, keeping the sections this workflow owns (the
+    assessment and the feature reference line) after it."""
+    ours = [m.group(0).strip() for m in (_ASSESS_RE.search(body), _FEATURE_REF_RE.search(body)) if m]
+    return "\n\n".join([text.strip(), *ours]) + "\n"
+
+
+def set_pr_description(pr: int, text: str, title: str | None) -> None:
+    body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
+    cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
+    if title:
+        cmd += ["--title", title]
+    run(cmd, input_text=with_description(body, text))
+
+
+def create_draft_pr(*, branch: str, base: str, title: str, body: str, cwd: str) -> str:
+    """Open a draft PR for `branch` against `base`; returns its URL."""
+    return run(
+        ["gh", "pr", "create", "--draft", "--head", branch, "--base", base, "--title", title, "--body-file", "-"],
+        cwd=cwd,
+        input_text=body,
+    )
 
 
 # How many PRs to ask about per aliased GraphQL query. Well under any complexity limit, and it
