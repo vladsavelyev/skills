@@ -136,17 +136,6 @@ def cmd_start(args: argparse.Namespace) -> None:
     remote = remote_ref(base)
     if remote is None:
         sys.exit(f"'{base}' is not on origin, so no PR can target it. Push it first.")
-
-    # A rerun after a start that failed partway (say `gh pr create` hit a transient error) picks up
-    # where it stopped instead of tripping over its own worktree.
-    existing = worktree_for_branch(name)
-    if existing is not None:
-        pr = github.open_pr_for_branch(name)
-        if pr is not None:
-            sys.exit(f"'{name}' is already started: worktree {existing}, PR #{pr}.")
-        print(f"Resuming the unfinished start of '{name}' in {existing}")
-        _finish_start(name, base, remote, existing, args)
-        return
     # Branch off an *intentional* base: local `base` must not sit ahead of its remote. A drifted
     # local base (e.g. unpushed commits on `main`) silently leaks into the branch, and since the
     # PR diff is computed against the remote base, those commits surface as unrelated changes in
@@ -163,11 +152,7 @@ def cmd_start(args: argparse.Namespace) -> None:
         )
     start_point = base if stray else remote
     worktree_path = create_branch_and_worktree(name, base, start_point)
-    _finish_start(name, base, start_point, worktree_path, args)
-
-
-def _finish_start(name: str, base: str, start_point: str, worktree_path: str, args: argparse.Namespace) -> None:
-    start_commit_and_push(name, start_point, worktree_path)
+    start_commit_and_push(name, worktree_path)
     title = args.title or name.replace("-", " ").capitalize()
     url = github.create_draft_pr(branch=name, base=base, title=title, body=args.body, cwd=worktree_path)
 

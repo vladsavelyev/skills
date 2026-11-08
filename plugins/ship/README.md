@@ -97,7 +97,8 @@ feature problem resolve 46 --commit abc1234
 feature problem reject 48 --reason "verifier is validated upstream in middleware.py:40"
 # re-review, then record a clean pass (0 new blocking) to open the gate:
 feature review record --sha $(git rev-parse HEAD) --new-blocking 0 --new-low 1 \
-    --summary "Re-reviewed oauth.py; #46 fixed; one naming nit filed"
+    --summary "Re-reviewed oauth.py; #46 fixed; one naming nit filed" \
+    --depth max --risk high --complexity med --why "Token handling; refresh has ordering"
 feature gate                                   # exit 0 = safe to merge, 20 = ask a human
 ```
 

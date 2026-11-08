@@ -130,13 +130,10 @@ def remote_ref(branch: str, cwd: str | None = None) -> str | None:
     return f"origin/{branch}"
 
 
-def start_commit_and_push(name: str, base_ref: str, worktree: str) -> None:
+def start_commit_and_push(name: str, worktree: str) -> None:
     """An empty first commit, pushed with upstream set: GitHub won't open a PR for a branch with no
-    commits of its own, and the draft PR is wanted from the start. Safe to repeat, so a start that
-    failed halfway resumes: the commit is only made while the branch has none past `base_ref`, and
-    pushing an up-to-date branch changes nothing."""
-    if run(["git", "rev-list", "--count", f"{base_ref}..HEAD"], cwd=worktree) == "0":
-        run(["git", "commit", "--allow-empty", "--quiet", "-m", f"Start {name}"], cwd=worktree)
+    commits of its own, and the draft PR is wanted from the start."""
+    run(["git", "commit", "--allow-empty", "--quiet", "-m", f"Start {name}"], cwd=worktree)
     run(["git", "push", "--quiet", "-u", "origin", name], cwd=worktree)
 
 

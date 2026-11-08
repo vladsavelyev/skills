@@ -72,7 +72,8 @@ GitHub with `GH_TOKEN=$(gh auth token --user vladsavelyev)`.
    substitute another reviewer.
    ```
    Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>` (over 300 files that
-   fails; use `git diff origin/<base>...HEAD` in the checkout instead). The PR's branch is
+   fails; then run `git fetch origin <base>` and use `git diff origin/<base>...HEAD` in the
+   checkout instead). The PR's branch is
    checked out at <worktree abs path>; read code only there, never another checkout. Read-only:
    no edits, commits, pushes or GitHub comments.
 
