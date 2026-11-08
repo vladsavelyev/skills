@@ -1,0 +1,8 @@
+{
+  "name": "cdt",
+  "description": "The cdt MCP (chrome-devtools-mcp) in every project: an agent's own Chrome with console, network and performance tools.",
+  "author": {
+    "name": "Vlad Savelyev"
+  },
+  "repository": "https://github.com/vladsavelyev/skills/tree/main/plugins/cdt"
+}
