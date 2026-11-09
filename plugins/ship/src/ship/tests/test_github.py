@@ -166,13 +166,26 @@ def test_remote_owner_parses_https_and_ssh():
     assert github.remote_owner("https://gitlab.com/x/y.git") is None
 
 
-def test_matching_account_only_picks_a_logged_in_inactive_namesake():
+def test_is_work_repo_by_active_account_or_its_orgs():
+    assert github.is_work_repo("kbww511_AZU", "kbww511_azu", [])
+    assert github.is_work_repo("azu-oncology-rd", "kbww511_azu", ["azu-oncology-rd", "GHCP-Business"])
+    assert not github.is_work_repo("vladsavelyev", "kbww511_azu", ["azu-oncology-rd"])
+    assert not github.is_work_repo("t3dotgg", "kbww511_azu", ["azu-oncology-rd"])
+
+
+def test_personal_account_is_the_one_other_logged_in_account():
     accounts = [
         {"login": "kbww511_azu", "active": True, "state": "success"},
-        {"login": "VladSavelyev", "active": False, "state": "success"},
+        {"login": "vladsavelyev", "active": False, "state": "success"},
+        {"login": "stale", "active": False, "state": "error"},
     ]
-    assert github.matching_account("vladsavelyev", accounts) == "VladSavelyev"
-    assert github.matching_account("kbww511_azu", accounts) is None  # already active
-    assert github.matching_account("AstraZeneca", accounts) is None
-    broken = [{"login": "vladsavelyev", "active": False, "state": "error"}]
-    assert github.matching_account("vladsavelyev", broken) is None
+    assert github.personal_account(accounts) == "vladsavelyev"
+
+
+@pytest.mark.parametrize("others", [[], ["a", "b"]])
+def test_personal_account_aborts_unless_exactly_one(others):
+    accounts = [{"login": "work", "active": True, "state": "success"}] + [
+        {"login": o, "active": False, "state": "success"} for o in others
+    ]
+    with pytest.raises(SystemExit):
+        github.personal_account(accounts)

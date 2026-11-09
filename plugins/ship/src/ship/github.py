@@ -74,36 +74,44 @@ def remote_owner(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def matching_account(owner: str, accounts: list[dict]) -> str | None:
-    """The logged-in, non-active gh account named like the repo's owner, if there is one."""
-    return next(
-        (
-            a["login"]
-            for a in accounts
-            if a["login"].lower() == owner.lower() and not a["active"] and a["state"] == "success"
-        ),
-        None,
-    )
+def is_work_repo(owner: str, active_login: str, active_orgs: list[str]) -> bool:
+    """A work repo is owned by the active (work) account or by one of its orgs."""
+    return owner.lower() in {active_login.lower(), *(o.lower() for o in active_orgs)}
+
+
+def personal_account(accounts: list[dict]) -> str:
+    """The one logged-in gh account that isn't active. Anything else is a setup the rule can't
+    resolve, so it aborts instead of guessing which account a push should go out as."""
+    others = [a["login"] for a in accounts if not a["active"] and a["state"] == "success"]
+    if len(others) != 1:
+        raise SystemExit(
+            f"This repo isn't owned by the active gh account or one of its orgs, so it needs the personal "
+            f"account: the one other logged-in gh account. Found {len(others)}: {others}. "
+            f"Fix it with `gh auth login`/`gh auth logout`, or export GH_TOKEN for this run."
+        )
+    return others[0]
 
 
 def use_owner_account() -> None:
-    """Point every `gh` and `git` call this process makes at the gh account named like the repo's
-    owner, when one is logged in but isn't the active account.
+    """Point every `gh` and `git` call this process makes at the right one of two gh accounts.
 
-    Personal repos (`<me>/*`) need the personal account while the machine-wide active account is a
-    work one that other sessions rely on, so switching accounts is out. An exported `GH_TOKEN`
-    reaches both `gh` and `git push` (through gh's credential helper) for this process only. An
-    explicit `GH_TOKEN` already in the environment wins.
+    The active account is the work one, and repos owned by it or one of its orgs use it. Every other
+    repo uses the personal account, the other logged-in one. Switching accounts is out, since the
+    active account is machine-wide and other sessions rely on it; an exported `GH_TOKEN` reaches both
+    `gh` and `git push` (through gh's credential helper) for this process only. An explicit
+    `GH_TOKEN` already in the environment wins.
     """
     if "GH_TOKEN" in os.environ:
         return
     owner = remote_owner(run(["git", "remote", "get-url", "origin"]))
     if owner is None:
         return
-    hosts = json.loads(run(["gh", "auth", "status", "--json", "hosts"]))["hosts"]
-    login = matching_account(owner, hosts.get("github.com", []))
-    if login is not None:
-        os.environ["GH_TOKEN"] = run(["gh", "auth", "token", "--user", login])
+    accounts = json.loads(run(["gh", "auth", "status", "--json", "hosts"]))["hosts"]["github.com"]
+    active_login = next(a["login"] for a in accounts if a["active"])
+    if owner.lower() != active_login.lower():
+        active_orgs = run(["gh", "api", "user/orgs", "--paginate", "--jq", ".[].login"]).splitlines()
+        if not is_work_repo(owner, active_login, active_orgs):
+            os.environ["GH_TOKEN"] = run(["gh", "auth", "token", "--user", personal_account(accounts)])
 
 
 def _owner_repo() -> tuple[str, str]:

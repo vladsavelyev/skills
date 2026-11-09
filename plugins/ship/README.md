@@ -60,9 +60,10 @@ chmod +x ~/.local/bin/feature
 
 ## Prerequisites
 
-- [`gh`](https://cli.github.com/) authenticated (`gh auth status`). If gh is also logged in to an account named like the
-  repo's owner (a personal repo next to an active work account), `feature` uses that account's
-  token for its `gh` and `git push` calls, without `gh auth switch`.
+- [`gh`](https://cli.github.com/) authenticated (`gh auth status`). With two accounts logged in, a
+  work one active and a personal one: a repo owned by the active account or one of its orgs uses
+  it, and any other repo makes `feature` use the personal account's token for its `gh` and
+  `git push` calls, without `gh auth switch`.
 - [`git-town`](https://www.git-town.com/) installed (`brew install git-town`) — needed for
   restacking stacked branches. Base-branch tracking works without it.
 - [`jq`](https://jqlang.org/), for the terminal `feature` wrapper above. It assumes one user-scope
