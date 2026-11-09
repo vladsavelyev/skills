@@ -18,6 +18,7 @@ hosts = ["ubuntu@my-vm.example.com"]
 machine_settings = ["env.DISPLAY", "hooks.Stop", "statusLine"]  # settings keys each machine keeps
 machine_skills = ["dev-browser"]                                # ~/.claude/skills entries that stay here
 helpers = ["git-pr-context"]                                    # commands the hooks and statusline call
+agents_md = ".claude/plugins/marketplaces/vlad-skills/agents/AGENTS.md"  # optional, see below
 ```
 
 What it covers:
@@ -34,6 +35,12 @@ What it covers:
   whole fleet and how each host is reached, and that its memory is its own (so an agent on a host
   knows it can't see what was remembered on the laptop, and makes shared changes there). Hand-written
   text after that section is left alone.
+- **`agents_md`** (optional): agent instructions that live in a repo instead of in `CLAUDE.md`. The
+  shared part of `~/.claude/CLAUDE.md` must import it (`@~/<agents_md>`), the file must exist on
+  every machine (a missing `@` import loads nothing, without a word), and wherever Codex is installed
+  `~/.codex/AGENTS.md` becomes a symlink to it, keeping a `.bak-<timestamp>` of a file that was
+  there. Pointing it into a plugin marketplace clone means it's always the default branch, and the
+  marketplace update at session start keeps it current.
 - **`~/.claude/settings*.json`**: every key is copied except `machine_settings`. Values go over stdin
   and only key names are printed, since `env` often carries secrets.
 - **Reported only**: missing `helpers` (a missing one fails silently, e.g. a statusline segment just
