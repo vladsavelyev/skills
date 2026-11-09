@@ -1,26 +1,32 @@
 ### Working style
 
-- Always build code cleanly, modularly, and with proper architecture and separation of concerns. Never simply bolt on a feature because I asked for it. If you can’t find an easy way to build it naturally, and you'd recommend a refactor to make the whole thing cleanly, stop your work ahead of time and say so.
-- **Finish the follow-ups yourself.** Don't end with "left for you: run X, delete Y" when X and Y are things you can safely do: do them, verify them, report them done. Hand back only what truly needs me: my SSO or a secret only I hold, a rebuild or stack takeover my rules say to confirm, a real design choice.
-- **Size work as your own.** Never estimate in engineer-days or weeks: you do the work, in this session. Describe the steps or just do them, and name only real waits (a long eval, an image build, access).
-- **Don't claim what you can't observe.** You can't see permission prompts or hook decisions from inside your own session, so a command's success output never proves it ran "without a prompt". Find an observable artifact (a `claude -p … --output-format json` subprocess and its `permission_denials`, a log, a surviving file) or say you can't verify it.
-- **Never blame the browser cache.** When a frontend change doesn't show up, prove what is served (curl the asset, diff it against the source, inspect the live DOM) and fix staleness at the source. Never suggest a hard reload.
-- **Never deploy without my explicit yes.** Don't dispatch a deploy or otherwise change a shared environment unless I said yes for that environment. "Test it there" or "on <branch>" means the local stack on that branch.
-- **Never assume. Don't leave it to me to test.** Be independent: run the app, verify UI changes in a browser (see Browsers below), test user scenarios.
+Always build code cleanly, modularly, and with proper architecture and separation of concerns. Never simply bolt on a feature because I asked for it. If you can’t find an easy way to build it naturally, and you'd recommend a refactor to make the whole thing cleanly, stop your work ahead of time and say so.
+
+**Finish the follow-ups yourself.** Don't end with "left for you: run X, delete Y" when X and Y are things you can safely do: do them, verify them, report them done. Hand back only what truly needs me: my SSO or a secret only I hold, a rebuild or stack takeover my rules say to confirm, a real design choice.
+
+**Size work as your own.** Never estimate in engineer-days or weeks: you do the work, in this session. Describe the steps or just do them, and name only real waits (a long eval, an image build, access).
+
+**Don't claim what you can't observe.** You can't see permission prompts or hook decisions from inside your own session, so a command's success output never proves it ran "without a prompt". Find an observable artifact (a `claude -p … --output-format json` subprocess and its `permission_denials`, a log, a surviving file) or say you can't verify it.
+
+**Never blame the browser cache.** When a frontend change doesn't show up, prove what is served (curl the asset, diff it against the source, inspect the live DOM) and fix staleness at the source. Never suggest a hard reload.
+
+**Never deploy without my explicit yes.** Don't dispatch a deploy or otherwise change a shared environment unless I said yes for that environment. "Test it there" or "on <branch>" means the local stack on that branch.
+
+**Never assume. Don't leave it to me to test.** Be independent: run the app, verify UI changes in a browser (see Browsers below), test user scenarios.
 
 ### Coding rules
 
 Use latest versions of Python (and other languages). If needed, upgrade. Never add `__future__` statements.
 
-**NEVER HIDE PROBLEMS.** Avoid silent fallbacks. Only use try-catch when absolutely warranted. The code should work as designed or ABORT FAST. If you want to add a fallback, ask permission. If a database file is missing, do not return an empty list as if there are no entries; if a file is unreadable, do not return an empty string as if it's just blank; instead, you must let the function crash.
+**Never hide problems.** Avoid silent fallbacks. Only use try-catch when absolutely warranted. The code should work as designed or ABORT FAST. If you want to add a fallback, ask permission. If a database file is missing, do not return an empty list as if there are no entries; if a file is unreadable, do not return an empty string as if it's just blank; instead, you must let the function crash.
 
 **Scratch dirs:** make them with `mktemp -d /tmp/<purpose>.XXXX`, never `mkdir -p` a guessed name: other sessions reuse natural names, and deleting the dir deletes their files too. Look inside before any `rm -r`, in a separate call.
 
-**NEVER add arbitrary limits, truncation, trimming, cropping.**
+**Never add arbitrary limits, truncation, trimming, cropping.**
 
 **Do not leave legacy code** in projects under active development that aren't public yet. Never create conditional branches for legacy scenarios there: we don't care about back-compatibility and can change APIs. Clean up old code fiercely. The exception is legacy support we explicitly decided to keep (e.g. an old format already written into external data). Keep it, and say in a code comment that it's deliberate and why, so no one removes it as cruft.
 
-**NEVER block the asyncio event loop.** Inside an `async def` or any coroutine that runs on the loop, use the async equivalent (`asyncio.sleep`, an async HTTP client, async file I/O) or push the sync work off-loop with `asyncio.to_thread` / `run_in_executor`.
+**Never block the asyncio event loop.** Inside an `async def` or any coroutine that runs on the loop, use the async equivalent (`asyncio.sleep`, an async HTTP client, async file I/O) or push the sync work off-loop with `asyncio.to_thread` / `run_in_executor`.
 
 ### Navari local stack
 
