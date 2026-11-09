@@ -8,6 +8,7 @@ import json
 import os
 import re
 
+from . import prbody
 from .shell import run
 
 LABELS = [
@@ -145,25 +146,6 @@ def open_pr_for_branch(branch: str) -> int | None:
     return int(out) if out else None
 
 
-# The marker makes the line unmistakably *ours*. A PR body legitimately carries hand-written
-# closing references to the problem sub-issues it fixes ("Closes #2173, #2174"), and one of those
-# can be a lone `Closes #2173` on its own line — indistinguishable from the feature reference
-# without this, so re-linking would strip it and silently stop that problem from auto-closing.
-# Invisible when rendered, and GitHub still parses the keyword reference that precedes it.
-_REF_MARK = "<!-- ship -->"
-# Our own reference line, in any form: the current one, the same line under the marker PRs carried
-# before the project was renamed from feature-workflow, or the non-closing `Part of #…` from before
-# the reference became a closing one. Each is upgraded in place on the next link.
-# The old forms are kept ON PURPOSE, not cruft: they are already written into PR bodies on GitHub,
-# and dropping one would make `feature pr` stack a second reference line instead of replacing it.
-_FEATURE_REF_RE = re.compile(r"(?mi)^(?:Closes #\d+ <!-- (?:ship|feature-workflow) -->|Part of #\d+)\s*$")
-
-
-def feature_ref(issue: int) -> str:
-    """The reference line this workflow writes into a PR body to link it to its feature issue."""
-    return f"Closes #{issue} {_REF_MARK}"
-
-
 def link_pr_to_feature(pr: int, issue: int) -> bool:
     """Put a native `Closes #<issue>` reference in the PR body, creating a real GitHub link that
     shows in the PR's sidebar and closes the tracking issue when the PR merges. Returns True if
@@ -181,48 +163,19 @@ def link_pr_to_feature(pr: int, issue: int) -> bool:
     needs closing by hand, and the auto-close writes no record — the state block stays at
     `in-review` and nothing names the debt that shipped.
 
-    Any stale reference line of ours is stripped first, so re-linking (or upgrading an old
-    `Part of #…`) replaces the reference instead of stacking a second one.
+    Any stale reference line of ours is replaced, so re-linking (or upgrading an old
+    `Part of #…`) never stacks a second one; `prbody` places it in the body's layout.
     """
     body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
-    ref = feature_ref(issue)
-    if any(line.strip() == ref for line in body.splitlines()):
+    if prbody.parse(body).ref == prbody.feature_ref(issue):
         return False  # already linked to this issue
-    stripped = _FEATURE_REF_RE.sub("", body).rstrip()
-    new_body = f"{stripped}\n\n{ref}\n" if stripped else f"{ref}\n"
-    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=new_body)
+    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=prbody.with_ref(body, issue))
     return True
-
-
-_ASSESS_BEGIN = "<!-- ship:assessment -->"
-_ASSESS_END = "<!-- /ship:assessment -->"
-_ASSESS_RE = re.compile(re.escape(_ASSESS_BEGIN) + r".*?" + re.escape(_ASSESS_END), re.S)
-
-
-def with_assessment(body: str, text: str) -> str:
-    """`body` with its assessment section set to `text`: replaced in place if there is one,
-    otherwise added just above our feature reference line (or at the end, before it's linked)."""
-    section = f"{_ASSESS_BEGIN}\n{text.strip()}\n{_ASSESS_END}"
-    if _ASSESS_RE.search(body):
-        return _ASSESS_RE.sub(lambda _: section, body, count=1)
-    ref = _FEATURE_REF_RE.search(body)
-    if ref:
-        head = body[: ref.start()].rstrip()
-        return f"{head}\n\n{section}\n\n{body[ref.start() :]}" if head else f"{section}\n\n{body[ref.start() :]}"
-    stripped = body.rstrip()
-    return f"{stripped}\n\n{section}\n" if stripped else f"{section}\n"
 
 
 def set_pr_assessment(pr: int, text: str) -> None:
     body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
-    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=with_assessment(body, text))
-
-
-def with_description(body: str, text: str) -> str:
-    """`body` with its prose replaced by `text`, keeping the sections this workflow owns (the
-    assessment and the feature reference line) after it."""
-    ours = [m.group(0).strip() for m in (_ASSESS_RE.search(body), _FEATURE_REF_RE.search(body)) if m]
-    return "\n\n".join([text.strip(), *ours]) + "\n"
+    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=prbody.with_assessment(body, text))
 
 
 def set_pr_description(pr: int, text: str, title: str | None) -> None:
@@ -230,7 +183,7 @@ def set_pr_description(pr: int, text: str, title: str | None) -> None:
     cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
     if title:
         cmd += ["--title", title]
-    run(cmd, input_text=with_description(body, text))
+    run(cmd, input_text=prbody.with_description(body, text))
 
 
 def create_draft_pr(*, branch: str, base: str, title: str, body: str, cwd: str) -> str:

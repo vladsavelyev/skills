@@ -94,6 +94,17 @@ evidence, and is nulled on invalidation, which is why it duplicates the last his
 Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
 than read with guessed-at defaults.
 
+### The PR body
+
+The PR body has three parts, in this order: the author's prose, a `---` rule and the CLI's meta
+(the assessment section from `feature review record`, then the `Closes #<issue>` line from
+`feature pr`), and the author's signature (trailing paragraphs starting with `🤖`, the
+attribution line an agent harness asks for) at the very end. `prbody.py` parses the whole body
+into those parts and composes it back on every write, so the layout comes out the same whichever
+command ran last, and a body from before the layout existed (meta appended after the signature)
+is put right on its next write. `feature describe` replaces the prose and the signature together
+with its input's, since the signature belongs to whoever wrote the prose.
+
 ## Lifecycle
 
 ```
@@ -265,7 +276,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | Command | Does |
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>` (the base must be on origin), a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
-| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description's prose (and optionally the title), keeping the assessment section and the feature reference line. `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
+| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description's prose and signature (and optionally the title), keeping the assessment section and the feature reference line between them (see "The PR body"). `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
 | `feature depth [--branch <b>]` | Print the reasoning effort for the next review round (`assess.py`): size from the diff stats; risk from the paths touched (sensitive → high, docs/tests only → low) until a review has graded the PR, then the last grade's risk and complexity. |
 | `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |

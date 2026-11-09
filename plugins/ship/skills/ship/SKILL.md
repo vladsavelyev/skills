@@ -64,7 +64,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    (`git log --format='%s%n%b' origin/<base>..HEAD`); don't read the diff for this. The
    description is the motivation in one to three informal sentences plus, if it isn't obvious,
    what changed; no "Summary" header, no test plan. The title says what the PR does, in plain
-   words. `feature describe` keeps the CLI's own sections of the body. Sol and step 6 read this
+   words. End it with your signature line if your harness asks for one. `feature describe` keeps
+   the CLI's own meta below the prose and moves the signature to the very end. Sol and step 6 read this
    description to know the PR's intent, so it comes first.
 3. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
    review it comes from the diff stats and the paths touched; after one, from the last review's

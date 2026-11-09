@@ -2,7 +2,7 @@
 
 import pytest
 
-from ship import github
+from ship import github, prbody
 
 
 def test_open_pr_for_branch_returns_number_when_present(monkeypatch):
@@ -33,15 +33,15 @@ def _fake_pr_body_editor(monkeypatch, body: str) -> dict:
     return captured
 
 
-REF = github.feature_ref(1964)
+REF = prbody.feature_ref(1964)
 
 
 def test_link_pr_appends_closing_reference_to_body(monkeypatch):
     captured = _fake_pr_body_editor(monkeypatch, "Some PR description.")
     assert github.link_pr_to_feature(1910, 1964) is True
     # A closing keyword, so merging the PR closes the tracking issue with nobody remembering to.
-    assert captured["body"] == f"Some PR description.\n\n{REF}\n"
-    assert captured["body"].startswith("Some PR description.\n\nCloses #1964 ")
+    assert captured["body"] == f"Some PR description.\n\n---\n\n{REF}\n"
+    assert captured["body"].endswith("\n\nCloses #1964 <!-- ship -->\n")
 
 
 def test_link_pr_is_idempotent_when_already_linked(monkeypatch):
@@ -52,10 +52,10 @@ def test_link_pr_is_idempotent_when_already_linked(monkeypatch):
 
 
 def test_link_pr_replaces_stale_reference(monkeypatch):
-    captured = _fake_pr_body_editor(monkeypatch, f"Desc.\n\n{github.feature_ref(1981)}\n")
+    captured = _fake_pr_body_editor(monkeypatch, f"Desc.\n\n{prbody.feature_ref(1981)}\n")
     # Re-linking to a different issue drops the old reference rather than stacking a second one.
     assert github.link_pr_to_feature(1910, 1964) is True
-    assert captured["body"] == f"Desc.\n\n{REF}\n"
+    assert captured["body"] == f"Desc.\n\n---\n\n{REF}\n"
     assert "#1981" not in captured["body"]
 
 
@@ -64,7 +64,7 @@ def test_link_pr_upgrades_the_old_non_closing_reference(monkeypatch):
     # replaces that line instead of leaving two references to the same issue behind.
     captured = _fake_pr_body_editor(monkeypatch, "Desc.\n\nPart of #1964\n")
     assert github.link_pr_to_feature(1910, 1964) is True
-    assert captured["body"] == f"Desc.\n\n{REF}\n"
+    assert captured["body"] == f"Desc.\n\n---\n\n{REF}\n"
     assert "Part of" not in captured["body"]
 
 
@@ -73,7 +73,7 @@ def test_link_pr_upgrades_the_pre_rename_marker(monkeypatch):
     # linking again replaces that line instead of leaving two closing references behind.
     captured = _fake_pr_body_editor(monkeypatch, "Desc.\n\nCloses #1981 <!-- feature-workflow -->\n")
     assert github.link_pr_to_feature(1910, 1964) is True
-    assert captured["body"] == f"Desc.\n\n{REF}\n"
+    assert captured["body"] == f"Desc.\n\n---\n\n{REF}\n"
 
 
 def test_link_pr_leaves_hand_written_problem_closures_alone(monkeypatch):
@@ -82,7 +82,7 @@ def test_link_pr_leaves_hand_written_problem_closures_alone(monkeypatch):
     # those problem sub-issues from auto-closing.
     captured = _fake_pr_body_editor(monkeypatch, "Desc.\n\nCloses #2173\n")
     assert github.link_pr_to_feature(1910, 1964) is True
-    assert captured["body"] == f"Desc.\n\nCloses #2173\n\n{REF}\n"
+    assert captured["body"] == f"Desc.\n\nCloses #2173\n\n---\n\n{REF}\n"
 
 
 def test_link_pr_handles_empty_body(monkeypatch):
