@@ -39,7 +39,9 @@ What it covers:
   shared part of `~/.claude/CLAUDE.md` must import it (`@~/<agents_md>`), the file must exist on
   every machine (a missing `@` import loads nothing, without a word), and wherever Codex is installed
   `~/.codex/AGENTS.md` becomes a symlink to it, keeping a `.bak-<timestamp>` of a file that was
-  there. Pointing it into a plugin marketplace clone means it's always the default branch, and the
+  there. Codex has no imports, so the machine's own part of `~/.claude/CLAUDE.md` (below the
+  marker) goes into `~/.codex/config.toml` as `developer_instructions`, in a block fleet owns at the
+  top of the file. A `developer_instructions` set by hand is refused, not overwritten. Pointing it into a plugin marketplace clone means it's always the default branch, and the
   marketplace update at session start keeps it current.
 - **`~/.claude/settings*.json`**: every key is copied except `machine_settings`. Values go over stdin
   and only key names are printed, since `env` often carries secrets.
