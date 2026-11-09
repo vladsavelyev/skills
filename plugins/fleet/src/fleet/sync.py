@@ -11,6 +11,9 @@ it. A check reports drift; `--apply` fixes what can be fixed without a human:
 - `~/.claude/CLAUDE.md`: everything above MARKER copied; below it each machine describes itself, starting
   with a generated section naming the machine, the fleet, and that its memory is its own.
 - `~/.claude/settings*.json`: every key copied, except the machine's own (`machine_settings`).
+- `agents_md` (optional): the shared agent instructions file. The shared part of `~/.claude/CLAUDE.md`
+  must import it, it must exist on every machine, and wherever Codex is installed
+  `~/.codex/AGENTS.md` must be a symlink to it.
 
 Reported only: helper commands the statusline and hooks call (`helpers`), and T3 Code, which pins a
 remote's server to the app's own version every time it connects.
@@ -46,6 +49,8 @@ class Config:
     machine_settings: list[str] = field(default_factory=list)
     machine_skills: list[str] = field(default_factory=list)
     helpers: list[str] = field(default_factory=list)
+    # Home-relative path of the agent instructions every machine's CLAUDE.md imports and Codex reads.
+    agents_md: str | None = None
 
 
 def load_config() -> Config:
@@ -55,7 +60,8 @@ def load_config() -> Config:
             '  hosts = ["user@host"]\n'
             '  machine_settings = ["env.DISPLAY", "hooks.Stop"]   # settings keys each machine keeps\n'
             '  machine_skills = ["dev-browser"]                   # skills that stay on this machine\n'
-            '  helpers = ["git-pr-context"]                       # commands the hooks/statusline call'
+            '  helpers = ["git-pr-context"]                       # commands the hooks/statusline call\n'
+            '  agents_md = ".claude/plugins/marketplaces/<m>/agents/AGENTS.md"  # optional, see README'
         )
     config = Config(**tomllib.loads(CONFIG_PATH.read_text()))
     if not config.hosts:
@@ -456,6 +462,63 @@ def sync_claude_md(machines: list[Machine], apply: bool, report: Report) -> None
             report.fixed(f"{machine.name}: updated ~/{CLAUDE_MD} (old file: ~/{backup})")
 
 
+# --- shared AGENTS.md ---
+
+CODEX_AGENTS_MD = ".codex/AGENTS.md"
+
+
+def import_line(agents_md: str) -> str:
+    return f"@~/{agents_md}"
+
+
+def sync_agents_md(machines: list[Machine], config: Config, apply: bool, report: Report) -> None:
+    """The file CLAUDE.md imports has to exist everywhere: a missing `@` import loads nothing, without a
+    word, and every session runs without its rules. Codex reads only `~/.codex/AGENTS.md`, so it gets a
+    symlink to the same file."""
+    path = config.agents_md
+    if path is None:
+        return
+    report.section(f"~/{path}")
+    source = machines[0].read(CLAUDE_MD)
+    if source is None:
+        raise RuntimeError(f"{machines[0].name} has no ~/{CLAUDE_MD} to import ~/{path} from")
+    shared, _ = split_claude_md(source, machines[0].name)
+    if import_line(path) not in shared.splitlines():
+        report.problem(f"the shared part of ~/{CLAUDE_MD} doesn't import it: add the line `{import_line(path)}`")
+    for machine in machines:
+        if machine.read(path) is None:
+            report.problem(
+                f"{machine.name}: no ~/{path}, so its CLAUDE.md imports nothing. Pull the repo it lives in "
+                "there (for a plugin marketplace, `claude plugin marketplace update <name>`)"
+            )
+        sync_codex_link(machine, path, apply, report)
+
+
+def sync_codex_link(machine: Machine, path: str, apply: bool, report: Report) -> None:
+    home = machine.out(["sh", "-c", 'printf %s "$HOME"'])
+    target = f"{home}/{path}"
+    probe = (
+        'if [ ! -d "$1" ]; then echo none; elif [ -L "$2" ]; then echo "link $(readlink "$2")"; '
+        'elif [ -e "$2" ]; then echo file; else echo missing; fi'
+    )
+    state = machine.out(["sh", "-c", probe, "sh", f"{home}/.codex", f"{home}/{CODEX_AGENTS_MD}"])
+    if state == "none":
+        report.ok(f"{machine.name}: no Codex (~/.codex), nothing to link")
+        return
+    if state == f"link {target}":
+        report.ok(f"{machine.name}: ~/{CODEX_AGENTS_MD} links to it")
+        return
+    report.drift(
+        f"{machine.name}: ~/{CODEX_AGENTS_MD} is {state.replace('link ', 'a link to ')}, not a link to it", apply
+    )
+    if apply:
+        backup = f"{home}/{CODEX_AGENTS_MD}.bak-{datetime.now().astimezone():%Y%m%d%H%M%S}"
+        script = 'if [ -e "$1" ] && [ ! -L "$1" ]; then mv "$1" "$3"; fi; ln -sfn "$2" "$1"'
+        machine.run(["sh", "-c", script, "sh", f"{home}/{CODEX_AGENTS_MD}", target, backup])
+        kept = f" (old file: {backup})" if state == "file" else ""
+        report.fixed(f"{machine.name}: ~/{CODEX_AGENTS_MD} now links to ~/{path}{kept}")
+
+
 # --- settings ---
 
 
@@ -563,6 +626,7 @@ def sync(apply: bool) -> int:
     sync_skills(machines, config, apply, report)
     sync_plugins(machines, apply, report)
     sync_claude_md(machines, apply, report)
+    sync_agents_md(machines, config, apply, report)
     sync_settings(machines, config, apply, report)
     check_helpers(machines, config, report)
     check_t3(machines, report)

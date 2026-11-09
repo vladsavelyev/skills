@@ -108,3 +108,48 @@ def test_with_machine_section_replaces_only_the_generated_section():
 def test_with_machine_section_without_an_end_marker_refuses():
     with pytest.raises(RuntimeError, match="but no"):
         fleet.with_machine_section(fleet.SECTION_START + "\nhalf\n", "x", "host")
+
+
+AGENTS = ".claude/plugins/marketplaces/m/agents/AGENTS.md"
+
+
+def _home(tmp_path, monkeypatch, *, imports: bool = True, rules: bool = True):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    shared = f"@~/{AGENTS}\n" if imports else "rules inline\n"
+    (home / fleet.CLAUDE_MD).write_text(shared + fleet.MARKER + "\nmine\n")
+    if rules:
+        (home / AGENTS).parent.mkdir(parents=True)
+        (home / AGENTS).write_text("rules\n")
+    return home
+
+
+def _sync(apply: bool) -> fleet.Report:
+    report = fleet.Report()
+    fleet.sync_agents_md([fleet.Machine(None)], fleet.Config(hosts=["u@h"], agents_md=AGENTS), apply, report)
+    return report
+
+
+def test_agents_md_without_codex_needs_nothing(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    assert _sync(apply=True).unresolved == 0
+    assert not (home / ".codex").exists()
+
+
+def test_agents_md_replaces_codex_file_with_a_link_and_keeps_the_old_one(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    (home / ".codex").mkdir()
+    (home / fleet.CODEX_AGENTS_MD).write_text("old codex rules\n")
+    assert _sync(apply=False).unresolved == 1
+    assert _sync(apply=True).unresolved == 0
+    link = home / fleet.CODEX_AGENTS_MD
+    assert link.is_symlink() and link.resolve() == (home / AGENTS).resolve()
+    [backup] = (home / ".codex").glob("AGENTS.md.bak-*")
+    assert backup.read_text() == "old codex rules\n"
+    assert _sync(apply=False).unresolved == 0
+
+
+def test_agents_md_flags_a_missing_import_or_file(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch, imports=False, rules=False)
+    assert _sync(apply=True).unresolved == 2
