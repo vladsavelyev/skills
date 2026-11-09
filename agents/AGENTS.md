@@ -1,7 +1,3 @@
-# Agent rules
-
-My rules for coding agents on every machine and in every project. Claude Code imports this file from `~/.claude/CLAUDE.md`; Codex reads it as `~/.codex/AGENTS.md`.
-
 ### Working style
 
 - Always build code cleanly, modularly, and with proper architecture and separation of concerns. Never simply bolt on a feature because I asked for it. If you can’t find an easy way to build it naturally, and you'd recommend a refactor to make the whole thing cleanly, stop your work ahead of time and say so.
