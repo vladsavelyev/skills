@@ -22,9 +22,9 @@ this skill adopts them on the first ship.
 reading or running there gives wrong answers. Prefix every command with `cd <worktree> &&`
 (the shell's cwd resets between calls), and never read from the main checkout or another worktree.
 
-`feature` picks the gh account named like the repo's owner by itself. For your own `gh` and
-`git push` calls in a repo whose owner is a logged-in gh account other than the active one,
-prefix them with `GH_TOKEN=$(gh auth token --user <owner>)`.
+`feature` picks the gh account by itself: the active one for a repo owned by it or one of its
+orgs, the other logged-in account for any other repo. Your own `gh` and `git push` calls follow
+the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` when it's personal.
 
 ## Commands
 
