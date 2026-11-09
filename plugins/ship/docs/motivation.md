@@ -146,6 +146,12 @@ session that's already open.
   usable across other repos before/without merging back. The original branch/PR/issue were
   closed and deleted to avoid divergence; this repo is the sole source of truth.
 
+**7. Deferred debt left open → a decision at close-out.** Deferred and low problems stayed open
+"so the debt stays visible", but after the merge nothing ever looked at them: the first feature to
+ship under the split skills left two open under a closed parent, with no owner and no plan. Close-out
+now refuses until each open problem is a `follow-up` (backlog, on purpose) or `wontfix` (closed as
+not planned), and the human makes that call.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

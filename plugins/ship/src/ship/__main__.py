@@ -401,6 +401,42 @@ def cmd_problem_reject(args: argparse.Namespace) -> None:
     print(f"Rejected problem #{args.number}")
 
 
+def _require_open_problem(args: argparse.Namespace) -> dict:
+    sub = _require_problem(args.branch or current_branch(), args.number)
+    if sub["state"] != "OPEN":
+        sys.exit(f"#{args.number} is already closed; a close-out decision is only for open problems.")
+    return sub
+
+
+def cmd_problem_follow_up(args: argparse.Namespace) -> None:
+    """Close-out decision: keep this problem open as a backlog issue, on purpose."""
+    sub = _require_open_problem(args)
+    # Labels may predate these two (a repo onboarded on an older CLI); creating them is idempotent.
+    github.init_labels()
+    github.comment(args.number, f"📌 Follow-up — shipped unfixed, kept open as a backlog issue: {args.reason}")
+    github.add_label(args.number, problems.FOLLOW_UP)
+    print(f"Problem #{args.number} [{problems.severity(sub)}] is a follow-up (open, in the backlog)")
+
+
+def cmd_problem_wontfix(args: argparse.Namespace) -> None:
+    """Close-out decision: a real problem nobody will fix. Closed as not planned, with the reason."""
+    _require_open_problem(args)
+    github.init_labels()
+    github.add_label(args.number, problems.WONTFIX)
+    github.close_issue(args.number, f"🙅 Won't fix — not planned: {args.reason}", not_planned=True)
+    print(f"Problem #{args.number} closed as not planned")
+
+
+def _undecided_refusal(issue: int, triaged: problems.Triage) -> str:
+    listed = "\n".join(f"  #{s['number']} [{problems.severity(s)}] {s['title']}" for s in triaged.undecided)
+    return (
+        f"Refusing to close out #{issue}: {len(triaged.undecided)} problem(s) are still open with no "
+        f"close-out decision:\n{listed}\n"
+        f'Decide each, with a reason: `feature problem follow-up <#> --reason "…"` keeps it open as a '
+        f'backlog issue, `feature problem wontfix <#> --reason "…"` closes it as not planned. Then re-run.'
+    )
+
+
 def cmd_problem_block(args: argparse.Namespace) -> None:
     """Revoke a deferral: this problem holds the merge after all.
 
@@ -660,6 +696,10 @@ def cmd_merge(args: argparse.Namespace) -> None:
                 f"Use --force to record it anyway."
             )
 
+    # Problems that ship open must each have been decided, or nothing ever visits them again.
+    if triaged.undecided:
+        sys.exit(_undecided_refusal(issue, triaged))
+
     # Name what actually shipped, derived from the triage rather than asserted. Deferred and
     # low-severity problems stay open on purpose, and on the --force path there may be blocking
     # problems too — a note claiming "no blocking problems" there would put a false statement in the
@@ -722,16 +762,10 @@ def _abandoned_note(pr: int, triaged: problems.Triage) -> str:
         f"`feature reconcile`. If the work resumed or landed under a different PR, reopen this issue "
         f"and re-link it with `feature pr <number>`."
     )
-    if triaged.blocking or triaged.debt:
-        # Problems filed against code that never shipped are moot, but closing them here would
-        # decide that for the reviewer — some describe pre-existing defects the review merely found.
-        # Name them so somebody can triage rather than leaving them silently under a closed parent.
-        still_open = ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.blocking + triaged.debt)
-        note += (
-            f"\n\n{len(triaged.blocking) + len(triaged.debt)} problem(s) filed against it are still "
-            f"open: {still_open}. They describe code that never merged — close the ones that only "
-            f"existed in this branch, keep any that name a pre-existing defect."
-        )
+    # Reconcile only gets here once every open problem is a decided follow-up; name them.
+    follow_ups = ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.blocking + triaged.debt)
+    if follow_ups:
+        note += f"\n\nKept open as follow-ups: {follow_ups}."
     return note
 
 
@@ -818,6 +852,16 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
         # means an old schema has to be upgraded first, right here: `feature migrate` resolves its
         # issue through the branch's git config and these branches are gone.
         triaged = _triage(issue)
+        # Every problem still open needs a close-out decision first, merged or abandoned alike: once
+        # the feature is closed, nothing would ever come back to an undecided one.
+        if triaged.undecided:
+            refs = ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.undecided)
+            print(
+                f"#{issue} ({row['title']}): PR #{pr} {pr_state}, but {len(triaged.undecided)} open problem(s) "
+                f"need a close-out decision first: {refs} — `feature problem follow-up|wontfix <#> --reason …`"
+            )
+            needs_human += 1
+            continue
         merged = pr_state == "MERGED"
         upgrade = "" if state["schema"] == SCHEMA else f" + state upgraded from schema {state['schema']}"
         if args.dry_run:
@@ -1006,6 +1050,16 @@ def build_parser() -> argparse.ArgumentParser:
     pj.add_argument("--reason", required=True, help="Why this is not a real problem")
     pj.add_argument("--branch")
     pj.set_defaults(func=cmd_problem_reject)
+    pf = psub.add_parser("follow-up", help="Close-out decision: keep an open problem as a backlog issue")
+    pf.add_argument("number", type=int)
+    pf.add_argument("--reason", required=True, help="Why it's worth fixing later")
+    pf.add_argument("--branch")
+    pf.set_defaults(func=cmd_problem_follow_up)
+    pw = psub.add_parser("wontfix", help="Close-out decision: close an open problem as not planned")
+    pw.add_argument("number", type=int)
+    pw.add_argument("--reason", required=True, help="Why it won't be fixed")
+    pw.add_argument("--branch")
+    pw.set_defaults(func=cmd_problem_wontfix)
     pb = psub.add_parser("block", help="Revoke a disposition: this problem holds the merge after all")
     pb.add_argument("number", type=int)
     pb.add_argument("--reason", required=True, help="What changed — why it must block now")

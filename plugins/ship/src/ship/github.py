@@ -18,6 +18,8 @@ LABELS = [
     ("sev:low", "0e8a16", "Low severity problem (tracked debt, does not block)"),
     ("deferred", "c5def5", "Real problem, deliberately not fixed in this PR (reason on the issue)"),
     ("rejected", "cfd3d7", "Not a real problem — false positive or by design (reason on the issue)"),
+    ("follow-up", "1d76db", "Shipped unfixed, kept open as a backlog issue (reason on the issue)"),
+    ("wontfix", "ffffff", "Real problem, closed as not planned (reason on the issue)"),
 ]
 
 
@@ -403,8 +405,9 @@ def comment(number: int, text: str) -> None:
     run(["gh", "issue", "comment", str(number), "--body", text])
 
 
-def close_issue(number: int, comment_text: str) -> None:
-    run(["gh", "issue", "close", str(number), "--comment", comment_text])
+def close_issue(number: int, comment_text: str, *, not_planned: bool = False) -> None:
+    reason = ["--reason", "not planned"] if not_planned else []
+    run(["gh", "issue", "close", str(number), "--comment", comment_text, *reason])
 
 
 def reopen_issue(number: int, comment_text: str) -> None:

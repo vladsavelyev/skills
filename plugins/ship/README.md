@@ -122,6 +122,8 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue as fixed. |
 | `feature problem defer <number> --reason <why>` | Real problem, shipped unfixed: stays open, stops blocking, reason recorded. |
 | `feature problem reject <number> --reason <why>` | False positive / by design: closed with the reasoning. |
+| `feature problem follow-up <number> --reason <why>` | Close-out decision: keep an open problem as a backlog issue. |
+| `feature problem wontfix <number> --reason <why>` | Close-out decision: close an open problem as not planned. |
 | `feature problem block <number> --reason <why>` | Revoke a disposition so the problem blocks again (inverse of `defer`). |
 | `feature problem list [--open] [--blocking]` | List problem sub-issues with severity and disposition. |
 | `feature budget [--set <n> \| --auto]` | Show or override the review-round budget. |
@@ -129,7 +131,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |
 | `feature gate [--branch <b>]` | Exit 0 = OPEN, 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION (1 and 2 stay "the command failed"). |
-| `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks the gate *and* that the PR really merged; names the debt that ships). |
+| `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks the gate *and* that the PR really merged; refuses while an open problem has no follow-up/wontfix decision). |
 | `feature reconcile [--branch <b>] [--dry-run]` | Sweep the repo: close out every feature whose PR already merged, close as `abandoned` the ones whose PR was closed unmerged, and repair the issue link on still-open PRs. |
 | `feature migrate [--branch <b>]` | Upgrade a repo for this CLI version: (re-)create the workflow labels and the feature issue's state block. Run it once per repo after upgrading. |
 
