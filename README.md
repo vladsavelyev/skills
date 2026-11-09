@@ -17,8 +17,8 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 
 [agents/AGENTS.md](agents/AGENTS.md) holds my rules for coding agents, on every machine and in every
 project. `~/.claude/CLAUDE.md` imports it from the marketplace clone
-(`@~/.claude/plugins/marketplaces/vlad-skills/agents/AGENTS.md`), and `~/.codex/AGENTS.md` is a
-symlink to the same file; `fleet` checks both. The repo's own instructions are the root
+(`@~/.claude/plugins/marketplaces/vlad-skills/agents/AGENTS.md`), and `fleet` generates
+`~/.codex/AGENTS.md` from the same file plus the machine's own part of `~/.claude/CLAUDE.md`. The repo's own instructions are the root
 [AGENTS.md](AGENTS.md).
 
 ## Setup

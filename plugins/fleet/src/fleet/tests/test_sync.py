@@ -137,57 +137,55 @@ def test_agents_md_without_codex_needs_nothing(tmp_path, monkeypatch):
     assert not (home / ".codex").exists()
 
 
-def test_agents_md_replaces_codex_file_with_a_link_and_keeps_the_old_one(tmp_path, monkeypatch):
+def _codex(home) -> str:
+    return (home / fleet.CODEX_AGENTS_MD).read_text()
+
+
+def test_agents_md_generates_codex_rules_with_the_machine_part(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    (home / ".codex").mkdir()
+    assert _sync(apply=False).unresolved == 1
+    assert _sync(apply=True).unresolved == 0
+    assert _codex(home) == fleet.codex_agents_md(AGENTS, "rules\n", "mine\n")
+    assert _codex(home).endswith("\n\nrules\n\nmine\n")
+    assert not list((home / ".codex").glob("AGENTS.md.bak-*"))
+    assert _sync(apply=False).unresolved == 0
+
+
+def test_agents_md_regenerates_codex_rules_when_either_half_changes(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    (home / ".codex").mkdir()
+    _sync(apply=True)
+    (home / AGENTS).write_text("new rules\n")
+    assert _sync(apply=False).unresolved == 1
+    _sync(apply=True)
+    (home / fleet.CLAUDE_MD).write_text(f"@~/{AGENTS}\n" + fleet.MARKER + "\nmoved\n")
+    assert _sync(apply=False).unresolved == 1
+    _sync(apply=True)
+    assert _codex(home).endswith("\n\nnew rules\n\nmoved\n")
+
+
+def test_agents_md_keeps_a_hand_written_codex_file(tmp_path, monkeypatch):
     home = _home(tmp_path, monkeypatch)
     (home / ".codex").mkdir()
     (home / fleet.CODEX_AGENTS_MD).write_text("old codex rules\n")
-    (home / fleet.CODEX_CONFIG).write_text('model = "m"\n')
-    assert _sync(apply=False).unresolved == 2  # the link and the instructions
-    assert _sync(apply=True).unresolved == 0
-    link = home / fleet.CODEX_AGENTS_MD
-    assert link.is_symlink() and link.resolve() == (home / AGENTS).resolve()
+    _sync(apply=True)
     [backup] = (home / ".codex").glob("AGENTS.md.bak-*")
     assert backup.read_text() == "old codex rules\n"
+
+
+def test_agents_md_replaces_a_codex_symlink_and_leaves_its_target(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    (home / ".codex").mkdir()
+    (home / fleet.CODEX_AGENTS_MD).symlink_to(home / AGENTS)
+    assert _sync(apply=False).unresolved == 1
+    _sync(apply=True)
+    assert not (home / fleet.CODEX_AGENTS_MD).is_symlink()
+    assert (home / AGENTS).read_text() == "rules\n"
+    assert not list((home / ".codex").glob("AGENTS.md.bak-*"))
     assert _sync(apply=False).unresolved == 0
 
 
 def test_agents_md_flags_a_missing_import_or_file(tmp_path, monkeypatch):
     _home(tmp_path, monkeypatch, imports=False, rules=False)
     assert _sync(apply=True).unresolved == 2
-
-
-OWN = "### This machine\n\nThis machine is `zebra`.\n"
-
-
-def test_codex_instructions_go_first_and_round_trip():
-    config = 'model = "m"\n\n[model_providers.x]\nname = "X"\n'
-    new = fleet.with_codex_instructions(config, OWN, "here")
-    assert new.startswith(fleet.CODEX_BLOCK_START)
-    parsed = fleet.tomllib.loads(new)
-    assert parsed["developer_instructions"] == OWN
-    assert parsed["model"] == "m" and parsed["model_providers"]["x"]["name"] == "X"
-    assert fleet.with_codex_instructions(new, OWN, "here") == new
-
-
-def test_codex_instructions_replace_only_fleets_block():
-    first = fleet.with_codex_instructions('model = "m"\n', "old\n", "here")
-    new = fleet.with_codex_instructions(first, OWN, "here")
-    assert "old" not in new and new.count(fleet.CODEX_BLOCK_START) == 1
-    assert fleet.tomllib.loads(new)["developer_instructions"] == OWN
-
-
-def test_codex_instructions_refuse_a_hand_set_key_and_a_triple_quote():
-    with pytest.raises(RuntimeError):
-        fleet.with_codex_instructions('developer_instructions = "mine"\n', OWN, "here")
-    with pytest.raises(RuntimeError):
-        fleet.with_codex_instructions("", "has ''' in it\n", "here")
-
-
-def test_agents_md_puts_the_machine_part_into_codex_config(tmp_path, monkeypatch):
-    home = _home(tmp_path, monkeypatch)
-    (home / ".codex").mkdir()
-    (home / fleet.CODEX_CONFIG).write_text('model = "m"\n')
-    assert _sync(apply=False).unresolved == 2  # the link and the instructions
-    assert _sync(apply=True).unresolved == 0
-    assert fleet.tomllib.loads((home / fleet.CODEX_CONFIG).read_text())["developer_instructions"] == "mine\n"
-    assert _sync(apply=False).unresolved == 0
