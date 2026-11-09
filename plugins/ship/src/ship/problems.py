@@ -12,6 +12,12 @@ the issue, so shipping known debt is an explicit, auditable act — not a silent
 Deferred problems stay open and are named at merge time; rejected ones are closed, because a
 non-problem is not debt.
 
+**Close-out needs a decision on every problem still open.** Deferred and low-severity problems ship
+open, and once the PR merges nothing ever visits them again: the feature issue closes, no session
+works on the branch, and "tracked debt" turns into a graveyard. So closing a feature out requires
+each open problem to be either a `follow-up` (kept open as a backlog issue, on purpose) or closed
+as `wontfix` (not planned). Both take a reason.
+
 Only `deferred` suppresses blocking. A `rejected` problem expresses itself by being *closed*, so if
 one is OPEN again someone overturned the rejection — a later review round rediscovering it with a
 real repro, per the skill's regression rule — and it must hold the merge like any other open
@@ -30,6 +36,8 @@ UNKNOWN_SEV = "sev:?"
 
 DEFERRED = "deferred"
 REJECTED = "rejected"
+FOLLOW_UP = "follow-up"
+WONTFIX = "wontfix"
 DISPOSITIONS = (DEFERRED, REJECTED)
 
 
@@ -45,11 +53,7 @@ def disposition(sub: dict) -> str | None:
 
 def is_blocking(sub: dict) -> bool:
     """True if this sub-issue holds the merge gate. See the module docstring for the two rules."""
-    return (
-        sub["state"] == "OPEN"
-        and severity(sub) not in NON_BLOCKING_SEVS
-        and DEFERRED not in sub["labels"]
-    )
+    return sub["state"] == "OPEN" and severity(sub) not in NON_BLOCKING_SEVS and DEFERRED not in sub["labels"]
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,7 @@ class Triage:
 
     blocking: list[dict]  # open, not explicitly low, not deferred — these hold the gate
     debt: list[dict]  # open, non-blocking (low severity, or disposed) — ships with the PR
+    undecided: list[dict]  # open and not yet a `follow-up` — these hold the close-out
 
     def summary(self) -> str:
         """One line naming the debt that ships, so it is never invisible at merge time."""
@@ -72,4 +77,5 @@ def triage(subs: list[dict]) -> Triage:
     return Triage(
         blocking=[s for s in open_subs if is_blocking(s)],
         debt=[s for s in open_subs if not is_blocking(s)],
+        undecided=[s for s in open_subs if FOLLOW_UP not in s["labels"]],
     )

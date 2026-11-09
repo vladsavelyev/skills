@@ -42,6 +42,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
 | Sync with base | `feature sync [--stack]` |
 | Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION; 1/2 mean the command failed |
+| Close-out decision | `feature problem follow-up\|wontfix <#> --reason "…"` |
 | Close out | `feature merge`, or `feature reconcile [--dry-run]` repo-wide |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
 
@@ -116,6 +117,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      Never `gh issue reopen`.
    - Same as a REJECTED problem → skip, unless the new repro answers the rejection reason. Then
      `block` it. A problem disputed twice goes to the human: escalate with both sides.
+   - Same as a WONTFIX problem (closed as not planned) → skip, unless the new repro makes it worse
+     than the reason allowed for. Then file it fresh at its real severity.
    - Not caused by this PR → never blocking. File it `--sev low`, or defer it.
    - Re-judge severity yourself, whatever Sol said: `high` = data loss, security hole, crash, or
      silently wrong result on a realistic path; `med` = real bug on a narrower path; `low` =
@@ -138,6 +141,18 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 - `NEEDS_DECISION` (20): no more rounds. `feature escalate` with exactly one recommendation: ship
   it (defer the rest with reasons), buy one round (`feature budget --set`, only with a concrete
   reason), split the PR, or redesign.
+
+## Close out
+
+After the human merges, every problem still open needs a decision before the feature closes:
+`feature merge` and `feature reconcile` refuse until there is one, because once the feature is
+closed nothing comes back to an undecided problem. The two decisions:
+
+- `feature problem follow-up <#> --reason "…"`: worth fixing later; stays open as a backlog issue.
+- `feature problem wontfix <#> --reason "…"`: not worth fixing; closed as not planned.
+
+Don't decide them yourself. List them in the report with one recommendation each and the reason,
+and let the caller ask the user. Then run `feature merge`.
 
 ## Rules
 
@@ -174,4 +189,6 @@ Always include these caller rules in `Next` when they apply:
   asking the user."
 - With `OPEN`: "Tell the user it's safe to merge and what debt ships. After they merge, call
   `Skill(ship:ship)` to close out."
+- With open problems at close-out: "Ask the user to decide each (follow-up or wontfix, with your
+  recommendation), then call `Skill(ship:ship)` with their decisions to close out."
 - With `NEEDS_DECISION`: "Stop. Present the recommendation to the user."

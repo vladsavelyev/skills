@@ -135,6 +135,12 @@ reason that is posted on the sub-issue, so shipping known debt is an explicit, a
 than a silent severity downgrade. Deferred problems stay **open** on purpose and are named in the
 merge comment: debt you can't see isn't tracked.
 
+Open alone wasn't enough, though: once the PR merged, the feature issue closed and nothing ever
+visited its open problems again, so "tracked debt" became a graveyard of issues under closed parents.
+So close-out (`feature merge`, `feature reconcile`) refuses while any problem is still open without
+a decision. Each one becomes a `follow-up` (kept open as a backlog issue, on purpose) or `wontfix`
+(closed as not planned), both with a reason on the issue. The skill leaves that call to the human.
+
 Only `deferred` suppresses blocking. `rejected` expresses itself by *closing* the issue, so an OPEN
 issue still carrying the label means someone overturned the rejection — a later round rediscovering
 it with a real repro — and it blocks like anything else. `feature problem block` is the explicit way
@@ -270,6 +276,8 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
 | `feature problem defer <number> --reason <why>` | Real problem, deliberately not fixed in this PR: labels it `deferred`, posts the reason, keeps it **open** but out of the blocking set. |
 | `feature problem reject <number> --reason <why>` | Not a real problem (false positive / by design): labels it `rejected` and closes it with the reasoning. |
+| `feature problem follow-up <number> --reason <why>` | Close-out decision: keep an open problem as a backlog issue (label `follow-up`). |
+| `feature problem wontfix <number> --reason <why>` | Close-out decision: close an open problem as not planned (label `wontfix`). |
 | `feature problem block <number> --reason <why>` | Revoke a disposition — drops `deferred`, re-opens if closed — so the problem holds the merge again. The inverse of `defer`, needed because a later round can rediscover a deferred problem with a repro that changes the call. |
 | `feature problem list [--open] [--blocking]` | List problem sub-issues with severity and disposition. `--blocking` shows only what holds the gate. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |

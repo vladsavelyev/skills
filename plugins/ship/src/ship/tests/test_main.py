@@ -95,14 +95,13 @@ def test_abandoned_note_never_claims_a_merge():
     # The work never landed: saying "merged" here would put a false claim in the permanent record.
     assert "Abandoned" in note
     assert "Merged" not in note
-    # Its problems describe code that never shipped, but whether each is moot is the reviewer's
-    # call — they are named for triage, not closed silently.
-    assert "#9 [sev:med]" in note
+    # By the time reconcile writes this, every open problem is a decided follow-up; it names them.
+    assert "follow-ups: #9 [sev:med]" in note
 
 
 def test_abandoned_note_is_short_when_there_is_nothing_left_open():
     note = cli._abandoned_note(123, problems.triage([_problem(9, "sev:med", state="CLOSED")]))
-    assert "still\nopen" not in note and "still open" not in note
+    assert "follow-ups" not in note
 
 
 def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str | None) -> dict:
@@ -150,3 +149,26 @@ def test_adopt_without_a_pr_or_parent_bases_on_main(monkeypatch):
     did = _stub_adopt(monkeypatch, parent=None, pr=None, pr_base=None)
     cli.cmd_adopt(_adopt_args())
     assert did["parent"] == ["main"]
+
+
+def test_triage_marks_open_problems_without_a_follow_up_label_undecided():
+    triaged = problems.triage(
+        [
+            _problem(1, "sev:low"),
+            _problem(2, "sev:high", extra=(problems.DEFERRED,)),
+            _problem(3, "sev:low", extra=(problems.FOLLOW_UP,)),
+            _problem(4, "sev:med", state="CLOSED"),
+        ]
+    )
+    assert [s["number"] for s in triaged.undecided] == [1, 2]
+
+
+def test_merge_refuses_while_open_problems_are_undecided(monkeypatch):
+    state = _merged_state()
+    triaged = problems.triage([_problem(5, "sev:low"), _problem(6, "sev:low", extra=(problems.FOLLOW_UP,))])
+    decision = cli.gate.GateDecision(verdict=cli.gate.Verdict.OPEN, reasons=[], next_step="", rounds_used=1, budget=2)
+    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, state, triaged, decision))
+    monkeypatch.setattr(github, "pr_state", lambda number: "MERGED")
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
+    assert "#5 [sev:low]" in str(exc.value) and "#6" not in str(exc.value)
