@@ -13,7 +13,8 @@ it. A check reports drift; `--apply` fixes what can be fixed without a human:
 - `~/.claude/settings*.json`: every key copied, except the machine's own (`machine_settings`).
 - `agents_md` (optional): the shared agent instructions file. The shared part of `~/.claude/CLAUDE.md`
   must import it, it must exist on every machine, and wherever Codex is installed
-  `~/.codex/AGENTS.md` must be a symlink to it.
+  `~/.codex/AGENTS.md` must be a symlink to it, and `~/.codex/config.toml` must carry the machine's
+  own part of `~/.claude/CLAUDE.md` as `developer_instructions`.
 
 Reported only: helper commands the statusline and hooks call (`helpers`), and T3 Code, which pins a
 remote's server to the app's own version every time it connects.
@@ -473,8 +474,9 @@ def import_line(agents_md: str) -> str:
 
 def sync_agents_md(machines: list[Machine], config: Config, apply: bool, report: Report) -> None:
     """The file CLAUDE.md imports has to exist everywhere: a missing `@` import loads nothing, without a
-    word, and every session runs without its rules. Codex reads only `~/.codex/AGENTS.md`, so it gets a
-    symlink to the same file."""
+    word, and every session runs without its rules. Codex has no imports: it reads one global file,
+    `~/.codex/AGENTS.md`, which becomes a symlink to the same rules, and the machine's own part of
+    CLAUDE.md goes into its `developer_instructions`."""
     path = config.agents_md
     if path is None:
         return
@@ -491,10 +493,12 @@ def sync_agents_md(machines: list[Machine], config: Config, apply: bool, report:
                 f"{machine.name}: no ~/{path}, so its CLAUDE.md imports nothing. Pull the repo it lives in "
                 "there (for a plugin marketplace, `claude plugin marketplace update <name>`)"
             )
-        sync_codex_link(machine, path, apply, report)
+        if sync_codex_link(machine, path, apply, report):
+            sync_codex_instructions(machine, apply, report)
 
 
-def sync_codex_link(machine: Machine, path: str, apply: bool, report: Report) -> None:
+def sync_codex_link(machine: Machine, path: str, apply: bool, report: Report) -> bool:
+    """Link Codex's global instructions to the shared rules. Returns whether Codex is installed."""
     home = machine.out(["sh", "-c", 'printf %s "$HOME"'])
     target = f"{home}/{path}"
     probe = (
@@ -504,10 +508,10 @@ def sync_codex_link(machine: Machine, path: str, apply: bool, report: Report) ->
     state = machine.out(["sh", "-c", probe, "sh", f"{home}/.codex", f"{home}/{CODEX_AGENTS_MD}"])
     if state == "none":
         report.ok(f"{machine.name}: no Codex (~/.codex), nothing to link")
-        return
+        return False
     if state == f"link {target}":
         report.ok(f"{machine.name}: ~/{CODEX_AGENTS_MD} links to it")
-        return
+        return True
     report.drift(
         f"{machine.name}: ~/{CODEX_AGENTS_MD} is {state.replace('link ', 'a link to ')}, not a link to it", apply
     )
@@ -517,6 +521,65 @@ def sync_codex_link(machine: Machine, path: str, apply: bool, report: Report) ->
         machine.run(["sh", "-c", script, "sh", f"{home}/{CODEX_AGENTS_MD}", target, backup])
         kept = f" (old file: {backup})" if state == "file" else ""
         report.fixed(f"{machine.name}: ~/{CODEX_AGENTS_MD} now links to ~/{path}{kept}")
+    return True
+
+
+CODEX_CONFIG = ".codex/config.toml"
+CODEX_BLOCK_START = (
+    "# fleet: this machine's own instructions (its ~/.claude/CLAUDE.md below the marker), rewritten by `fleet --apply`"
+)
+CODEX_BLOCK_END = "# fleet: end of this machine's own instructions"
+TOML_LITERAL = "'''"
+
+
+def codex_instructions_block(own: str) -> str:
+    """A top-level `developer_instructions` key holding the machine's own instructions, as a TOML
+    multi-line literal string so nothing in the text needs escaping."""
+    text = own.strip() + "\n"
+    if TOML_LITERAL in text:
+        raise RuntimeError(f"the machine's own part of CLAUDE.md contains {TOML_LITERAL}, which TOML can't hold here")
+    return f"{CODEX_BLOCK_START}\ndeveloper_instructions = {TOML_LITERAL}\n{text}{TOML_LITERAL}\n{CODEX_BLOCK_END}\n"
+
+
+def with_codex_instructions(config: str, own: str, where: str) -> str:
+    """Codex's config.toml with fleet's block replaced, or put first: a top-level key has to come
+    before the first table. Refuses a `developer_instructions` someone set by hand rather than
+    overwrite it, and checks the result parses back to exactly this text."""
+    block = codex_instructions_block(own)
+    if CODEX_BLOCK_START in config:
+        before, _, rest = config.partition(CODEX_BLOCK_START + "\n")
+        _, sep, after = rest.partition(CODEX_BLOCK_END + "\n")
+        if not sep:
+            raise RuntimeError(f"{where}: ~/{CODEX_CONFIG} has\n  {CODEX_BLOCK_START}\nbut no\n  {CODEX_BLOCK_END}")
+        new = before + block + after
+    elif re.search(r"(?m)^\s*developer_instructions\s*=", config):
+        raise RuntimeError(
+            f"{where}: ~/{CODEX_CONFIG} sets developer_instructions by hand; move that text into the machine's "
+            f"own part of ~/{CLAUDE_MD} and delete the key, so fleet can manage it"
+        )
+    else:
+        new = block + "\n" + config
+    if tomllib.loads(new).get("developer_instructions") != own.strip() + "\n":
+        raise RuntimeError(f"{where}: rewriting ~/{CODEX_CONFIG} would not round-trip developer_instructions")
+    return new
+
+
+def sync_codex_instructions(machine: Machine, apply: bool, report: Report) -> None:
+    claude_md = machine.read(CLAUDE_MD)
+    config = machine.read(CODEX_CONFIG)
+    if claude_md is None or config is None:
+        missing = CLAUDE_MD if claude_md is None else CODEX_CONFIG
+        report.problem(f"{machine.name}: has Codex but no ~/{missing}, so Codex gets no machine instructions")
+        return
+    _, own = split_claude_md(claude_md, machine.name)
+    new = with_codex_instructions(config, own, machine.name)
+    if new == config:
+        report.ok(f"{machine.name}: Codex developer_instructions match its CLAUDE.md")
+        return
+    report.drift(f"{machine.name}: Codex developer_instructions differ from its CLAUDE.md's own part", apply)
+    if apply:
+        backup = machine.write(CODEX_CONFIG, new)
+        report.fixed(f"{machine.name}: updated ~/{CODEX_CONFIG} (old file: ~/{backup})")
 
 
 # --- settings ---
