@@ -13,8 +13,12 @@ The **base branch** is the branch the PR merges into
 (`gh pr view <pr> --json baseRefName`). On a stacked PR that is the parent feature branch, not
 `main`. Every "keep up with the base" step below means that branch.
 
-On `vladsavelyev/*` repos, run every `gh` and `git push` with
-`GH_TOKEN=$(gh auth token --user vladsavelyev)` in front.
+Use the active gh account for a repo owned by it or one of its orgs (`gh api user/orgs`). For any
+other repo, run every `gh` and `git push` with `GH_TOKEN=$(gh auth token --user <personal login>)`
+in front, the personal login being the other account in `gh auth status`.
+
+**A branch tracked by ship** (`feature status` shows a feature, not "untracked") has its own
+review loop and merge gate. On one, the steps marked *ship-tracked* below replace the plain ones.
 
 ## Waiting
 
@@ -54,6 +58,11 @@ its checks with `gh api repos/<owner>/<repo>/commits/<sha>/check-runs`.
 - For a finding not worth addressing, reply with the reason and resolve the thread. Post every
   comment and reply with the `pr-comments:pr-comments` skill.
 - Screenshots or videos help reviewers when you have a way to upload them.
+- *Ship-tracked:* when a bot finding is the same as an open ship problem
+  (`feature problem list --open`), handle the problem too: `feature problem resolve <#> --commit
+  <sha>` after the fix, or `feature problem reject <#> --reason "…"` when you dismiss it. Every
+  push moves HEAD past ship's last review, so once CI is green, call `Skill(ship:ship)` for the
+  next review round and follow its report.
 
 Keep the PR the size the user's goal needs. Review loops grow a PR one cheap-looking fix at a time.
 Fix real bugs in the intended case. Decline the rest with a written reason and list them as
@@ -65,12 +74,14 @@ performance costs. Prefer the fix that deletes or narrows code.
 `watch_pull_request` reports conflicts but not a PR falling behind, so check that yourself before
 calling the PR ready: `gh pr view <pr> --json mergeStateStatus` shows `BEHIND` or `DIRTY`, and
 `git log HEAD..origin/<base>` shows what landed on the base. Update the branch with `git town sync`
-(it merges the base in, so no force-push). If the repo is set to rebase instead, ask before
-force-pushing.
+(it merges the base in, so no force-push). *Ship-tracked:* use `feature sync [--stack]` instead.
+It runs the same sync and also records that the base moved, so the review rounds before it stop
+counting against ship's budget. A plain `git town sync` leaves them counted. If the repo is set to
+rebase instead, ask before force-pushing.
 
 On a stack:
 
-- When the parent PR merges, `git town sync` moves this branch onto the parent's own base. Check
+- When the parent PR merges, the sync moves this branch onto the parent's own base. Check
   the PR's base on GitHub afterwards and fix it with `gh pr edit <pr> --base <branch>` if it still
   names the merged branch.
 - Merge bottom-up. A PR whose base is another feature branch merges into that branch, not into
@@ -85,8 +96,11 @@ The PR is **ready** when, on the latest head:
 - no review thread is unresolved;
 - it is not `BEHIND` or `DIRTY`, and nothing that landed on the base since the last green run
   touches the PR's files;
-- on a branch tracked by ship, `feature gate` passes (see `ship:ship`).
+- *ship-tracked:* the latest `Skill(ship:ship)` report says the gate is `OPEN`. Don't run
+  `feature gate` yourself to decide this; a review round has to cover the head first, and only
+  ship runs one.
 
 Stop there and report it ready. Merge only when the user explicitly asked for a merge. Right before
 merging, `git fetch` and check the gate again; if the base moved, sync, push, and wait for green
-again.
+again. *Ship-tracked:* never merge; ship leaves the merge to the user. Report it ready with the
+debt ship named, and after the user merges, call `Skill(ship:ship)` to close the feature out.
