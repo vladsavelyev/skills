@@ -1,6 +1,6 @@
 import pytest
 
-from ship import assess, github
+from ship import assess
 
 
 @pytest.mark.parametrize(
@@ -44,27 +44,6 @@ def test_review_depth_rejects_unknown_values():
         assess.review_depth(size="M", risk="medium", complexity="low")
 
 
-def test_assessment_goes_above_the_feature_reference():
-    body = "Why we need it.\n\nCloses #7 <!-- ship -->\n"
-    out = github.with_assessment(body, "depth high")
-    assert (
-        out
-        == "Why we need it.\n\n<!-- ship:assessment -->\ndepth high\n<!-- /ship:assessment -->\n\nCloses #7 <!-- ship -->\n"
-    )
-
-
-def test_assessment_is_replaced_in_place():
-    body = github.with_assessment("Motivation.\n", "old")
-    out = github.with_assessment(body + "\nCloses #3 <!-- ship -->\n", "new")
-    assert "old" not in out
-    assert out.count("<!-- ship:assessment -->") == 1
-    assert out.index("new") < out.index("Closes #3")
-
-
-def test_assessment_on_empty_body():
-    assert github.with_assessment("", "x") == "<!-- ship:assessment -->\nx\n<!-- /ship:assessment -->\n"
-
-
 def test_path_risk_high_on_a_sensitive_hit():
     assert assess.path_risk(["README.md", "src/auth/x.py"], ["src/auth/x.py"]) == "high"
 
@@ -89,14 +68,54 @@ def test_last_grade_skips_ungraded_entries():
     assert assess.last_grade([{"run": 1}]) is None
 
 
-def test_description_replaces_prose_and_keeps_our_sections():
-    body = github.with_assessment("Old motivation.\n\nCloses #7 <!-- ship -->\n", "grade")
-    out = github.with_description(body, "New motivation.\n")
-    assert (
-        out
-        == "New motivation.\n\n<!-- ship:assessment -->\ngrade\n<!-- /ship:assessment -->\n\nCloses #7 <!-- ship -->\n"
+def _review(grade: dict, history: list[dict], **kw) -> assess.Review:
+    defaults = {"size": "M", "changed_files": 8, "changed_lines": 412, "next_depth": "max"}
+    return assess.Review(grade=grade, history=history, **(defaults | kw))
+
+
+def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
+    grade = {"risk": "high", "complexity": "med", "why": " whole-body rewrites can corrupt the ref "}
+    history = [
+        {"run": 1, "depth": "high", "found": {"low": [40]}, "regressions": 0},
+        {"event": "base-advanced"},
+        {"run": 2, "depth": "xhigh", "found": {"high": [41], "med": [42, 44]}, "regressions": 1},
+        {"run": 3, "depth": "xhigh", "found": {}, "regressions": 0},
+    ]
+    assert assess.render(issue=39, review=_review(grade, history)) == (
+        "> **Risk: high**: whole-body rewrites can corrupt the ref\n"
+        "> Complexity: medium, size: M (8 files, 412 lines)\n"
+        "> Feature tracking issue: closes #39\n"
+        "> **Review round 1** (high). Findings: 1 low (#40).\n"
+        "> **Review round 2** (xhigh). Findings: 1 high (#41), 2 med (#42, #44), 1 of them back after a fix.\n"
+        "> **Review round 3** (xhigh). Findings: none. Next round would run at max."
     )
 
 
-def test_description_on_a_body_without_our_sections():
-    assert github.with_description("Old.", "New.") == "New.\n"
+def test_render_before_any_review_is_the_reference_alone():
+    # `closes` is what makes GitHub close the issue on merge.
+    assert assess.render(issue=39, review=None) == "> Feature tracking issue: closes #39"
+
+
+def test_render_lists_a_hand_given_severity_after_the_known_ones():
+    grade = {"risk": "low", "complexity": "low", "why": "docs"}
+    history = [{"run": 1, "depth": "low", "found": {"critical": [9], "low": [8]}, "regressions": 0}]
+    out = assess.render(issue=39, review=_review(grade, history, next_depth="low"))
+    assert (
+        out.splitlines()[-1]
+        == "> **Review round 1** (low). Findings: 1 low (#8), 1 critical (#9). Next round would run at low."
+    )
+
+
+def test_render_shows_rounds_recorded_before_found_existed():
+    grade = {"risk": "low", "complexity": "low", "why": "docs"}
+    history = [
+        {"run": 1, "placeholder": True},
+        {"run": 2, "new_blocking": 2, "new_low": 1, "regressions": 0},
+        {"run": 3, "depth": "low", "new_blocking": 0, "new_low": 0, "regressions": 0},
+    ]
+    out = assess.render(issue=39, review=_review(grade, history, next_depth="low"))
+    assert out.splitlines()[-3:] == [
+        "> **Review round 1**. Not recorded.",
+        "> **Review round 2**. Findings: 2 blocking, 1 low.",
+        "> **Review round 3** (low). Findings: none. Next round would run at low.",
+    ]

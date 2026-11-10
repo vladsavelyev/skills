@@ -94,6 +94,44 @@ evidence, and is nulled on invalidation, which is why it duplicates the last his
 Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
 than read with guessed-at defaults.
 
+### The PR body
+
+Ship owns one tagged block in the PR body, and it is the only part of the body the CLI edits:
+
+```
+<the author's description>
+
+<!-- ship -->
+> **Risk: low**: only rewrites ship's own tagged block of the PR body
+> Complexity: low, size: M (8 files, 412 lines)
+> Feature tracking issue: closes #39
+> **Review round 1** (high). Findings: 1 low (#40).
+> **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
+> **Review round 3** (medium). Findings: none. Next round would run at low.
+<!-- /ship -->
+
+🤖 Claude Opus 5.5 in Claude Code (T3 Code)
+```
+
+Every command that writes the block (`feature pr`, `feature describe`, `feature review record`,
+`feature reconcile`) renders the whole quote from the feature's state (`assess.render`) and sets
+it between the tags (`prbody.py`), so the block always shows the current state. Before any review
+it is the reference line alone. A body without the block gets it above the author's signature (a
+trailing one-line paragraph starting with `🤖`, the attribution line an agent harness asks for),
+or at the end. `feature describe` takes its input as the new description, as written, with the
+block below it. The grade is Sol's latest; each round's line lists what it found by severity
+(recorded with the round from `--found`), which never changes after the round.
+
+The reference keeps the `closes` keyword: GitHub closes the issue on merge only when the keyword
+comes right before the number (checked on PR #38's `closingIssuesReferences`: a quoted
+`Feature tracking issue: closes #39` closes it, `Feature tracking issue: #39` doesn't).
+
+Before the block held it, the reference was a standalone line, `Closes #<issue> <!-- ship -->`
+(`<!-- feature-workflow -->` before the rename, and the non-closing `Part of #<issue>` before
+that), and the block was tagged `ship:assessment`. PR bodies on GitHub still carry those, so the
+first write under the current tags drops those lines and replaces the old block; after that,
+nothing outside the block is touched.
+
 ## Lifecycle
 
 ```
@@ -199,9 +237,9 @@ first repo to use this workflow reached 17 open tracking issues whose PRs had me
 earlier, all still claiming `in-review`. A step that depends on remembering, at the one moment
 attention has moved on, is not a mechanism.
 
-So the linkage is now GitHub-native and self-firing: `feature pr` writes `Closes #<issue>` into the
-PR body (marked with an invisible `<!-- ship -->` comment (PRs linked before the rename carry `<!-- feature-workflow -->`, which is still recognised) so it can never be confused
-with the PR's own hand-written `Closes #<problem>` lines, which re-linking must not disturb), and
+So the linkage is now GitHub-native and self-firing: `feature pr` writes `closes #<issue>` into
+ship's tagged block of the PR body (see "The PR body"), apart from the PR's own hand-written
+`Closes #<problem>` lines, which re-linking must not disturb, and
 merging closes the tracking issue with nobody in the loop. The original design chose a non-closing
 `Part of #<issue>` deliberately — the umbrella issue outlives the PR, and its problem sub-issues can
 still be open — but "closed with open children" is a state GitHub renders fine, and a closed issue
@@ -265,13 +303,13 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | Command | Does |
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>` (the base must be on origin), a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
-| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description's prose (and optionally the title), keeping the assessment section and the feature reference line. `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
+| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description (and optionally the title), keeping ship's block (see "The PR body"). `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
 | `feature depth [--branch <b>]` | Print the reasoning effort for the next review round (`assess.py`): size from the diff stats; risk from the paths touched (sensitive → high, docs/tests only → low) until a review has graded the PR, then the last grade's risk and complexity. |
 | `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
-| `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
+| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. `high`/`med` block the gate; `low` doesn't. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
 | `feature problem defer <number> --reason <why>` | Real problem, deliberately not fixed in this PR: labels it `deferred`, posts the reason, keeps it **open** but out of the blocking set. |
@@ -312,10 +350,11 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
        └─ duplicate of a tracked problem? (judged by MEANING)
               ├─ matches an OPEN issue      ─▶ skip (already tracked)
               ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
+              │                                (a low one: filed fresh, `block` refuses low)
               ├─ matches a REJECTED one     ─▶ skip, unless the repro answers the rejection
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
                                                     (spec gaps and design smells: always low)
-   6. `feature review record --new-blocking <high+med filed & regressed> --new-low <n>
+   6. `feature review record --found <problems filed & regressed>
                              --regressions <blocking reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
    7. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
@@ -388,10 +427,12 @@ bug as an already-tracked problem: matches an OPEN issue → skip; matches a CLO
 regression (reopen, count as new); distinct → file. It also confirms reproducibility so false
 positives never reach the gate.
 
-`feature review record --new-blocking <n>` takes the count of genuinely-new *blocking* problems plus
-blocking regressions; a clean pass is `--new-blocking 0`, which (with zero open blocking sub-issues)
-opens the gate. `--new-low` doesn't gate anything — it keeps the record honest about what a "clean"
-round actually found. `--regressions` counts re-opened *blocking* problems only, and feeds the churn
+`feature review record --found <#>...` takes the problems the round filed or brought back as
+regressions, and counts them by their severity labels: the high/med ones are the round's new
+blocking count, the low ones its new low count. A clean pass is a bare `--found`, which (with zero
+open blocking sub-issues) opens the gate. Low finds don't gate anything; they keep the record honest
+about what a "clean" round actually found, and the round's line in the PR body lists every find by
+severity. `--regressions` counts re-opened *blocking* problems only, and feeds the churn
 signal: a re-opened low-severity nit is not evidence the design is wrong, and escalating on one would
 contradict the rule that low severity never gates.
 
