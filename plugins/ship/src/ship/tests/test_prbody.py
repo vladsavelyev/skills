@@ -1,5 +1,7 @@
 """The PR body layout: prose, ship's meta, and the signature last whichever writer ran."""
 
+import pytest
+
 from ship import prbody
 
 SIG = "🤖 Claude Opus 5.5 in Claude Code (T3 Code)"
@@ -102,6 +104,15 @@ def test_markers_quoted_in_a_nested_code_block_stay_in_the_prose():  # #44, #40
     assert prbody.with_ref(f"{prose}\n\n{REF}\n", 7) == f"{prose}\n\n{REF}\n"
     quoted = f"Body says:\n\n```\n{REF}\n```"
     assert prbody.with_description(FULL, quoted) == f"{quoted}\n\n{ASSESS}\n\n{REF}\n"
+
+
+def test_a_write_that_would_not_read_back_as_written_is_refused():
+    # With no ref of ours below it, the description's own last line would be read back as ours
+    # and replaced by the next `feature pr`. Refuse now rather than let that rewrite it later.
+    with pytest.raises(ValueError, match="different prose, ref"):
+        prbody.with_description("Old.", "Fix the parser.\n\nPart of #42")
+    # Below a real ref it is plain prose, as in #41.
+    assert prbody.with_description(f"Old.\n\n{REF}", "Fix.\n\nPart of #42") == f"Fix.\n\nPart of #42\n\n{REF}\n"
 
 
 def test_a_signature_quoted_at_the_end_of_a_code_block_stays_in_it():

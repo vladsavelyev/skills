@@ -110,14 +110,34 @@ def compose(parts: Parts) -> str:
     return "\n\n".join(blocks) + "\n" if blocks else ""
 
 
+def _write(parts: Parts) -> str:
+    """`parts` composed into a body, refused unless the body reads back as exactly those parts.
+
+    Every writer changes one part and carries the others over untouched, so this is what makes a
+    write unable to lose or alter anyone's text: the only way to fail it is a description whose
+    own last paragraph looks like ship's (a `🤖` line, a `Part of #N`, a ship marker), which the
+    next read would take for meta. Refusing that write beats letting a later one rewrite it."""
+    body = compose(parts)
+    if (back := parse(body)) != parts:
+        changed = ", ".join(
+            f for f in ("prose", "signature", "assessment", "ref") if getattr(back, f) != getattr(parts, f)
+        )
+        raise ValueError(
+            f"Refusing to write the PR body: it would read back with a different {changed}. The "
+            f"description's last paragraph looks like one of ship's own lines (a signature, a "
+            f"`Part of #N`, a ship marker); reword it."
+        )
+    return body
+
+
 def with_ref(body: str, issue: int) -> str:
     """`body` linked to feature issue `issue`, replacing the reference line of ours it had."""
-    return compose(replace(parse(body), ref=feature_ref(issue)))
+    return _write(replace(parse(body), ref=feature_ref(issue)))
 
 
 def with_assessment(body: str, text: str) -> str:
     """`body` with its assessment section set to `text`."""
-    return compose(replace(parse(body), assessment=text.strip()))
+    return _write(replace(parse(body), assessment=text.strip()))
 
 
 def with_description(body: str, text: str) -> str:
@@ -125,4 +145,4 @@ def with_description(body: str, text: str) -> str:
     owns. `text` is the author's, so only its trailing signature is split off: a ship line it
     quotes is prose."""
     prose, signature = split_signature(text)
-    return compose(replace(parse(body), prose=prose, signature=signature))
+    return _write(replace(parse(body), prose=prose, signature=signature))

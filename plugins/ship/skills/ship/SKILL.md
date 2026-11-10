@@ -103,7 +103,9 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - risk, what a missed bug would cost. high: data loss or corruption, security or auth, money,
      migrations or stored formats, concurrency, shared infra or deploys, anything hard to roll
      back. med: user-visible behaviour on a main path, public APIs, error handling. low: docs,
-     tests, tooling, internal refactors with good coverage.
+     tests, tooling, internal refactors with good coverage, and text written to GitHub (PR
+     bodies, issues, comments), which keeps every edit. Grade the cost of a bug left in this
+     change, not how serious its subject sounds.
    - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
      invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
