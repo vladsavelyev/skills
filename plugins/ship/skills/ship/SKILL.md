@@ -75,8 +75,9 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    model the `codex` provider lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`,
    `timeoutMs: 3600000`, and
    `target: {providerInstanceId: "codex", model: <sol model>, options: {reasoningEffort: <depth>}}`.
-   The `task` is the brief below, and nothing about
-   tracked problems or earlier rounds: Sol must find without them. If the wait times out, keep
+   The `task` is the brief below, with the user's request filled in from the `Last prompt` line
+   of `feature status`, and nothing about tracked problems or earlier rounds: Sol must find
+   without them. If the wait times out, keep
    waiting (`t3_thread_wait` on the child thread) until it finishes; never cancel it or review
    yourself instead. If Sol isn't listed, or its task comes back failed (an auth or gateway
    error, a crash), stop: record no review, put Sol's error verbatim in the report, and don't
@@ -96,6 +97,31 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    wrong result on a realistic path; med = a real bug on a narrower path; low = anything else);
    file:line; a concrete failure scenario (inputs or state → wrong outcome); the smallest fix.
    If you find nothing, say so plainly.
+
+   Then, separately from the defects, two more checks, each under its own heading. Give each
+   finding a title, file:line where there is one, and the smallest fix; no severity.
+   - Spec: what the PR's intent asks for that the diff leaves missing or partial, and behaviour
+     the diff adds that nothing asked for. The intent is the PR description, the issues it or its
+     commits reference, and the user's request: <recorded request, or "none recorded">. Don't
+     open issues labelled `feature` or `problem`: they're this review's own bookkeeping. Quote the
+     line of intent each finding rests on. Something asked for but built wrong is a defect: report
+     it with the defects above.
+   - Design: breaches of the repo's documented coding rules (AGENTS.md, CLAUDE.md,
+     CONTRIBUTING.md and the like, and your own instructions), citing the file and the rule; and
+     these smells in the PR's own code, each a judgement call ("possible Feature Envy"):
+     - Mysterious Name: a name that hides or misstates what the thing does or holds.
+     - Duplicated Code: the same logic shape in more than one place in the change.
+     - Feature Envy: a function that works on another object's data more than its own.
+     - Data Clumps: the same few fields or parameters travelling together, a type wanting to exist.
+     - Primitive Obsession: a string or number standing in for a domain concept.
+     - Repeated Switches: the same switch or if-cascade on the same type in several places.
+     - Shotgun Surgery: one logical change scattered as edits across many files.
+     - Divergent Change: one module edited for several unrelated reasons.
+     - Speculative Generality: abstractions, parameters or hooks for needs nothing has.
+     - Message Chains: callers walking `a.b().c().d()` they shouldn't depend on.
+     - Middle Man: a class or function that mostly just delegates onward.
+     - Refused Bequest: a subclass or implementer that ignores most of what it inherits.
+     A documented rule wins over a smell. Skip what a linter or formatter enforces.
 
    Then grade the PR as a whole, each with low/med/high, plus one or two sentences on what
    drives both:
@@ -124,10 +150,15 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      silently wrong result on a realistic path; `med` = real bug on a narrower path; `low` =
      everything else. Only `low` is non-blocking, and an unlabelled problem blocks, so always
      pass `--sev`.
+   - Spec and design findings go through the same checks, then `--sev low`, always: they are
+     tracked debt that never holds the gate. Drop a spec gap whose quoted intent doesn't say what
+     Sol claims, and a smell outside the PR's own code. Title them `Spec: …` or `Design: …`.
 7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
-   the repro, `file:line` and the suggested smallest fix.
+   the repro (for a spec gap, the quoted intent; for a design finding, the rule or smell and the
+   code), `file:line` and the suggested smallest fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) …`. Write `--summary` as a real
-   sentence about what was reviewed and found, never a bare "clean pass". Pass the effort Sol ran
+   sentence about what was reviewed and found, never a bare "clean pass"; count spec and design
+   findings in `--new-low` and name them in the summary. Pass the effort Sol ran
    at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`; raise a grade if the
    findings show Sol underrated it, never lower one. The CLI writes the grade into the PR body and
    sizes the next round's depth from it.
