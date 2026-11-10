@@ -31,20 +31,26 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
 5. **Tidy up.**
    - If the harness is watching the PR (T3's `watch_pull_request`), unwatch it.
    - The feature's checkout (`git worktree list`) is done with once it holds nothing the PR
-     doesn't. Check all three:
-     - `git -C <checkout> status --porcelain` is empty;
+     doesn't. Check all four:
+     - `git -C <checkout> status --porcelain --untracked-files=all` is empty;
      - its HEAD is the PR's `headRefOid`;
-     - `git -C <checkout> status --porcelain --ignored` lists nothing but what the checkout can
-       rebuild (`.venv`, `node_modules`, `__pycache__`, tool caches). An ignored `.env`, eval
-       results or logs are the user's, and removing the worktree deletes them without a word:
-       name them and ask first.
+     - `git -C <checkout> ls-files -v | grep '^[a-zS]'` is empty: files flagged assume-unchanged
+       or skip-worktree hide their local edits from `status`;
+     - `git -C <checkout> status --porcelain --untracked-files=all --ignored` lists nothing but
+       what the checkout can rebuild (`.venv`, `node_modules`, `__pycache__`, tool caches). An
+       ignored `.env`, eval results or logs are the user's, and removing the worktree deletes them
+       without a word.
+
+     `--untracked-files=all` overrides a `status.showUntrackedFiles=no` setting, which would hide
+     both kinds. Anything a check turns up stays: name it and ask before removing.
 
      Then, if your session is in it, leave it (`ExitWorktree`, `action: "keep"`). A linked
      worktree goes with `git worktree remove <worktree>`. The main checkout can't be removed:
-     check out the base branch there and pull it. Then `git branch -D <branch>`, unless another
-     branch is stacked on it (`git config --get-regexp '^git-town-branch\..*\.parent$'` names it
-     as a parent); say so if you keep it. A checkout that fails a check stays, and the report
-     names what is in it.
+     check out the base branch there and pull it. Then delete the branch, unless another branch is
+     stacked on it (`git config --get-regexp '^git-town-branch\..*\.parent$'` names it as a
+     parent; say so if you keep it): `git branch -D <branch>`, then
+     `git config --unset git-town-branch.<branch>.parent`, the git-town pointer `git branch -D`
+     leaves behind.
 6. **Report** in two or three lines: the feature closed, what shipped outstanding, the follow-ups
    kept, and what you removed or left.
 
