@@ -225,9 +225,10 @@ def cmd_pr(args: argparse.Namespace) -> None:
     state["pr"] = args.number
     set_status(state, "in-review")
     _save_state(issue, body, state)
-    # Native link: `Part of #<issue>` in the PR body so GitHub shows the connection in the PR
+    # Native link: `Closes #<issue>` in the PR body so GitHub shows the connection in the PR
     # sidebar and the issue timeline — not just a comment that no linked-issues view reads.
     github.link_pr_to_feature(args.number, issue)
+    _refresh_assessment(state)
     github.comment(issue, f"🔗 Linked PR #{args.number}.")
     print(f"Linked PR #{args.number} to feature #{issue}")
 
@@ -250,6 +251,25 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
     return depth, size, files, lines, why
 
 
+def _refresh_assessment(state: dict) -> None:
+    """Render the assessment in the PR body's ship block from `state`: Sol's latest grade and every
+    round so far. Every command that writes the block calls this, so the block always shows the
+    current state in the current format. Nothing to render before a review has graded the PR."""
+    grade = assess.last_grade(state["review_history"])
+    if grade is None:
+        return
+    next_depth, size, files, lines, _ = _next_depth(state)
+    text = assess.render(
+        size=size,
+        changed_files=files,
+        changed_lines=lines,
+        grade=grade,
+        history=state["review_history"],
+        next_depth=next_depth,
+    )
+    github.set_pr_assessment(state["pr"], text)
+
+
 def cmd_describe(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
     _, state, _ = _load_state(branch)
@@ -259,6 +279,7 @@ def cmd_describe(args: argparse.Namespace) -> None:
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
     github.set_pr_description(state["pr"], text, args.title)
+    _refresh_assessment(state)
     print(f"Updated the description of PR #{state['pr']}")
 
 
@@ -339,18 +360,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
     triaged = problems.triage(subs)
-    next_depth, size, files, lines, _ = _next_depth(state)
-    github.set_pr_assessment(
-        state["pr"],
-        assess.render(
-            size=size,
-            changed_files=files,
-            changed_lines=lines,
-            grade=entry["grade"],
-            history=state["review_history"],
-            next_depth=next_depth,
-        ),
-    )
+    _refresh_assessment(state)
     rounds, pinned, _ = _resolve_budget(state)
     decision = gate.evaluate(
         blocking_open=len(triaged.blocking),

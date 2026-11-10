@@ -80,7 +80,7 @@ def test_render_quotes_the_grade_and_one_line_per_round():
     assert out == (
         "> **Risk: high**: whole-body rewrites can corrupt the ref\n"
         "> **Size: M** (8 files, 412 lines)\n"
-        "> **Complexity: med**\n"
+        "> **Complexity: medium**\n"
         "> **Reviewed** with Sol, next round would run at max:\n"
         "> - round 1 at high: 1 low (#40)\n"
         "> - round 2 at xhigh: 1 high (#41), 2 med (#42, #44); 1 of them back after a fix\n"
@@ -99,5 +99,5 @@ def test_render_shows_rounds_recorded_before_found_existed():
     assert out.splitlines()[-3:] == [
         "> - round 1: not recorded",
         "> - round 2: 2 blocking, 1 low",
-        "> - round 3 at low: 0 blocking, 0 low",
+        "> - round 3 at low: nothing found",
     ]

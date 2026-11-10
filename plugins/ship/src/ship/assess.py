@@ -80,18 +80,22 @@ def review_depth(*, size: str, risk: str, complexity: str) -> str:
 
 # The severities a round's finds are listed under, worst first. `?` is an unlabelled problem.
 FOUND_SEVS = ("high", "med", "low", "?")
+# How a grade level reads in the PR body.
+_SPELLED = {"low": "low", "med": "medium", "high": "high"}
 
 
 def _found(entry: dict) -> str:
-    if "found" not in entry:
+    if "found" in entry:
+        parts = [
+            f"{len(nums)} {sev} ({', '.join(f'#{n}' for n in nums)})"
+            for sev in FOUND_SEVS
+            if (nums := entry["found"].get(sev))
+        ]
+    else:
         # Rounds recorded before `--found` existed carry only their counts. Kept ON PURPOSE: those
         # rounds are already written into feature issues of PRs in flight.
-        return f"{entry['new_blocking']} blocking, {entry['new_low']} low"
-    parts = [
-        f"{len(nums)} {sev} ({', '.join(f'#{n}' for n in nums)})"
-        for sev in FOUND_SEVS
-        if (nums := entry["found"].get(sev))
-    ]
+        counts = (("blocking", entry["new_blocking"]), ("low", entry["new_low"]))
+        parts = [f"{n} {kind}" for kind, n in counts if n]
     if not parts:
         return "nothing found"
     regressions = f"; {entry['regressions']} of them back after a fix" if entry["regressions"] else ""
@@ -113,9 +117,9 @@ def render(
     lists what it found, which never changes afterwards, so the block can't go stale."""
     rounds = [e for e in history if "run" in e]
     lines = [
-        f"**Risk: {grade['risk']}**: {grade['why'].strip()}",
+        f"**Risk: {_SPELLED[grade['risk']]}**: {grade['why'].strip()}",
         f"**Size: {size}** ({changed_files} files, {changed_lines} lines)",
-        f"**Complexity: {grade['complexity']}**",
+        f"**Complexity: {_SPELLED[grade['complexity']]}**",
         f"**Reviewed** with Sol, next round would run at {next_depth}:",
         *map(_round_line, rounds),
     ]
