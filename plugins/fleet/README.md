@@ -37,12 +37,14 @@ What it covers:
   text after that section is left alone.
 - **`agents_md`** (optional): agent instructions that live in a repo instead of in `CLAUDE.md`. The
   shared part of `~/.claude/CLAUDE.md` must import it (`@~/<agents_md>`), the file must exist on
-  every machine (a missing `@` import loads nothing, without a word). Codex has no imports, so
+  every machine (a missing `@` import loads nothing, without a word), and each machine's clone of its
+  repo must be unmodified (local changes are a problem to move into the repo) and is fast-forwarded to
+  the default branch, so every machine reads the same rules. Codex has no imports, so
   wherever it's installed `--apply` generates `~/.codex/AGENTS.md`: that machine's copy of the file
   followed by its own part of `~/.claude/CLAUDE.md` (below the marker). It's a copy, so after the
   rules change Codex has them from the next `--apply`, which reports the file out of date until then.
-  Pointing `agents_md` into a plugin marketplace clone means it's always the default branch, and the
-  marketplace update at session start keeps Claude Code's import current.
+  Pointing `agents_md` into a plugin marketplace clone means the marketplace update at session start
+  keeps Claude Code's import current between `fleet` runs.
 - **`~/.claude/settings*.json`**: every key is copied except `machine_settings`. Values go over stdin
   and only key names are printed, since `env` often carries secrets.
 - **Reported only**: missing `helpers` (a missing one fails silently, e.g. a statusline segment just
