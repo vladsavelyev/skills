@@ -6,7 +6,7 @@
     > **Risk: low**: …
     > Complexity: low, size: S (2 files, 30 lines)
     > Feature tracking issue: closes #39
-    > **Review round 1** (medium). Findings: none. Next round would run at low.
+    > **Review round 1** (medium). Findings: none. A re-review after new commits would run at low.
     <!-- /ship -->
 
     🤖 <model> in <harness>
