@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Use when the user asks to ship, review a PR or branch, check whether it can merge, or close out a merged feature.
+description: Use when the user asks to ship a PR.
 context: fork
 background: false
 ---

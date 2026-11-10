@@ -45,10 +45,6 @@ Pick the browser by whose login the test needs. The two keep separate profiles, 
 * Before an eval run, commit, so its results belong to a revision, and keep every run's results: copy them to a file named for the run before the next run overwrites them.
 * When you run tests or evals, and you find them green, make sure they were actually run, not skipped, and that they finished. A background run's completion notice is not proof: check the log ends with the runner's summary line (pytest's `N passed … in Xs`) and no runner process is still alive.
 
-### Reviews (ship)
-
-- Any request to review a PR or branch means `Skill(ship:ship)`, never a standalone reviewer, whether or not the branch is tracked yet: the skill tracks it first. It runs in a forked subagent and returns a report with next steps; follow them.
-
 ### Git
 
 **Prefer `git-town`** for branch/stacking operations (creating feature branches, syncing, stacking one branch on another, proposing PRs). It tracks parent-branch pointers in git config, which our tooling relies on. Fall back to plain `git` only when git-town doesn't cover the operation.
