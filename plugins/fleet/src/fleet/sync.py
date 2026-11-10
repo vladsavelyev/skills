@@ -228,7 +228,8 @@ def default_branch(machine: Machine, repo: str) -> str:
 def sync_repo(machine: Machine, repo: str, url: str, apply: bool, report: Report) -> bool:
     """Returns whether the clone is now at its default branch's tip."""
     where = f"{machine.name}: ~/{repo}"
-    if machine.run(["test", "-d", f"{repo}/.git"], check=False).returncode != 0:
+    # `.git` is a directory in a clone and a file in a linked worktree.
+    if machine.run(["test", "-e", f"{repo}/.git"], check=False).returncode != 0:
         report.drift(f"{where} is not cloned", apply)
         if not apply:
             return False
