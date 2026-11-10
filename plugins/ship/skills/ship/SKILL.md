@@ -36,7 +36,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
-| Record a review | `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --complexity <c> --why "<sentence>"` |
+| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list --blocking\|--open`, `add`, `resolve <#> --commit <sha>`, `defer\|reject\|block <#> --reason "…"` |
 | Review budget | `feature budget [--set <n> \| --auto]` |
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
@@ -64,7 +64,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    (`git log --format='%s%n%b' origin/<base>..HEAD`); don't read the diff for this. The
    description is the motivation in one to three informal sentences plus, if it isn't obvious,
    what changed; no "Summary" header, no test plan. The title says what the PR does, in plain
-   words. `feature describe` keeps the CLI's own sections of the body. Sol and step 6 read this
+   words. End it with your signature line if your harness asks for one. `feature describe` keeps
+   ship's block and puts it above that signature. Sol and step 6 read this
    description to know the PR's intent, so it comes first.
 3. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
    review it comes from the diff stats and the paths touched; after one, from the last review's
@@ -102,7 +103,9 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - risk, what a missed bug would cost. high: data loss or corruption, security or auth, money,
      migrations or stored formats, concurrency, shared infra or deploys, anything hard to roll
      back. med: user-visible behaviour on a main path, public APIs, error handling. low: docs,
-     tests, tooling, internal refactors with good coverage.
+     tests, tooling, internal refactors with good coverage, and text written to GitHub (PR
+     bodies, issues, comments), which keeps every edit. Grade the cost of a bug left in this
+     change, not how serious its subject sounds.
    - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
      invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
@@ -113,7 +116,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      a guard the intent doesn't need.
    - Same meaning as an OPEN problem → skip.
    - Same as a CLOSED fixed problem → regression. `feature problem block <#> --reason
-     "rediscovered: <repro>"`, and count it (if high/med) in `--new-blocking` and `--regressions`.
+     "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, count it in `--regressions`).
      Never `gh issue reopen`.
    - Same as a REJECTED problem → skip, unless the new repro answers the rejection reason. Then
      `block` it. A problem disputed twice goes to the human: escalate with both sides.
@@ -126,7 +129,9 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      pass `--sev`.
 7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
    the repro, `file:line` and the suggested smallest fix.
-8. **Record**: `feature review record --sha $(git rev-parse HEAD) …`. Write `--summary` as a real
+8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
+   `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
+   the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
    sentence about what was reviewed and found, never a bare "clean pass". Pass the effort Sol ran
    at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`; raise a grade if the
    findings show Sol underrated it, never lower one. The CLI writes the grade into the PR body and

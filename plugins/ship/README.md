@@ -91,15 +91,15 @@ feature adopt                                  # labels, tracking issue; links t
 feature depth                                  # effort for Sol: from stats + paths, later Sol's grade
 # Sol reviews PR #123 at that depth, the skill dedups vs tracked problems, then:
 feature problem add --title "…" --sev high    # file each genuinely-new problem
-feature review record --sha $(git rev-parse HEAD) --new-blocking 2 --new-low 3 \
+feature review record --sha $(git rev-parse HEAD) --found 46 47 48 49 50 \
     --summary "Token refresh race + unchecked PKCE verifier; 3 nits filed as low" \
     --depth xhigh --risk high --complexity med --why "Token handling; refresh has ordering"
 feature problem list --blocking                # what actually holds the merge
 # ... fix the blocking ones, then:
 feature problem resolve 46 --commit abc1234
 feature problem reject 48 --reason "verifier is validated upstream in middleware.py:40"
-# re-review, then record a clean pass (0 new blocking) to open the gate:
-feature review record --sha $(git rev-parse HEAD) --new-blocking 0 --new-low 1 \
+# re-review, then record a clean pass (no new blocking) to open the gate:
+feature review record --sha $(git rev-parse HEAD) --found 51 \
     --summary "Re-reviewed oauth.py; #46 fixed; one naming nit filed" \
     --depth max --risk high --complexity med --why "Token handling; refresh has ordering"
 feature gate                                   # exit 0 = safe to merge, 20 = ask a human
@@ -117,7 +117,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
-| `feature review record --sha <s> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary <t> --depth <d> --risk <r> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade into the PR body) and print the resulting verdict. |
+| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
 | `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (anything but `low` blocks the gate). |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue as fixed. |
 | `feature problem defer <number> --reason <why>` | Real problem, shipped unfixed: stays open, stops blocking, reason recorded. |
@@ -137,7 +137,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 
 ## PR ↔ issue linkage
 
-`feature pr` writes a `Closes #<issue>` reference into the PR body, so **merging the PR closes the
+`feature pr` writes a `closes #<issue>` reference into ship's block of the PR body, so **merging the PR closes the
 tracking issue** with nobody having to remember a follow-up command. It used to write a
 non-closing `Part of #<issue>` on the theory that the umbrella issue should outlive its PR and be
 closed deliberately by `feature merge` — in practice that step happens after the merge button, when

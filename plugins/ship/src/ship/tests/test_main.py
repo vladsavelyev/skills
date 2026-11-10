@@ -120,7 +120,7 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
     monkeypatch.setattr(github, "open_pr_for_branch", lambda name: pr)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
-    monkeypatch.setattr(github, "link_pr_to_feature", lambda number, issue: True)
+    monkeypatch.setattr(github, "set_pr_block", lambda number, quote, issue: True)
     monkeypatch.setattr(github, "comment", lambda issue, text: None)
     monkeypatch.setattr(github, "init_labels", lambda: None)
     return did
@@ -172,3 +172,18 @@ def test_merge_refuses_while_open_problems_are_undecided(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
     assert "#5 [sev:low]" in str(exc.value) and "#6" not in str(exc.value)
+
+
+def test_round_finds_counts_by_severity_label():
+    subs = [_problem(40, "sev:low"), _problem(41, "sev:high"), _problem(42, "sev:med"), _problem(43, "sev:med")]
+    subs.append({"number": 44, "title": "unlabelled", "state": "OPEN", "labels": []})
+    found, blocking, low = cli._round_finds(7, subs, [43, 41, 40, 44, 41])
+    assert found == {"high": [41], "med": [43], "low": [40], "?": [44]}
+    # An unlabelled problem blocks, like everywhere else.
+    assert (blocking, low) == (3, 1)
+    assert cli._round_finds(7, subs, []) == ({}, 0, 0)
+
+
+def test_round_finds_refuses_a_number_that_is_not_one_of_the_problems():
+    with pytest.raises(SystemExit, match="#99 is not one of its problem sub-issues"):
+        cli._round_finds(7, [_problem(40, "sev:low")], [40, 99])

@@ -199,7 +199,7 @@ def cmd_adopt(args: argparse.Namespace) -> None:
         state["pr"] = pr
         set_status(state, "in-review")
         _save_state(issue, body, state)
-        github.link_pr_to_feature(pr, issue)
+        _write_block(state, issue)
         github.comment(issue, f"🔗 Linked PR #{pr}.")
 
     print(f"Adopted existing branch '{name}'")
@@ -225,9 +225,9 @@ def cmd_pr(args: argparse.Namespace) -> None:
     state["pr"] = args.number
     set_status(state, "in-review")
     _save_state(issue, body, state)
-    # Native link: `Part of #<issue>` in the PR body so GitHub shows the connection in the PR
+    # Native link: `closes #<issue>` in the PR body so GitHub shows the connection in the PR
     # sidebar and the issue timeline — not just a comment that no linked-issues view reads.
-    github.link_pr_to_feature(args.number, issue)
+    _write_block(state, issue)
     github.comment(issue, f"🔗 Linked PR #{args.number}.")
     print(f"Linked PR #{args.number} to feature #{issue}")
 
@@ -250,15 +250,37 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
     return depth, size, files, lines, why
 
 
+def _block_quote(state: dict, issue: int) -> str:
+    """The quote for the PR body's ship block, rendered from `state`: the reference to `issue`, and
+    once a review has graded the PR, Sol's latest grade and every round so far. Every command that
+    writes the block renders it here, so the block always shows the current state."""
+    # `feature reconcile` reads schema-1 states too; those predate grading, so they show the
+    # reference alone.
+    history = state["review_history"] if state["schema"] == SCHEMA else []
+    grade = assess.last_grade(history)
+    if grade is None:
+        return assess.render(issue=issue, review=None)
+    next_depth, size, files, lines, _ = _next_depth(state)
+    review = assess.Review(
+        grade=grade, size=size, changed_files=files, changed_lines=lines, history=history, next_depth=next_depth
+    )
+    return assess.render(issue=issue, review=review)
+
+
+def _write_block(state: dict, issue: int) -> bool:
+    """Set the linked PR's ship block from `state`; True if the body changed."""
+    return github.set_pr_block(state["pr"], _block_quote(state, issue), issue)
+
+
 def cmd_describe(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    _, state, _ = _load_state(branch)
+    issue, state, _ = _load_state(branch)
     if state["pr"] is None:
         sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
-    github.set_pr_description(state["pr"], text, args.title)
+    github.set_pr_description(state["pr"], text, args.title, _block_quote(state, issue))
     print(f"Updated the description of PR #{state['pr']}")
 
 
@@ -270,6 +292,23 @@ def cmd_depth(args: argparse.Namespace) -> None:
     depth, size, files, lines, why = _next_depth(state)
     print(f"Review depth: {depth}")
     print(f"  size {size} ({files} files, {lines} lines); {why}")
+
+
+def _round_finds(issue: int, subs: list[dict], numbers: list[int]) -> tuple[dict[str, list[int]], int, int]:
+    """A round's `--found` problems by severity (only the severities it found), and how many of
+    them block and how many don't. Aborts on a number that isn't one of the feature's problems."""
+    by_number = {s["number"]: s for s in subs}
+    if unknown := sorted(set(numbers) - by_number.keys()):
+        sys.exit(
+            f"Refusing to record a review for #{issue}: {', '.join(f'#{n}' for n in unknown)} is not "
+            f"one of its problem sub-issues. Pass --found the problems this round filed "
+            f"(`feature problem add`) or brought back (`feature problem block`)."
+        )
+    found: dict[str, list[int]] = {}
+    for number in sorted(set(numbers)):
+        found.setdefault(problems.severity(by_number[number]).removeprefix("sev:"), []).append(number)
+    new_low = sum(len(found.get(sev.removeprefix("sev:"), [])) for sev in problems.NON_BLOCKING_SEVS)
+    return found, len(set(numbers)) - new_low, new_low
 
 
 def cmd_review_record(args: argparse.Namespace) -> None:
@@ -294,15 +333,25 @@ def cmd_review_record(args: argparse.Namespace) -> None:
             f"wrong diff (pulling in the base branch's own commits). Reopen the PR against "
             f"'{expected_base}' (`gh pr edit {state['pr']} --base {expected_base}`), then retry."
         )
+    # The round's finds by severity come from the problems themselves: the PR body lists them per
+    # round, and the gate's counts can't disagree with the labels the gate reads.
+    subs = github.sub_issues(issue)
+    found, new_blocking, new_low = _round_finds(issue, subs, args.found)
+    if args.regressions > new_blocking:
+        sys.exit(
+            f"Refusing to record a review for #{issue}: --regressions {args.regressions} is more than "
+            f"the {new_blocking} blocking problem(s) in --found, and a regression is one of those."
+        )
     entry = record_review(
         state,
         sha=args.sha,
-        new_blocking=args.new_blocking,
-        new_low=args.new_low,
+        new_blocking=new_blocking,
+        new_low=new_low,
         regressions=args.regressions,
         summary=args.summary,
     )
     run_num = entry["run"]
+    entry["found"] = found
     entry["depth"] = args.depth
     entry["grade"] = {"risk": args.risk, "complexity": args.complexity, "why": args.why}
 
@@ -311,19 +360,8 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # once. (A duplicated timeline comment, the one thing a retry can repeat, is harmless noise; a
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
-    triaged = _triage(issue)
-    next_depth, size, files, lines, _ = _next_depth(state)
-    github.set_pr_assessment(
-        state["pr"],
-        assess.render(
-            size=size,
-            changed_files=files,
-            changed_lines=lines,
-            grade=entry["grade"],
-            reviewed_at=args.depth,
-            next_depth=next_depth,
-        ),
-    )
+    triaged = problems.triage(subs)
+    _write_block(state, issue)
     rounds, pinned, _ = _resolve_budget(state)
     decision = gate.evaluate(
         blocking_open=len(triaged.blocking),
@@ -335,7 +373,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     )
     github.comment(
         issue,
-        f"🔍 Review run {run_num} ({args.sha}): {args.new_blocking} new blocking, {args.new_low} new low, "
+        f"🔍 Review run {run_num} ({args.sha}): {new_blocking} new blocking, {new_low} new low, "
         f"{args.regressions} regression(s). {len(triaged.blocking)} blocking open. {args.summary}\n\n"
         f"Gate: {decision}",
     )
@@ -830,7 +868,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
                 # Whether the body actually needs an edit is only knowable by reading it, which is
                 # what the real run does — don't claim a count here that a dry run can't know.
                 print(f"#{issue} ({row['title']}): PR #{pr} open → reference repaired if stale{stale}")
-            elif github.link_pr_to_feature(pr, issue):
+            elif _write_block(state, issue):
                 print(f"#{issue} ({row['title']}): re-linked — PR #{pr} now closes it on merge{stale}")
                 relinked += 1
             continue
@@ -1003,12 +1041,13 @@ def build_parser() -> argparse.ArgumentParser:
     r = rsub.add_parser("record", help="Record an in-session review run (moves the gate)")
     r.add_argument("--sha", required=True)
     r.add_argument(
-        "--new-blocking",
+        "--found",
         type=int,
+        nargs="*",
         required=True,
-        help="Count of NEW high/med problems filed, plus blocking ones re-opened as regressions",
+        metavar="PROBLEM",
+        help="The problems this round filed or brought back as regressions; bare `--found` for a clean round",
     )
-    r.add_argument("--new-low", type=int, default=0, help="Count of NEW low-severity problems filed (non-blocking)")
     r.add_argument(
         "--regressions",
         type=int,
