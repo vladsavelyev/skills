@@ -47,7 +47,7 @@ Pick the browser by whose login the test needs. The two keep separate profiles, 
 
 ### Reviews (ship)
 
-- Any request to review a PR or branch means `Skill(ship:ship)`, never a standalone reviewer, whether or not the branch is tracked yet: the skill tracks it first. It runs in a forked subagent and returns a report with next steps; follow them.
+- Call `Skill(ship:ship)` only when I explicitly ask to ship a PR or branch (tracked yet or not: the skill tracks it first), or when its last report's next steps say to call it again. Other review requests and questions about a PR, answer yourself. It runs in a forked subagent and returns a report with next steps; follow them.
 
 ### Git
 

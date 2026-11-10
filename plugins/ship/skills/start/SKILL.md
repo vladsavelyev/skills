@@ -21,5 +21,5 @@ later, when the user asks to ship it (`Skill(ship:ship)`).
    from the main checkout edits the base branch.
 5. Link the draft PR in T3 if the harness offers it (`link_pull_request`).
 
-Then do the work, committing and pushing as you go. When the user asks to ship, review, or check
-whether the feature can merge, call `Skill(ship:ship)`.
+Then do the work, committing and pushing as you go. When the user asks to ship it, call
+`Skill(ship:ship)`.
