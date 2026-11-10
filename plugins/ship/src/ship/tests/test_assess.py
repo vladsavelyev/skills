@@ -25,13 +25,14 @@ def test_size_bucket(files, lines, size):
     ("size", "risk", "complexity", "depth"),
     [
         ("S", "low", "low", "low"),
-        ("M", "low", "low", "medium"),
-        ("S", "low", "med", "medium"),
-        ("L", "low", "high", "high"),  # bumps cap at one below high risk
-        ("M", "med", "med", "high"),
-        ("XL", "med", "high", "xhigh"),
-        ("S", "high", "low", "xhigh"),
-        ("L", "high", "low", "max"),
+        ("L", "low", "med", "low"),  # PR #38: size never lifts a low-risk change
+        ("XL", "low", "high", "low"),
+        ("M", "med", "med", "medium"),
+        ("L", "med", "low", "high"),
+        ("XL", "med", "high", "high"),  # bumps cap at one below high risk
+        ("S", "high", "low", "high"),
+        ("M", "high", "high", "xhigh"),
+        ("L", "high", "low", "xhigh"),
         ("XL", "high", "high", "max"),
     ],
 )
