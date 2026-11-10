@@ -79,7 +79,8 @@ def main() -> None:
     print(
         "Before the merge, the gate decides whether to review again: REVIEW_AGAIN means fix "
         "the blocking problems and run ONE more review round; NEEDS_DECISION means STOP "
-        "reviewing and `feature escalate --reason '<recommendation>'` for a human. Only "
+        "reviewing, still fix the blocking problems (the budget limits reviews, not fixes), and "
+        "`feature escalate --reason '<recommendation>'` for a human. Only "
         "high/med problems block — never downgrade a severity to open the gate, use "
         "`feature problem defer <#> --reason '<why>'` so the decision is recorded."
     )

@@ -17,7 +17,7 @@ terminates — a real reviewer always finds *something*. After it, a fourth ends
 | --- | --- | --- |
 | `OPEN` | 0 | No blocking problems, and a review has covered the current branch head. Ship it. |
 | `REVIEW_AGAIN` | 10 | Blocking work left, review budget remains. |
-| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. A human decides: ship the debt, split, or redesign. |
+| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Blocking problems still get fixed; a human decides whether to review the fixes in another round, merge, split, or redesign. |
 | `MERGED` | 30 | The PR is in. Nothing left to review; close the feature out. |
 
 Only an explicit `sev:low` is non-blocking: it's tracked debt that ships. A problem with no

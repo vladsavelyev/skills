@@ -173,6 +173,13 @@ could block nothing. The gate now says `MERGED` once the PR is in, `feature merg
 outstanding instead of refusing, and close-out moved to a `close` skill that runs inline and never
 reviews.
 
+**10. A spent budget read as "stop fixing" → it limits reviews only.** At `NEEDS_DECISION` the gate
+offered three ways out: ship the rest as debt, buy a round, or split/redesign. Fixing wasn't one
+of them. With a small, real blocker left after round 2, the skill recommended deferring it, and
+the agent asked the user for permission to fix it. Now `NEEDS_DECISION` still has the blockers
+fixed. The human only decides whether another review round goes over the fixes, and deferral is
+for a blocker the PR can't fix.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

@@ -161,7 +161,7 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
 | --- | --- | --- |
 | `OPEN` | 0 | Zero **blocking** problems open, and the last valid review covered the current branch head. |
 | `REVIEW_AGAIN` | 10 | Blocking work outstanding, review budget remains, and the trend is converging. |
-| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. A human decides. |
+| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human, but the blocking problems still get fixed: the budget limits reviews, not fixes. |
 | `MERGED` | 30 | The PR has merged. Checked first, so it outranks the other three; its reasons still name what was outstanding when it went in. |
 
 The codes skip 1 and 2 deliberately: those already mean "the command failed" (`sys.exit(message)`

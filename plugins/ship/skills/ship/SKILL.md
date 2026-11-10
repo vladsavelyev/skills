@@ -195,9 +195,13 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
   that it's still a draft. The human merges.
 - `REVIEW_AGAIN` (10): the caller fixes the blocking problems, then calls this skill again.
 - `MERGED` (30): the PR is in. Don't review; the caller closes it out with `Skill(ship:close)`.
-- `NEEDS_DECISION` (20): no more rounds. `feature escalate` with exactly one recommendation: ship
-  it (defer the rest with reasons), buy one round (`feature budget --set`, only with a concrete
-  reason), split the PR, or redesign.
+- `NEEDS_DECISION` (20): no more review rounds without a human. The budget limits reviews, not
+  fixes: the blocking problems still get fixed, exactly as for `REVIEW_AGAIN`. `feature escalate`
+  with one recommendation for after the fixes: review them in one more round (`feature budget
+  --set`), merge with them unreviewed (close-out records that), split the PR, or redesign it.
+  Recommend deferring a blocker only when this PR can't fix it, and say why. When the gate names
+  churn (fixes re-opening old bugs, findings rising), say so: splitting or redesigning may beat
+  another fix.
 
 ## Rules
 
@@ -235,4 +239,8 @@ Always include these caller rules in `Next` when they apply:
 - With `OPEN`: "Tell the user it's safe to merge and what debt ships. After they merge, call
   `Skill(ship:close)` to close out."
 - With `MERGED`: "Don't review. Call `Skill(ship:close)` to close the feature out."
-- With `NEEDS_DECISION`: "Stop. Present the recommendation to the user."
+- With `NEEDS_DECISION`: "Fix the blocking problems as for `REVIEW_AGAIN` (commit, push,
+  `feature problem resolve`); the budget limits review rounds, not fixes, so don't defer a
+  blocker you can fix. Then stop and present the recommendation to the user: another review round
+  of the fixes (`feature budget --set <n>`, then `Skill(ship:ship)`), or merge with them
+  unreviewed."

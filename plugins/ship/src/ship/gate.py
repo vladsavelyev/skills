@@ -31,10 +31,15 @@ _NEXT_OPEN = "Human merges the PR, then close it out with `Skill(ship:close)`."
 # A review after the merge can block nothing, and the old advice ("review again") sent agents to do
 # exactly that on a merged PR whose last commits were never reviewed.
 _NEXT_MERGED = "Don't review: the PR has merged. Close the feature out with `Skill(ship:close)`."
+# The budget limits review rounds, not fixes. The old wording listed only "ship the rest as debt",
+# "buy a round" or "split/redesign", so an agent at a spent budget deferred real blockers it could
+# have fixed in minutes and asked the human for permission to fix them.
 _NEXT_DECISION = (
-    "STOP reviewing — a human decides. Run `feature escalate --reason '<what you recommend>'`, "
-    "then one of: ship the rest as debt (`feature problem defer <#> --reason '<why>'`), buy "
-    "another round (`feature budget --set <n>`), or split/redesign the PR."
+    "STOP reviewing, but still fix the blocking problems: the budget limits review rounds, not "
+    "fixes. Then `feature escalate --reason '<what you recommend>'`, and a human decides whether to "
+    "review the fixes in another round (`feature budget --set <n>`), merge with them unreviewed, or "
+    "split/redesign the PR. Defer (`feature problem defer <#> --reason '<why>'`) only a blocker "
+    "this PR can't fix."
 )
 
 
