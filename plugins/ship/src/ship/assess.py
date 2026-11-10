@@ -67,16 +67,16 @@ def last_grade(history: list[dict]) -> dict | None:
 
 
 def review_depth(*, size: str, risk: str, complexity: str) -> str:
-    """Risk sets the base depth; a big or complex diff buys one more step, and both together
-    buy two only when the risk is high. A small, simple, low-risk change gets the lightest pass."""
+    """Risk sets the base depth: low risk reviews at low, med at medium, high at high. A missed
+    bug in a low-risk change costs little however big or hard the change is, so size and
+    complexity never lift it. Above that, a big or complex diff buys one more step, and both
+    together buy two only when the risk is high."""
     if size not in SIZES or risk not in LEVELS or complexity not in LEVELS:
         raise ValueError(f"unknown assessment: size={size!r} risk={risk!r} complexity={complexity!r}")
-    if risk == "low" and complexity == "low" and size == "S":
+    if risk == "low":
         return DEPTHS[0]
-    level = {"low": 1, "med": 2, "high": 3}[risk]
     bumps = int(size in ("L", "XL")) + int(complexity == "high")
-    level += bumps if risk == "high" else min(bumps, 1)
-    return DEPTHS[min(level, len(DEPTHS) - 1)]
+    return DEPTHS[LEVELS.index(risk) + (bumps if risk == "high" else min(bumps, 1))]
 
 
 # The severities a round's finds are listed under, worst first. `?` is an unlabelled problem.

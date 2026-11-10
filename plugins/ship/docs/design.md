@@ -408,6 +408,18 @@ written into the PR body for the human, and sizes every later round. A cheap fir
 too low gets corrected by the reviewer that found out. The mapping is code, not prose, so the same
 inputs always buy the same depth.
 
+**Why risk is about stakes, and caps the depth.** PR #38 changed only how ship formats its own
+block in PR bodies, in this personal repo, where a bad write is visible and fixed by hand. Sol
+still graded it high twice ("whole-body rewrites can corrupt persistent author content"), so
+its rounds ran at high, then xhigh, with max next. The rubric listed "data loss or corruption"
+and "stored formats" as high without asking who a bug reaches or whether it can be undone, so
+Sol matched the subject, not the stakes. Its reasoning also mixed in how hard the parser was to
+get right, which is complexity. Now risk is the cost of a missed bug, judged from the repo's
+stakes: reach and reversibility. Each risk level starts at the depth of the same name, and a
+low-risk PR reviews at low whatever its size or complexity: a big, intricate change still costs
+little to get wrong if nobody else is hit and it is easy to undo. For the same reason, many
+findings in a round raise complexity, not risk.
+
 **Why a subagent, not a headless `claude`.** An earlier design spawned `claude -p "/code-review"`
 as a *subprocess* and forced its findings into a JSON schema. That second, long-lived `claude`
 process was reaped by the session manager after ~10 minutes with SIGTERM→SIGKILL — the
