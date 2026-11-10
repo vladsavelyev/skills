@@ -37,9 +37,15 @@ def _legacy_part_of_re(issue: int) -> re.Pattern:
     return re.compile(rf"(?m)\n*^Part of #{issue}[ \t]*$")
 
 
+def _block(body: str) -> re.Match | None:
+    """Ship's block in `body`: the last one, since it sits below the description, and a
+    description that quotes ship's tags (a PR about ship) has its example above it."""
+    return next(reversed(list(_BLOCK_RE.finditer(body))), None)
+
+
 def _block_parts(body: str) -> tuple[str, str]:
     """The assessment and the `Closes` line in `body`'s block, each empty if absent."""
-    block = _BLOCK_RE.search(body)
+    block = _block(body)
     if not block:
         return "", ""
     inner = block.group(1).strip()
@@ -59,20 +65,30 @@ def _without_legacy_ref(body: str, issue: int | None = None) -> tuple[str, str]:
     return body, found[-1] if found else ""
 
 
-def _with_block(body: str, assessment: str, ref: str) -> str:
-    """`body` with its block set to `assessment` and `ref`: replaced in place if it has one,
-    otherwise placed above the trailing signature or at the end."""
+def _render(assessment: str, ref: str) -> str:
     inner = "\n\n".join(p for p in (assessment.strip(), ref) if p)
-    block = f"{_BEGIN}\n{inner}\n{_END}"
-    if _BLOCK_RE.search(body):
-        return _BLOCK_RE.sub(lambda _: block, body, count=1)
-    if not inner:
-        return body
-    text = body.rstrip()
+    return f"{_BEGIN}\n{inner}\n{_END}" if inner else ""
+
+
+def _place(text: str, block: str) -> str:
+    """`text` with `block` added above its trailing signature (a one-line paragraph starting with
+    `🤖`, so the end of a code block quoting one never counts), or at the end."""
+    if not block:
+        return text
+    text = text.rstrip()
     head, _, last = text.rpartition("\n\n")
-    if last.startswith(_SIGNATURE_PREFIX):
+    if last.startswith(_SIGNATURE_PREFIX) and "\n" not in last:
         return f"{head}\n\n{block}\n\n{last}\n" if head else f"{block}\n\n{last}\n"
     return f"{text}\n\n{block}\n" if text else f"{block}\n"
+
+
+def _with_block(body: str, assessment: str, ref: str) -> str:
+    """`body` with its block set to `assessment` and `ref`: replaced in place if it has one,
+    otherwise placed."""
+    block = _render(assessment, ref)
+    if existing := _block(body):
+        return body[: existing.start()] + block + body[existing.end() :]
+    return _place(body, block)
 
 
 def with_ref(body: str, issue: int) -> str:
@@ -89,8 +105,9 @@ def with_assessment(body: str, text: str) -> str:
     return _with_block(body, text, ref or legacy)
 
 
-def with_description(body: str, text: str) -> str:
-    """`text` as the new description, carrying `body`'s block over. `text` is taken as written."""
-    body, legacy = _without_legacy_ref(body)
-    assessment, ref = _block_parts(body)
-    return _with_block(text, assessment, ref or legacy)
+def with_description(body: str, text: str, issue: int) -> str:
+    """`text` as the new description, taken as written, with `body`'s assessment and the reference
+    to feature issue `issue` in a block placed below it. `text` is never searched for a block: a
+    description can quote ship's tags."""
+    assessment, _ = _block_parts(body)
+    return _place(text, _render(assessment, f"Closes #{issue}"))

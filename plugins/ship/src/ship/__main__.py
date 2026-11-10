@@ -272,13 +272,13 @@ def _refresh_assessment(state: dict) -> None:
 
 def cmd_describe(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    _, state, _ = _load_state(branch)
+    issue, state, _ = _load_state(branch)
     if state["pr"] is None:
         sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
-    github.set_pr_description(state["pr"], text, args.title)
+    github.set_pr_description(state["pr"], text, args.title, issue)
     _refresh_assessment(state)
     print(f"Updated the description of PR #{state['pr']}")
 

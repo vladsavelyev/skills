@@ -179,12 +179,12 @@ def set_pr_assessment(pr: int, text: str) -> None:
     run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=prbody.with_assessment(body, text))
 
 
-def set_pr_description(pr: int, text: str, title: str | None) -> None:
+def set_pr_description(pr: int, text: str, title: str | None, issue: int) -> None:
     body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
     cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
     if title:
         cmd += ["--title", title]
-    run(cmd, input_text=prbody.with_description(body, text))
+    run(cmd, input_text=prbody.with_description(body, text, issue))
 
 
 def create_draft_pr(*, branch: str, base: str, title: str, body: str, cwd: str) -> str:
