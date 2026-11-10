@@ -96,6 +96,16 @@ def test_render_before_any_review_is_the_reference_alone():
     assert assess.render(issue=39, review=None) == "> Feature tracking issue: closes #39"
 
 
+def test_render_lists_a_hand_given_severity_after_the_known_ones():
+    grade = {"risk": "low", "complexity": "low", "why": "docs"}
+    history = [{"run": 1, "depth": "low", "found": {"critical": [9], "low": [8]}, "regressions": 0}]
+    out = assess.render(issue=39, review=_review(grade, history, next_depth="low"))
+    assert (
+        out.splitlines()[-1]
+        == "> **Review round 1** (low). Findings: 1 low (#8), 1 critical (#9). Next round would run at low."
+    )
+
+
 def test_render_shows_rounds_recorded_before_found_existed():
     grade = {"risk": "low", "complexity": "low", "why": "docs"}
     history = [

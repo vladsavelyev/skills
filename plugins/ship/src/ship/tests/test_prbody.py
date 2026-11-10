@@ -52,10 +52,12 @@ def test_a_body_from_before_the_block_held_the_reference_is_migrated_once():
         "\n\nCloses #7 <!-- ship -->\n"
     )
     assert prbody.with_block(old, QUOTE, 7) == f"Why.\n\n{SIG}\n\n{_block()}\n"
-    for line in ("Closes #3 <!-- feature-workflow -->", "Part of #7"):
+    for line in ("Closes #7 <!-- feature-workflow -->", "Part of #7"):
         assert prbody.with_block(f"Why.\n\n{line}\n", QUOTE, 7) == f"Why.\n\n{_block()}\n"
     # Someone else's issue is the author's text.
     assert prbody.with_block("Why.\n\nPart of #42\n", QUOTE, 7) == f"Why.\n\nPart of #42\n\n{_block()}\n"
+    example = "Why.\n\n```\nCloses #42 <!-- ship -->\n```"
+    assert prbody.with_block(f"{example}\n\nCloses #7 <!-- ship -->\n", QUOTE, 7) == f"{example}\n\n{_block()}\n"
 
 
 def test_the_legacy_inline_marker_is_not_an_opening_tag():

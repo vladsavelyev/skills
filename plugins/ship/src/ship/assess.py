@@ -89,7 +89,8 @@ def _found(entry: dict) -> str:
     if "found" in entry:
         parts = [
             f"{len(nums)} {sev} ({', '.join(f'#{n}' for n in nums)})"
-            for sev in FOUND_SEVS
+            # Known severities worst first, then any other `sev:*` label a problem was given by hand.
+            for sev in [*FOUND_SEVS, *sorted(entry["found"].keys() - set(FOUND_SEVS))]
             if (nums := entry["found"].get(sev))
         ]
     else:

@@ -25,15 +25,15 @@ _END = "<!-- /ship -->"
 # on GitHub carry that name, so it is read as the block (and renamed on write) ON PURPOSE.
 _BLOCK_RE = re.compile(r"(?ms)^<!-- ship(?::assessment)? -->[ \t]*$.*?^<!-- /ship(?::assessment)? -->[ \t]*$")
 _SIGNATURE_PREFIX = "🤖"
+
+
 # Before the block held it, the reference was a line of its own, marked so it could be told from
 # the author's own `Closes #…` lines; before that, the non-closing `Part of #<issue>`. Kept ON
 # PURPOSE, not cruft: PR bodies on GitHub carry these, and the first write under the current tags
-# drops them, since the block now carries the reference.
-_LEGACY_REF_RE = re.compile(r"(?m)\n*^Closes #\d+ <!-- (?:ship|feature-workflow) -->[ \t]*$")
-
-
-def _legacy_part_of_re(issue: int) -> re.Pattern:
-    return re.compile(rf"(?m)\n*^Part of #{issue}[ \t]*$")
+# drops them for this feature's issue, since the block now carries the reference. Lines naming
+# another issue are the author's (an example quoting ship's format) and stay.
+def _legacy_ref_re(issue: int) -> re.Pattern:
+    return re.compile(rf"(?m)\n*^(?:Closes #{issue} <!-- (?:ship|feature-workflow) -->|Part of #{issue})[ \t]*$")
 
 
 def _block(body: str) -> re.Match | None:
@@ -65,7 +65,7 @@ def with_block(body: str, quote: str, issue: int) -> str:
     block = _wrap(quote)
     existing = _block(body)
     if existing is None or not existing.group(0).startswith(_BEGIN):
-        body = _legacy_part_of_re(issue).sub("", _LEGACY_REF_RE.sub("", body))
+        body = _legacy_ref_re(issue).sub("", body)
         existing = _block(body)
     if existing is not None:
         return body[: existing.start()] + block + body[existing.end() :]
