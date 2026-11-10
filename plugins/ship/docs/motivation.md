@@ -165,6 +165,14 @@ nice-to-have or a "possible Feature Envy" is a judgement call, and letting judge
 gate is the endless loop #5 got out of. Something asked for but built wrong stays a defect, at its
 real severity.
 
+**9. Close-out waits for the gate → close-out is its own skill and records the gate.** `feature
+merge` refused until the gate opened, and the gate wants a review covering HEAD. A PR admin-merged
+with two commits after its last review could then close out only through another review, so the
+`ship` skill, asked to close it out, reviewed a merged PR, and T3 showed a "Review PR" run that
+could block nothing. The gate now says `MERGED` once the PR is in, `feature merge` records what was
+outstanding instead of refusing, and close-out moved to a `close` skill that runs inline and never
+reviews.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

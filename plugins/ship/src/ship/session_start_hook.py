@@ -66,18 +66,18 @@ def main() -> None:
         "`Skill(ship:ship)`, NOT a standalone code reviewer. The skill runs in a "
         "forked subagent and returns a report; follow its `Next` steps."
     )
-    # A merged PR whose feature never closed out is the one state where the gate's advice is moot,
-    # and the branch you're on is the last place anyone will notice — after this session it gets
-    # deleted and the tracking issue is orphaned for good. Say so before the review instructions.
+    # A merged PR whose feature never closed out is the one state where reviewing is pointless, and
+    # the branch you're on is the last place anyone will notice — after this session it gets deleted
+    # and the tracking issue is orphaned for good. The gate says MERGED there; route it to the
+    # close-out skill, which never reviews, rather than to `ship`, which exists to review.
     print(
-        "If the status above warns that the PR is MERGED but the feature was never closed out, do "
-        "that FIRST: `feature merge` (or `feature reconcile` to sweep the whole repo). Reviewing a "
-        "merged feature is not useful; recording what shipped is."
+        "If the gate says MERGED, the PR is in: don't review it. Close the feature out with "
+        "`Skill(ship:close)`, which records what shipped and closes the tracking issue."
     )
-    # The gate line above already says what to do; make the stop condition explicit, because the
-    # failure mode this replaced was an agent reviewing round after round chasing a clean sweep.
+    # Otherwise the gate line says what to do; make the stop condition explicit, because the failure
+    # mode this replaced was an agent reviewing round after round chasing a clean sweep.
     print(
-        "The gate above is authoritative about whether to review again: REVIEW_AGAIN means fix "
+        "Before the merge, the gate decides whether to review again: REVIEW_AGAIN means fix "
         "the blocking problems and run ONE more review round; NEEDS_DECISION means STOP "
         "reviewing and `feature escalate --reason '<recommendation>'` for a human. Only "
         "high/med problems block — never downgrade a severity to open the gate, use "

@@ -7,16 +7,18 @@ the PR: real defects, plus spec gaps and design smells as non-blocking debt, and
 other (via git-town). Review-found problems are tracked as GitHub sub-issues, and a **merge
 gate** blocks until the *blocking* ones are resolved and a review comes back clean. A new Claude
 session on an existing branch reconstructs full context (base branch, last prompt, last review,
-blocking problems) from GitHub.
+blocking problems) from GitHub. Once the PR merges, the `close` skill closes the feature out: it
+records what shipped and closes the tracking issue, and never reviews.
 
-The gate has three verdicts, because "review until a run finds nothing" never terminates — a real
-reviewer always finds *something*:
+Before the merge the gate has three verdicts, because "review until a run finds nothing" never
+terminates — a real reviewer always finds *something*. After it, a fourth ends the loop:
 
 | `feature gate` | Exit | Meaning |
 | --- | --- | --- |
 | `OPEN` | 0 | No blocking problems, and a review has covered the current branch head. Ship it. |
 | `REVIEW_AGAIN` | 10 | Blocking work left, review budget remains. |
 | `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. A human decides: ship the debt, split, or redesign. |
+| `MERGED` | 30 | The PR is in. Nothing left to review; close the feature out. |
 
 Only an explicit `sev:low` is non-blocking: it's tracked debt that ships. A problem with no
 severity label blocks until someone labels it, so a missing label can't quietly loosen the gate.
@@ -130,8 +132,8 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature escalate --reason <t>` | Park at `needs-decision` with your recommendation for a human. |
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |
-| `feature gate [--branch <b>]` | Exit 0 = OPEN, 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION (1 and 2 stay "the command failed"). |
-| `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks the gate *and* that the PR really merged; refuses while an open problem has no follow-up/wontfix decision). |
+| `feature gate [--branch <b>]` | Exit 0 = OPEN, 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION, 30 = MERGED (1 and 2 stay "the command failed"). |
+| `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks that the PR really merged and records what the gate still had outstanding; refuses while an open problem has no follow-up/wontfix decision). |
 | `feature reconcile [--branch <b>] [--dry-run]` | Sweep the repo: close out every feature whose PR already merged, close as `abandoned` the ones whose PR was closed unmerged, and repair the issue link on still-open PRs. |
 | `feature migrate [--branch <b>]` | Upgrade a repo for this CLI version: (re-)create the workflow labels and the feature issue's state block. Run it once per repo after upgrading. |
 
@@ -171,8 +173,8 @@ session on a tracked branch gets its context injected.
 ## Claude skill
 
 `skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (Sol review at a sized depth,
-triage, gate, close-out). Keep it in sync with the CLI:
-when you add or change a command, update the SKILL.md in the same commit.
+triage, gate); `skills/close/SKILL.md` closes it out after the merge. Keep them in sync with the
+CLI: when you add or change a command, update the SKILL.md files in the same commit.
 
 ## Development
 

@@ -16,7 +16,7 @@ def run(n: int, *, blocking: int = 0, low: int = 0, regressions: int = 0, sha: s
     }
 
 
-def gate(*, blocking_open, last_review, history, budget=3, head_sha=HEAD, pinned=False):
+def gate(*, blocking_open, last_review, history, budget=3, head_sha=HEAD, pinned=False, merged=False):
     return evaluate(
         blocking_open=blocking_open,
         last_review=last_review,
@@ -24,6 +24,7 @@ def gate(*, blocking_open, last_review, history, budget=3, head_sha=HEAD, pinned
         budget=budget,
         head_sha=head_sha,
         budget_is_explicit=pinned,
+        pr_merged=merged,
     )
 
 
@@ -190,3 +191,26 @@ def test_churn_trend_ignores_rounds_before_a_base_change():
 def test_both_reasons_reported_together():
     d = gate(blocking_open=3, last_review=DIRTY, history=[DIRTY], head_sha="newsha")
     assert len(d.reasons) == 2
+
+
+def test_a_merged_pr_never_asks_for_another_review_but_names_what_was_outstanding():
+    """An unreviewed tail on a merged PR used to read REVIEW_AGAIN, and an agent reviewed a merged PR."""
+    d = gate(blocking_open=0, last_review=run(1, sha="old11"), history=[run(1, sha="old11")], merged=True)
+    assert d.verdict is Verdict.MERGED
+    assert d.exit_code == 30
+    assert "ship:close" in d.next_step and "review" not in d.next_step.replace("Don't review", "")
+    assert any("old11" in r and "never been reviewed" in r for r in d.reasons)
+
+
+def test_merged_outranks_a_spent_budget():
+    """Past the merge, escalating to a human about review rounds is as moot as another round."""
+    history = [run(1, blocking=1), run(2, blocking=1)]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=2, merged=True)
+    assert d.verdict is Verdict.MERGED
+    assert d.reasons == ["1 blocking problem(s) open"]
+
+
+def test_a_clean_merge_reports_nothing_outstanding():
+    d = gate(blocking_open=0, last_review=CLEAN, history=[DIRTY, CLEAN], merged=True)
+    assert d.verdict is Verdict.MERGED
+    assert d.reasons == []

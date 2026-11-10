@@ -1,6 +1,6 @@
 {
   "name": "ship",
-  "description": "Start features (branch, worktree, draft PR); ship them with a sized Sol review, issue-tracked problems and a merge gate.",
+  "description": "Start features (branch, worktree, draft PR); ship them with a sized Sol review, issue-tracked problems and a merge gate; close them out after the merge.",
   "author": {
     "name": "Vlad Savelyev"
   },

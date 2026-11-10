@@ -88,6 +88,11 @@ def _resolve_budget(state: dict) -> tuple[int, bool, list[str]]:
     return rounds, False, why
 
 
+def _pr_merged(state: dict) -> bool:
+    """Whether the feature's linked PR has merged — the one fact that ends the review loop."""
+    return state["pr"] is not None and github.pr_state(state["pr"]) == "MERGED"
+
+
 def _triage(issue: int) -> problems.Triage:
     return problems.triage(github.sub_issues(issue))
 
@@ -370,6 +375,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
         budget=rounds,
         head_sha=branch_head_sha(branch),
         budget_is_explicit=pinned,
+        pr_merged=_pr_merged(state),
     )
     github.comment(
         issue,
@@ -544,6 +550,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         budget=rounds,
         head_sha=branch_head_sha(branch),
         budget_is_explicit=pinned,
+        pr_merged=pr_state == "MERGED",
     )
 
     if args.json:
@@ -588,11 +595,11 @@ def cmd_status(args: argparse.Namespace) -> None:
         print("Last review: (none valid)")
     print(f"Reviews    : {decision.rounds_used}/{rounds} rounds used ({'; '.join(rounds_why)})")
     print(f"Gate       : {decision}")
-    print(f"  → {decision.next_step}")
+    print(f"  → {'Closed out; nothing left to do.' if state['status'] == 'merged' else decision.next_step}")
     if needs_close_out:
         print(
             f"⚠️  PR #{state['pr']} is MERGED but this feature is still '{state['status']}' — "
-            f"close it out with `feature merge` (or `feature reconcile` for every such feature in the repo)."
+            f"close it out with `Skill(ship:close)` (or `feature reconcile` for every such feature in the repo)."
         )
     print(f"Blocking problems ({len(triaged.blocking)}):")
     for s in triaged.blocking:
@@ -613,6 +620,7 @@ def _gate_for(branch: str) -> tuple[int, dict, problems.Triage, gate.GateDecisio
         budget=rounds,
         head_sha=branch_head_sha(branch),
         budget_is_explicit=pinned,
+        pr_merged=_pr_merged(state),
     )
     return issue, state, triaged, decision
 
@@ -623,7 +631,7 @@ def cmd_gate(args: argparse.Namespace) -> None:
     print(f"GATE {decision} (#{issue})")
     print(f"  → {decision.next_step}")
     print(f"  {triaged.summary()}")
-    # Exit code is the machine interface: 0 ship, 10 review again, 20 human decision needed.
+    # Exit code is the machine interface: 0 ship, 10 review again, 20 human decision needed, 30 merged.
     # (1 and 2 mean the command itself failed — see gate.EXIT_CODES.)
     sys.exit(decision.exit_code)
 
@@ -706,58 +714,63 @@ def _blocking_refs(triaged: problems.Triage) -> str:
 
 
 def cmd_merge(args: argparse.Namespace) -> None:
-    """Final transition: verify the gate, mark merged, close the feature issue.
+    """Final transition: verify the PR merged, mark the feature merged, close the feature issue.
 
-    Does NOT merge the PR itself — the human clicks merge. This records the outcome
-    once the branch is merged and closes the tracking issue.
+    Does NOT merge the PR itself — the human clicks merge. This records the outcome once the PR is
+    merged and closes the tracking issue.
+
+    It doesn't wait for the gate. The gate decides whether a PR may merge; once it has merged that
+    question is answered, and refusing here until a review covered HEAD only bought a review that
+    could block nothing (an admin merge of commits pushed after the last round sent an agent to
+    review a merged PR). What the gate still had outstanding goes into the record instead.
     """
     branch = args.branch or current_branch()
     issue, state, triaged, decision = _gate_for(branch)
-    if not decision.open and not args.force:
-        sys.exit(f"Refusing to close #{issue}: gate {decision}. Use --force to override.")
     # "Merged" is a claim about the world, and this command writes it into the permanent record.
-    # Verify it instead of trusting the caller's timing: run a round too early (the gate opens
-    # *before* the merge) and the feature reads as shipped while the PR is still open — or was
-    # closed unmerged, in which case the work never landed at all.
-    if not args.force:
+    # Verify it instead of trusting the caller's timing: run too early and the feature reads as
+    # shipped while the PR is still open — or was closed unmerged, in which case the work never
+    # landed at all.
+    if decision.verdict is not gate.Verdict.MERGED and not args.force:
         if state["pr"] is None:
             sys.exit(
                 f"Refusing to mark #{issue} merged: no PR is linked, so nothing has merged. "
                 f"Link it with `feature pr <number>` first, or use --force if this feature shipped "
                 f"some other way."
             )
-        pr_state = github.pr_state(state["pr"])
-        if pr_state != "MERGED":
-            sys.exit(
-                f"Refusing to mark #{issue} merged: PR #{state['pr']} is {pr_state}. `feature merge` "
-                f"records the outcome *after* the merge — merge the PR first, then re-run. "
-                f"Use --force to record it anyway."
-            )
+        sys.exit(
+            f"Refusing to mark #{issue} merged: PR #{state['pr']} is {github.pr_state(state['pr'])}. "
+            f"`feature merge` records the outcome *after* the merge — merge the PR first, then re-run. "
+            f"Use --force to record it anyway."
+        )
 
     # Problems that ship open must each have been decided, or nothing ever visits them again.
     if triaged.undecided:
         sys.exit(_undecided_refusal(issue, triaged))
 
-    # Name what actually shipped, derived from the triage rather than asserted. Deferred and
-    # low-severity problems stay open on purpose, and on the --force path there may be blocking
-    # problems too — a note claiming "no blocking problems" there would put a false statement in the
-    # feature's permanent record, which is the exact failure this workflow exists to prevent.
-    if decision.open:
-        note = f"✅ Merged. No blocking problems; {triaged.summary()}."
-    else:
+    # Name what actually shipped, derived from the gate and the triage rather than asserted. Deferred
+    # and low-severity problems stay open on purpose, and blocking problems or unreviewed commits may
+    # have gone in too — a note claiming "no blocking problems" there would put a false statement in
+    # the feature's permanent record, which is the exact failure this workflow exists to prevent.
+    if decision.verdict is not gate.Verdict.MERGED:
         note = (
-            f"⚠️ Merged with `--force` while the gate was **{decision.verdict}** "
-            f"({'; '.join(decision.reasons)}).\n\n"
-            f"Blocking problems overridden: {_blocking_refs(triaged)}.\n{triaged.summary()}."
+            f"⚠️ Recorded as merged with `--force` while the gate was **{decision.verdict}** "
+            f"({'; '.join(decision.reasons) or 'nothing outstanding'}).\n\n{triaged.summary()}."
         )
+    elif decision.reasons:
+        note = f"⚠️ Merged with this still outstanding: {'; '.join(decision.reasons)}."
+        if triaged.blocking:
+            note += f"\n\nBlocking problems that shipped open: {_blocking_refs(triaged)}."
+        note += f"\n{triaged.summary()}."
+    else:
+        note = f"✅ Merged. No blocking problems; {triaged.summary()}."
     # The issue may already be closed: the PR's `Closes #<issue>` reference fires the moment it
     # merges into the default branch, which is usually seconds before anyone runs this. Comment
     # either way, close only if it's still open.
     _record_outcome(issue, state, note, status="merged", already_closed=github.get_issue(issue)["state"] != "OPEN")
     print(f"Marked feature #{issue} merged and closed it.")
     print(f"  {triaged.summary()}")
-    if not decision.open:
-        print(f"  overridden with --force: {len(triaged.blocking)} blocking problem(s) still open")
+    if decision.reasons:
+        print(f"  shipped with: {'; '.join(decision.reasons)}")
 
 
 def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_closed: bool) -> None:
@@ -1118,7 +1131,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser(
         "gate",
-        help="Merge verdict. Exit 0 = OPEN (ship), 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION (human)",
+        help="Merge verdict. Exit 0 = OPEN (ship), 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION (human), 30 = MERGED (close out)",
     )
     c.add_argument("--branch")
     c.set_defaults(func=cmd_gate)
@@ -1139,9 +1152,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_migrate)
 
-    c = sub.add_parser("merge", help="Mark feature merged and close its issue (checks gate + that the PR merged)")
+    c = sub.add_parser("merge", help="Mark feature merged and close its issue (checks that the PR merged)")
     c.add_argument("--branch")
-    c.add_argument("--force", action="store_true", help="Record it even if the gate is closed or the PR isn't merged")
+    c.add_argument("--force", action="store_true", help="Record it even if the PR isn't merged")
     c.set_defaults(func=cmd_merge)
 
     c = sub.add_parser(

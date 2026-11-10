@@ -155,13 +155,14 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
                                └─ budget spent or churning ──▶ needs-decision (human)
 ```
 
-### The merge gate (pure query, three outcomes)
+### The merge gate (pure query, three outcomes, and one after the merge)
 
 | Verdict | Exit | When |
 | --- | --- | --- |
 | `OPEN` | 0 | Zero **blocking** problems open, and the last valid review covered the current branch head. |
 | `REVIEW_AGAIN` | 10 | Blocking work outstanding, review budget remains, and the trend is converging. |
 | `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. A human decides. |
+| `MERGED` | 30 | The PR has merged. Checked first, so it outranks the other three; its reasons still name what was outstanding when it went in. |
 
 The codes skip 1 and 2 deliberately: those already mean "the command failed" (`sys.exit(message)`
 and argparse both use them), so reusing them would make a lost git-config key or a `gh` 503 read as
@@ -274,9 +275,16 @@ pre-existing is a reviewer's call. One case is exempted: if the branch has since
 under a new open PR, the feature is alive, so the sweep hands back the number to `feature pr`
 instead of burying work in flight.
 
-`feature merge` additionally verifies that the PR *actually merged* before writing `merged` into the
-record, since the gate opens before the merge, not after it, and `feature status` flags a merged PR
-whose feature never closed out — which puts the reminder in front of the next session on the branch.
+`feature merge` verifies that the PR *actually merged* before writing `merged` into the record,
+since the gate opens before the merge, not after it, and `feature status` flags a merged PR whose
+feature never closed out — which puts the reminder in front of the next session on the branch.
+
+It doesn't wait for the gate to open. It used to, and the gate's coverage rule then held close-out
+hostage: a PR merged with commits after its last review (an admin merge, say) could only close out
+after another review or `--force`, and the skill forbade `--force`, so an agent reviewed a merged PR
+— a round that could block nothing. Past the merge the gate reports `MERGED` instead, with the
+reasons it would have given, and `feature merge` writes those reasons into the record. Closing out
+is its own skill, `close`, which never reviews; `ship` hands a merged PR to it.
 
 ## Session bootstrap
 
@@ -324,8 +332,8 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
 | `feature escalate --reason <text> [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human. |
 | `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`deferred`/`rejected` are newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
-| `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION` (1 and 2 stay "the command itself failed"). |
-| `feature merge [--branch <b>] [--force]` | Final transition: verify the gate **and that the PR actually merged**, set status `merged`, close the feature issue (or just comment, if the PR's `Closes` reference already closed it). Does not merge the PR itself. |
+| `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION`, 30 = `MERGED` (1 and 2 stay "the command itself failed"). |
+| `feature merge [--branch <b>] [--force]` | Final transition: verify **that the PR actually merged**, record what the gate still had outstanding, set status `merged`, close the feature issue (or just comment, if the PR's `Closes` reference already closed it). Does not merge the PR itself; `--force` records a feature that shipped without its PR merging. |
 | `feature reconcile [--branch <b>] [--dry-run]` | Repo-wide sweep for features the close-out never reached: closes out every feature whose PR merged, closes as `abandoned` those whose PR was closed unmerged (unless the branch has a newer open PR, which it reports instead), and repairs the issue reference on still-open PRs. GitHub-only (no git), so it reaches features whose branch is long deleted. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If the base advanced, invalidates the last review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
 
@@ -361,6 +369,7 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
                              --regressions <blocking reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
    7. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
+      (a merged PR stops at step 1: the caller hands it to Skill(ship:close))
 ```
 
 **Why scope the review through the PR.** The finder is handed the **PR number**, not a diff

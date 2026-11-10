@@ -166,12 +166,48 @@ def test_triage_marks_open_problems_without_a_follow_up_label_undecided():
 def test_merge_refuses_while_open_problems_are_undecided(monkeypatch):
     state = _merged_state()
     triaged = problems.triage([_problem(5, "sev:low"), _problem(6, "sev:low", extra=(problems.FOLLOW_UP,))])
-    decision = cli.gate.GateDecision(verdict=cli.gate.Verdict.OPEN, reasons=[], next_step="", rounds_used=1, budget=2)
-    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, state, triaged, decision))
-    monkeypatch.setattr(github, "pr_state", lambda number: "MERGED")
+    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, state, triaged, _decision(cli.gate.Verdict.MERGED)))
     with pytest.raises(SystemExit) as exc:
         cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
     assert "#5 [sev:low]" in str(exc.value) and "#6" not in str(exc.value)
+
+
+def _decision(verdict, reasons: list[str] | None = None) -> "cli.gate.GateDecision":
+    return cli.gate.GateDecision(verdict=verdict, reasons=reasons or [], next_step="", rounds_used=1, budget=2)
+
+
+def _stub_close_out(monkeypatch, decision, triaged) -> list[str]:
+    notes: list[str] = []
+    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, _merged_state(), triaged, decision))
+    monkeypatch.setattr(github, "pr_state", lambda number: "OPEN")
+    monkeypatch.setattr(github, "get_issue", lambda number: {"state": "OPEN"})
+    monkeypatch.setattr(cli, "_record_outcome", lambda issue, state, note, **kw: notes.append(note))
+    return notes
+
+
+def test_merge_closes_out_a_merged_pr_whose_last_commits_were_never_reviewed(monkeypatch):
+    """The gate's coverage rule held close-out hostage: the only ways past it were a review that
+    could block nothing, or --force. A merged PR closes out, and the record names the unreviewed tail."""
+    tail = "the last review looked at aaa111, but the branch is now at bbb222 — that code has never been reviewed"
+    triaged = problems.triage([_problem(5, "sev:low", extra=(problems.FOLLOW_UP,))])
+    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED, [tail]), triaged)
+    cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
+    assert len(notes) == 1 and tail in notes[0] and "#5" in notes[0]
+    assert not notes[0].startswith("✅")
+
+
+def test_merge_names_blocking_problems_that_shipped_open(monkeypatch):
+    triaged = problems.triage([_problem(8, "sev:high", extra=(problems.FOLLOW_UP,))])
+    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED, ["1 blocking problem(s) open"]), triaged)
+    cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
+    assert "Blocking problems that shipped open: #8" in notes[0]
+
+
+def test_merge_still_refuses_a_pr_that_has_not_merged(monkeypatch):
+    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.OPEN), problems.triage([]))
+    with pytest.raises(SystemExit, match="PR #123 is OPEN"):
+        cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
+    assert notes == []
 
 
 def test_round_finds_counts_by_severity_label():
