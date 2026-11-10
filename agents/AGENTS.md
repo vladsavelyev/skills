@@ -14,7 +14,7 @@ Always build code cleanly, modularly, and with proper architecture and separatio
 
 **Never assume. Don't leave it to me to test.** Be independent: run the app, verify UI changes in a browser (see Browsers below), test user scenarios.
 
-**Prove user-facing changes on video.** When a PR changes what a user sees or does, screencast the browser test that shows it working (cdt's `screencast_start` and `screencast_stop`; copy out the .mp4 it saves) and link the video from the PR description. Where to host it is in this machine's own instructions; when they don't say, give me the local path and say the PR has no video. Anyone the host serves can open the link, so record only data the PR's readers may see.
+**Prove user-facing changes on video.** When a PR changes what a user sees or does, screencast the browser test that shows it working (cdt's `screencast_start` and `screencast_stop`; copy out the .mp4 it saves) and embed it in the PR description. GitHub plays a video inline only from its own upload: drop the file into the PR's comment box in a browser signed in to GitHub, don't post the comment, and put the `https://github.com/user-attachments/assets/…` URL it writes on its own line in the description. This machine's own instructions say which browser is signed in; with none, link the video from a host they name, or give me the local path, and say the PR has no embedded video. Record only data the PR's readers may see.
 
 ### Coding rules
 
