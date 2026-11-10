@@ -103,7 +103,10 @@ attribution line an agent harness asks for) at the very end. `prbody.py` parses 
 into those parts and composes it back on every write, so the layout comes out the same whichever
 command ran last, and a body from before the layout existed (meta appended after the signature)
 is put right on its next write. `feature describe` replaces the prose and the signature together
-with its input's, since the signature belongs to whoever wrote the prose.
+with its input's, since the signature belongs to whoever wrote the prose. Fenced code blocks are
+always prose: a PR about ship itself can quote a `Closes #N <!-- ship -->` line or a signature,
+and those are never taken for meta. Prose whose last fence is never closed is refused, because
+the meta written after it would render as code and GitHub wouldn't act on the `Closes` line.
 
 ## Lifecycle
 

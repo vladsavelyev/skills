@@ -80,7 +80,7 @@ def review_depth(*, size: str, risk: str, complexity: str) -> str:
 
 def render(*, size: str, changed_files: int, changed_lines: int, grade: dict, reviewed_at: str, next_depth: str) -> str:
     return (
-        f"**Risk {grade['risk']} · complexity {grade['complexity']}** · size {size} "
+        f"**Risk {grade['risk']} · complexity {grade['complexity']} · size {size}** "
         f"({changed_files} files, {changed_lines} lines)\n{grade['why'].strip()}\n\n"
         f"Reviewed by Sol at {reviewed_at}; a next round would run at {next_depth}."
     )

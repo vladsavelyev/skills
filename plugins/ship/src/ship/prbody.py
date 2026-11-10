@@ -48,6 +48,9 @@ _RULE_RE = re.compile(r"[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*")
 # `🤖 Claude Opus 5.5 in Claude Code (T3 Code)`.
 _SIGNATURE_PREFIX = "🤖"
 _BLANK_LINE_RE = re.compile(r"\n[ \t]*\n")
+# CommonMark fences. Anything inside one is the author's quoted text, never our meta: a PR about
+# ship itself can quote a `Closes #N <!-- ship -->` line or a signature in a code block.
+_FENCE_OPEN_RE = re.compile(r"(?m)^ {0,3}(`{3,}|~{3,})")
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,36 @@ def feature_ref(issue: int) -> str:
     return f"Closes #{issue} {_REF_MARK}"
 
 
+def _fenced_spans(text: str) -> list[tuple[int, int, bool]]:
+    """`(start, end, closed)` for every fenced code block in `text`, fence lines included. An
+    unclosed fence runs to the end, as it renders."""
+    spans, pos = [], 0
+    while opener := _FENCE_OPEN_RE.search(text, pos):
+        fence = opener.group(1)
+        closer = re.compile(rf"(?m)^ {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*$")
+        line_end = text.find("\n", opener.end())
+        close = closer.search(text, line_end) if line_end != -1 else None
+        end = close.end() if close else len(text)
+        spans.append((opener.start(), end, close is not None))
+        pos = end
+    return spans
+
+
+def _outside(spans: list[tuple[int, int, bool]], start: int, end: int) -> bool:
+    return all(end <= s or start >= e for s, e, _ in spans)
+
+
+def _unfenced(pattern: re.Pattern, text: str) -> list[re.Match]:
+    spans = _fenced_spans(text)
+    return [m for m in pattern.finditer(text) if _outside(spans, m.start(), m.end())]
+
+
+def _without(text: str, matches: list[re.Match]) -> str:
+    for m in reversed(matches):
+        text = text[: m.start()] + text[m.end() :]
+    return text
+
+
 def _split_last_paragraph(text: str) -> tuple[str, str]:
     breaks = list(_BLANK_LINE_RE.finditer(text))
     if not breaks:
@@ -74,8 +107,11 @@ def _peel_signature(text: str) -> tuple[str, str]:
     """Split the author's text into its prose and its trailing signature paragraphs, dropping a
     rule left dangling at the end of the prose (ours, from the last compose)."""
     rest, signature = text.strip(), []
+    spans = _fenced_spans(rest)  # peeling only shortens `rest` from the end, so these stay valid
     while rest:
         head, last = _split_last_paragraph(rest)
+        if not _outside(spans, len(rest) - len(last), len(rest)):
+            break
         if last.lstrip().startswith(_SIGNATURE_PREFIX):
             signature.insert(0, last.strip())
         elif not _RULE_RE.fullmatch(last):
@@ -85,10 +121,11 @@ def _peel_signature(text: str) -> tuple[str, str]:
 
 
 def parse(body: str) -> Parts:
-    assessment = _ASSESS_RE.search(body)
-    refs = list(_FEATURE_REF_RE.finditer(body))
-    rest = _FEATURE_REF_RE.sub("", _ASSESS_RE.sub("", body))
-    prose, signature = _peel_signature(rest)
+    assessments = _unfenced(_ASSESS_RE, body)
+    assessment = assessments[0] if assessments else None
+    rest = _without(body, assessments)
+    refs = _unfenced(_FEATURE_REF_RE, rest)
+    prose, signature = _peel_signature(_without(rest, refs))
     return Parts(
         prose=prose,
         signature=signature,
@@ -98,6 +135,13 @@ def parse(body: str) -> Parts:
 
 
 def compose(parts: Parts) -> str:
+    # Whatever follows an unclosed fence renders inside it: the meta would show as code and GitHub
+    # would not act on the `Closes` line. Closing the fence for the author would rewrite their text.
+    if any(not closed for *_, closed in _fenced_spans(parts.prose)):
+        raise ValueError(
+            "The PR description has a code fence (``` or ~~~) that is never closed, so the meta "
+            "written after it would render as code. Close the fence in the description first."
+        )
     meta = [
         s for s in (f"{_ASSESS_BEGIN}\n{parts.assessment}\n{_ASSESS_END}" if parts.assessment else "", parts.ref) if s
     ]

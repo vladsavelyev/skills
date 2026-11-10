@@ -66,3 +66,14 @@ def test_last_grade_skips_ungraded_entries():
     ]
     assert assess.last_grade(history) == g
     assert assess.last_grade([{"run": 1}]) is None
+
+
+def test_render_bolds_all_three_labels_and_keeps_the_counts_plain():
+    grade = {"risk": "high", "complexity": "med", "why": " Touches auth. "}
+    out = assess.render(
+        size="M", changed_files=7, changed_lines=325, grade=grade, reviewed_at="high", next_depth="xhigh"
+    )
+    assert out == (
+        "**Risk high · complexity med · size M** (7 files, 325 lines)\nTouches auth.\n\n"
+        "Reviewed by Sol at high; a next round would run at xhigh."
+    )
