@@ -30,13 +30,21 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
    report.
 5. **Tidy up.**
    - If the harness is watching the PR (T3's `watch_pull_request`), unwatch it.
-   - The feature's worktree (`git worktree list`) is done with once it's clean and holds nothing
-     the PR doesn't: `git -C <worktree> status --porcelain` is empty and its HEAD is the PR's
-     `headRefOid`. Then leave it if your session is in it (`ExitWorktree`, `action: "keep"`), and
-     run `git worktree remove <worktree>` and `git branch -D <branch>`. Keep the branch if another
+   - The feature's checkout (`git worktree list`) is done with once it holds nothing the PR
+     doesn't. Check all three:
+     - `git -C <checkout> status --porcelain` is empty;
+     - its HEAD is the PR's `headRefOid`;
+     - `git -C <checkout> status --porcelain --ignored` lists nothing but what the checkout can
+       rebuild (`.venv`, `node_modules`, `__pycache__`, tool caches). An ignored `.env`, eval
+       results or logs are the user's, and removing the worktree deletes them without a word:
+       name them and ask first.
+
+     Then, if your session is in it, leave it (`ExitWorktree`, `action: "keep"`). A linked
+     worktree goes with `git worktree remove <worktree>`. The main checkout can't be removed:
+     check out the base branch there and pull it. Then `git branch -D <branch>`, unless another
      branch is stacked on it (`git config --get-regexp '^git-town-branch\..*\.parent$'` names it
-     as a parent), and say so. A worktree with anything else in it stays, and the report names
-     what is there.
+     as a parent); say so if you keep it. A checkout that fails a check stays, and the report
+     names what is in it.
 6. **Report** in two or three lines: the feature closed, what shipped outstanding, the follow-ups
    kept, and what you removed or left.
 
