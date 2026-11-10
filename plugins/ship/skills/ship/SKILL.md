@@ -36,7 +36,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
-| Record a review | `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --complexity <c> --why "<sentence>"` |
+| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list --blocking\|--open`, `add`, `resolve <#> --commit <sha>`, `defer\|reject\|block <#> --reason "…"` |
 | Review budget | `feature budget [--set <n> \| --auto]` |
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
@@ -114,7 +114,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      a guard the intent doesn't need.
    - Same meaning as an OPEN problem → skip.
    - Same as a CLOSED fixed problem → regression. `feature problem block <#> --reason
-     "rediscovered: <repro>"`, and count it (if high/med) in `--new-blocking` and `--regressions`.
+     "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, count it in `--regressions`).
      Never `gh issue reopen`.
    - Same as a REJECTED problem → skip, unless the new repro answers the rejection reason. Then
      `block` it. A problem disputed twice goes to the human: escalate with both sides.
@@ -127,7 +127,9 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      pass `--sev`.
 7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
    the repro, `file:line` and the suggested smallest fix.
-8. **Record**: `feature review record --sha $(git rev-parse HEAD) …`. Write `--summary` as a real
+8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
+   `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
+   the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
    sentence about what was reviewed and found, never a bare "clean pass". Pass the effort Sol ran
    at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`; raise a grade if the
    findings show Sol underrated it, never lower one. The CLI writes the grade into the PR body and

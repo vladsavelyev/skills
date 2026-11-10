@@ -96,17 +96,41 @@ than read with guessed-at defaults.
 
 ### The PR body
 
-The PR body has three parts, in this order: the author's prose, a `---` rule and the CLI's meta
-(the assessment section from `feature review record`, then the `Closes #<issue>` line from
-`feature pr`), and the author's signature (trailing paragraphs starting with `🤖`, the
-attribution line an agent harness asks for) at the very end. `prbody.py` parses the whole body
-into those parts and composes it back on every write, so the layout comes out the same whichever
-command ran last, and a body from before the layout existed (meta appended after the signature)
-is put right on its next write. `feature describe` replaces the prose and the signature together
-with its input's, since the signature belongs to whoever wrote the prose. Fenced code blocks are
-always prose: a PR about ship itself can quote a `Closes #N <!-- ship -->` line or a signature,
-and those are never taken for meta. Prose whose last fence is never closed is refused, because
-the meta written after it would render as code and GitHub wouldn't act on the `Closes` line.
+The PR body has three parts, in this order: the author's prose, the CLI's meta (the assessment
+from `feature review record`, then the `Closes #<issue>` line from `feature pr`), and the
+author's signature (trailing one-line paragraphs starting with `🤖`, the attribution line an agent
+harness asks for) at the very end:
+
+```
+<prose>
+
+> **Risk: high**: whole-body rewrites can corrupt the closing reference
+> **Size: M** (8 files, 412 lines)
+> **Complexity: med**
+> **Reviewed** with Sol, next round would run at xhigh:
+> - round 1 at high: 1 low (#40)
+> - round 2 at xhigh: 4 med (#41, #42, #43, #44)
+> - round 3 at xhigh: nothing found
+
+Closes #39
+
+🤖 Claude Opus 5.5 in Claude Code (T3 Code)
+```
+
+The quote sets the meta apart from the prose. The grade is Sol's latest; each round's line lists
+what it found by severity (recorded with the round from `--found`), which never changes after the
+round, so the block can't go stale between writes.
+
+`prbody.py` parses the whole body into those parts and composes it back on every write, so the
+layout comes out the same whichever command ran last. It reads the meta and the signature only
+from the end of the body, in any order, because every writer has always put them there: matching
+ship's lines anywhere took quoted examples (a PR about ship, a code block) and an author's own
+`Part of #12` for ours. Reading the tail in any order also puts right a body from before this
+layout, which had the meta after the signature. The cost: if someone writes text below the meta,
+the meta is no longer found there, and the next write adds a fresh copy under it. `feature
+describe` replaces the prose and the signature together with its input's, since the signature
+belongs to whoever wrote the prose; it splits only a trailing signature off its input, so a ship
+line the input quotes stays prose.
 
 ## Lifecycle
 
@@ -285,7 +309,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
-| `feature review record --sha <sha> --new-blocking <n> [--new-low <n>] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
+| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. `high`/`med` block the gate; `low` doesn't. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
 | `feature problem defer <number> --reason <why>` | Real problem, deliberately not fixed in this PR: labels it `deferred`, posts the reason, keeps it **open** but out of the blocking set. |
@@ -327,7 +351,7 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
               ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
               ├─ matches a REJECTED one     ─▶ skip, unless the repro answers the rejection
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
-   6. `feature review record --new-blocking <high+med filed & regressed> --new-low <n>
+   6. `feature review record --found <problems filed & regressed>
                              --regressions <blocking reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
    7. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
@@ -400,10 +424,12 @@ bug as an already-tracked problem: matches an OPEN issue → skip; matches a CLO
 regression (reopen, count as new); distinct → file. It also confirms reproducibility so false
 positives never reach the gate.
 
-`feature review record --new-blocking <n>` takes the count of genuinely-new *blocking* problems plus
-blocking regressions; a clean pass is `--new-blocking 0`, which (with zero open blocking sub-issues)
-opens the gate. `--new-low` doesn't gate anything — it keeps the record honest about what a "clean"
-round actually found. `--regressions` counts re-opened *blocking* problems only, and feeds the churn
+`feature review record --found <#>...` takes the problems the round filed or brought back as
+regressions, and counts them by their severity labels: the high/med ones are the round's new
+blocking count, the low ones its new low count. A clean pass is a bare `--found`, which (with zero
+open blocking sub-issues) opens the gate. Low finds don't gate anything; they keep the record honest
+about what a "clean" round actually found, and the round's line in the PR body lists every find by
+severity. `--regressions` counts re-opened *blocking* problems only, and feeds the churn
 signal: a re-opened low-severity nit is not evidence the design is wrong, and escalating on one would
 contradict the rule that low severity never gates.
 

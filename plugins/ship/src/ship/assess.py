@@ -78,9 +78,45 @@ def review_depth(*, size: str, risk: str, complexity: str) -> str:
     return DEPTHS[min(level, len(DEPTHS) - 1)]
 
 
-def render(*, size: str, changed_files: int, changed_lines: int, grade: dict, reviewed_at: str, next_depth: str) -> str:
-    return (
-        f"**Risk {grade['risk']} · complexity {grade['complexity']} · size {size}** "
-        f"({changed_files} files, {changed_lines} lines)\n{grade['why'].strip()}\n\n"
-        f"Reviewed by Sol at {reviewed_at}; a next round would run at {next_depth}."
-    )
+# The severities a round's finds are listed under, worst first. `?` is an unlabelled problem.
+FOUND_SEVS = ("high", "med", "low", "?")
+
+
+def _found(entry: dict) -> str:
+    if "found" not in entry:
+        # Rounds recorded before `--found` existed carry only their counts. Kept ON PURPOSE: those
+        # rounds are already written into feature issues of PRs in flight.
+        return f"{entry['new_blocking']} blocking, {entry['new_low']} low"
+    parts = [
+        f"{len(nums)} {sev} ({', '.join(f'#{n}' for n in nums)})"
+        for sev in FOUND_SEVS
+        if (nums := entry["found"].get(sev))
+    ]
+    if not parts:
+        return "nothing found"
+    regressions = f"; {entry['regressions']} of them back after a fix" if entry["regressions"] else ""
+    return ", ".join(parts) + regressions
+
+
+def _round_line(entry: dict) -> str:
+    if entry.get("placeholder"):
+        return f"- round {entry['run']}: not recorded"
+    # Rounds from before review sizing carry no depth; also already written into feature issues.
+    at = f" at {entry['depth']}" if "depth" in entry else ""
+    return f"- round {entry['run']}{at}: {_found(entry)}"
+
+
+def render(
+    *, size: str, changed_files: int, changed_lines: int, grade: dict, history: list[dict], next_depth: str
+) -> str:
+    """The PR body's assessment: Sol's latest grade and one line per review round. A round's line
+    lists what it found, which never changes afterwards, so the block can't go stale."""
+    rounds = [e for e in history if "run" in e]
+    lines = [
+        f"**Risk: {grade['risk']}**: {grade['why'].strip()}",
+        f"**Size: {size}** ({changed_files} files, {changed_lines} lines)",
+        f"**Complexity: {grade['complexity']}**",
+        f"**Reviewed** with Sol, next round would run at {next_depth}:",
+        *map(_round_line, rounds),
+    ]
+    return "\n".join(f"> {line}" for line in lines)

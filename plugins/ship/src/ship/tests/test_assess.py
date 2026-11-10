@@ -68,12 +68,36 @@ def test_last_grade_skips_ungraded_entries():
     assert assess.last_grade([{"run": 1}]) is None
 
 
-def test_render_bolds_all_three_labels_and_keeps_the_counts_plain():
-    grade = {"risk": "high", "complexity": "med", "why": " Touches auth. "}
-    out = assess.render(
-        size="M", changed_files=7, changed_lines=325, grade=grade, reviewed_at="high", next_depth="xhigh"
-    )
+def test_render_quotes_the_grade_and_one_line_per_round():
+    grade = {"risk": "high", "complexity": "med", "why": " whole-body rewrites can corrupt the ref "}
+    history = [
+        {"run": 1, "depth": "high", "found": {"low": [40]}, "regressions": 0},
+        {"event": "base-advanced"},
+        {"run": 2, "depth": "xhigh", "found": {"high": [41], "med": [42, 44]}, "regressions": 1},
+        {"run": 3, "depth": "xhigh", "found": {}, "regressions": 0},
+    ]
+    out = assess.render(size="M", changed_files=8, changed_lines=412, grade=grade, history=history, next_depth="max")
     assert out == (
-        "**Risk high · complexity med · size M** (7 files, 325 lines)\nTouches auth.\n\n"
-        "Reviewed by Sol at high; a next round would run at xhigh."
+        "> **Risk: high**: whole-body rewrites can corrupt the ref\n"
+        "> **Size: M** (8 files, 412 lines)\n"
+        "> **Complexity: med**\n"
+        "> **Reviewed** with Sol, next round would run at max:\n"
+        "> - round 1 at high: 1 low (#40)\n"
+        "> - round 2 at xhigh: 1 high (#41), 2 med (#42, #44); 1 of them back after a fix\n"
+        "> - round 3 at xhigh: nothing found"
     )
+
+
+def test_render_shows_rounds_recorded_before_found_existed():
+    grade = {"risk": "low", "complexity": "low", "why": "docs"}
+    history = [
+        {"run": 1, "placeholder": True},
+        {"run": 2, "new_blocking": 2, "new_low": 1, "regressions": 0},
+        {"run": 3, "depth": "low", "new_blocking": 0, "new_low": 0, "regressions": 0},
+    ]
+    out = assess.render(size="S", changed_files=1, changed_lines=3, grade=grade, history=history, next_depth="low")
+    assert out.splitlines()[-3:] == [
+        "> - round 1: not recorded",
+        "> - round 2: 2 blocking, 1 low",
+        "> - round 3 at low: 0 blocking, 0 low",
+    ]
