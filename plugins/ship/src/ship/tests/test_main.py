@@ -223,3 +223,29 @@ def test_round_finds_counts_by_severity_label():
 def test_round_finds_refuses_a_number_that_is_not_one_of_the_problems():
     with pytest.raises(SystemExit, match="#99 is not one of its problem sub-issues"):
         cli._round_finds(7, [_problem(40, "sev:low")], [40, 99])
+
+
+def _stub_gate_inputs(monkeypatch, *, pr_state: str, reviewed: str, branch_tip: str, pr_head: str) -> None:
+    state = _merged_state()
+    state["last_review"] = {"run": 1, "sha": reviewed, "new_blocking": 0, "new_low": 0, "regressions": 0, "summary": ""}
+    state["review_history"] = [state["last_review"]]
+    monkeypatch.setattr(cli, "_load_state", lambda branch: (7, state, ""))
+    monkeypatch.setattr(cli, "_triage", lambda issue: problems.triage([]))
+    monkeypatch.setattr(cli, "_resolve_budget", lambda state: (2, False, []))
+    monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
+    monkeypatch.setattr(github, "pr_head_sha", lambda number: pr_head)
+    monkeypatch.setattr(cli, "branch_head_sha", lambda branch: branch_tip)
+
+
+def test_a_merged_pr_is_judged_by_what_merged_not_by_a_stale_local_branch(monkeypatch):
+    """The fix was pushed from another checkout and reviewed; this checkout's branch still sits behind."""
+    _stub_gate_inputs(monkeypatch, pr_state="MERGED", reviewed="fff666", branch_tip="aaa111", pr_head="fff666aaaa")
+    _, _, _, decision = cli._gate_for("add-oauth")
+    assert decision.verdict is cli.gate.Verdict.MERGED
+    assert decision.reasons == []
+
+
+def test_an_open_pr_is_still_judged_by_the_branch_tip(monkeypatch):
+    _stub_gate_inputs(monkeypatch, pr_state="OPEN", reviewed="fff666", branch_tip="aaa111", pr_head="fff666aaaa")
+    _, _, _, decision = cli._gate_for("add-oauth")
+    assert decision.verdict is cli.gate.Verdict.REVIEW_AGAIN

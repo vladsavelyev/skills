@@ -93,6 +93,12 @@ def _pr_merged(state: dict) -> bool:
     return state["pr"] is not None and github.pr_state(state["pr"]) == "MERGED"
 
 
+def _review_head(branch: str, state: dict, pr_merged: bool) -> str:
+    """The commit the last review has to cover. Once the PR has merged that is the PR's head — the code
+    that went in; the local branch may lag behind it (pushed from another checkout) or be gone."""
+    return github.pr_head_sha(state["pr"]) if pr_merged else branch_head_sha(branch)
+
+
 def _triage(issue: int) -> problems.Triage:
     return problems.triage(github.sub_issues(issue))
 
@@ -368,14 +374,15 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     triaged = problems.triage(subs)
     _write_block(state, issue)
     rounds, pinned, _ = _resolve_budget(state)
+    merged = _pr_merged(state)
     decision = gate.evaluate(
         blocking_open=len(triaged.blocking),
         last_review=state["last_review"],
         history=state["review_history"],
         budget=rounds,
-        head_sha=branch_head_sha(branch),
+        head_sha=_review_head(branch, state, merged),
         budget_is_explicit=pinned,
-        pr_merged=_pr_merged(state),
+        pr_merged=merged,
     )
     github.comment(
         issue,
@@ -548,7 +555,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         last_review=state["last_review"],
         history=state["review_history"],
         budget=rounds,
-        head_sha=branch_head_sha(branch),
+        head_sha=_review_head(branch, state, pr_state == "MERGED"),
         budget_is_explicit=pinned,
         pr_merged=pr_state == "MERGED",
     )
@@ -613,14 +620,15 @@ def _gate_for(branch: str) -> tuple[int, dict, problems.Triage, gate.GateDecisio
     issue, state, _ = _load_state(branch)
     triaged = _triage(issue)
     rounds, pinned, _ = _resolve_budget(state)
+    merged = _pr_merged(state)
     decision = gate.evaluate(
         blocking_open=len(triaged.blocking),
         last_review=state["last_review"],
         history=state["review_history"],
         budget=rounds,
-        head_sha=branch_head_sha(branch),
+        head_sha=_review_head(branch, state, merged),
         budget_is_explicit=pinned,
-        pr_merged=_pr_merged(state),
+        pr_merged=merged,
     )
     return issue, state, triaged, decision
 

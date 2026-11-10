@@ -235,6 +235,14 @@ def pr_state(number: int) -> str:
     return pr_states([number])[number]
 
 
+def pr_head_sha(number: int) -> str:
+    """The commit a PR's head points at (`headRefOid`): for a merged PR, the code that went in."""
+    out = run(["gh", "pr", "view", str(number), "--json", "headRefOid", "--jq", ".headRefOid"])
+    if not out:
+        raise ValueError(f"Could not resolve the head commit of PR #{number}")
+    return out
+
+
 def pr_base_branch(number: int) -> str:
     """The base branch a PR targets (`baseRefName`). This defines the PR's review diff
     (`git diff <base>...HEAD`), so the review scope is only correct when it equals the
