@@ -199,7 +199,7 @@ def cmd_adopt(args: argparse.Namespace) -> None:
         state["pr"] = pr
         set_status(state, "in-review")
         _save_state(issue, body, state)
-        github.link_pr_to_feature(pr, issue)
+        _write_block(state, issue)
         github.comment(issue, f"🔗 Linked PR #{pr}.")
 
     print(f"Adopted existing branch '{name}'")
@@ -225,10 +225,9 @@ def cmd_pr(args: argparse.Namespace) -> None:
     state["pr"] = args.number
     set_status(state, "in-review")
     _save_state(issue, body, state)
-    # Native link: `Closes #<issue>` in the PR body so GitHub shows the connection in the PR
+    # Native link: `closes #<issue>` in the PR body so GitHub shows the connection in the PR
     # sidebar and the issue timeline — not just a comment that no linked-issues view reads.
-    github.link_pr_to_feature(args.number, issue)
-    _refresh_assessment(state)
+    _write_block(state, issue)
     github.comment(issue, f"🔗 Linked PR #{args.number}.")
     print(f"Linked PR #{args.number} to feature #{issue}")
 
@@ -251,23 +250,26 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
     return depth, size, files, lines, why
 
 
-def _refresh_assessment(state: dict) -> None:
-    """Render the assessment in the PR body's ship block from `state`: Sol's latest grade and every
-    round so far. Every command that writes the block calls this, so the block always shows the
-    current state in the current format. Nothing to render before a review has graded the PR."""
-    grade = assess.last_grade(state["review_history"])
+def _block_quote(state: dict, issue: int) -> str:
+    """The quote for the PR body's ship block, rendered from `state`: the reference to `issue`, and
+    once a review has graded the PR, Sol's latest grade and every round so far. Every command that
+    writes the block renders it here, so the block always shows the current state."""
+    # `feature reconcile` reads schema-1 states too; those predate grading, so they show the
+    # reference alone.
+    history = state["review_history"] if state["schema"] == SCHEMA else []
+    grade = assess.last_grade(history)
     if grade is None:
-        return
+        return assess.render(issue=issue, review=None)
     next_depth, size, files, lines, _ = _next_depth(state)
-    text = assess.render(
-        size=size,
-        changed_files=files,
-        changed_lines=lines,
-        grade=grade,
-        history=state["review_history"],
-        next_depth=next_depth,
+    review = assess.Review(
+        grade=grade, size=size, changed_files=files, changed_lines=lines, history=history, next_depth=next_depth
     )
-    github.set_pr_assessment(state["pr"], text)
+    return assess.render(issue=issue, review=review)
+
+
+def _write_block(state: dict, issue: int) -> bool:
+    """Set the linked PR's ship block from `state`; True if the body changed."""
+    return github.set_pr_block(state["pr"], _block_quote(state, issue), issue)
 
 
 def cmd_describe(args: argparse.Namespace) -> None:
@@ -278,8 +280,7 @@ def cmd_describe(args: argparse.Namespace) -> None:
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
-    github.set_pr_description(state["pr"], text, args.title, issue)
-    _refresh_assessment(state)
+    github.set_pr_description(state["pr"], text, args.title, _block_quote(state, issue))
     print(f"Updated the description of PR #{state['pr']}")
 
 
@@ -360,7 +361,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
     triaged = problems.triage(subs)
-    _refresh_assessment(state)
+    _write_block(state, issue)
     rounds, pinned, _ = _resolve_budget(state)
     decision = gate.evaluate(
         blocking_open=len(triaged.blocking),
@@ -867,7 +868,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
                 # Whether the body actually needs an edit is only knowable by reading it, which is
                 # what the real run does — don't claim a count here that a dry run can't know.
                 print(f"#{issue} ({row['title']}): PR #{pr} open → reference repaired if stale{stale}")
-            elif github.link_pr_to_feature(pr, issue):
+            elif _write_block(state, issue):
                 print(f"#{issue} ({row['title']}): re-linked — PR #{pr} now closes it on merge{stale}")
                 relinked += 1
             continue

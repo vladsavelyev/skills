@@ -13,6 +13,7 @@ for a max-effort sweep and a migration doesn't get a skim. It comes from size, r
 The mapping lives here, not in the skill, so the same inputs always buy the same depth.
 """
 
+from dataclasses import dataclass
 from fnmatch import fnmatch
 
 SIZES = ("S", "M", "L", "XL")
@@ -111,17 +112,33 @@ def _round_line(entry: dict) -> str:
     return f"{title}{depth}. Findings: {_found(entry)}."
 
 
-def render(
-    *, size: str, changed_files: int, changed_lines: int, grade: dict, history: list[dict], next_depth: str
-) -> str:
-    """The PR body's assessment: Sol's latest grade and one line per review round. A round's line
-    lists what it found, which never changes afterwards, so the block can't go stale."""
-    rounds = [_round_line(e) for e in history if "run" in e]
-    rounds[-1] += f" Next round would run at {next_depth}."
-    lines = [
-        f"**Risk: {_SPELLED[grade['risk']]}**: {grade['why'].strip()}",
-        f"**Size: {size}** ({changed_files} files, {changed_lines} lines)",
-        f"**Complexity: {_SPELLED[grade['complexity']]}**",
-        *rounds,
-    ]
+@dataclass(frozen=True)
+class Review:
+    """What the PR body shows once a review has graded the PR."""
+
+    grade: dict
+    size: str
+    changed_files: int
+    changed_lines: int
+    history: list[dict]
+    next_depth: str
+
+
+def render(*, issue: int, review: Review | None) -> str:
+    """The quote in the PR body's ship block: Sol's latest grade, the closing reference to the
+    feature issue, and one line per review round. A round's line lists what it found, which never
+    changes afterwards. Before any review it is the reference alone."""
+    # `closes` is what makes GitHub close the issue on merge; a bare `#39` would only link it.
+    lines = [f"Feature tracking issue: closes #{issue}"]
+    if review is not None:
+        grade = review.grade
+        rounds = [_round_line(e) for e in review.history if "run" in e]
+        rounds[-1] += f" Next round would run at {review.next_depth}."
+        lines = [
+            f"**Risk: {_SPELLED[grade['risk']]}**: {grade['why'].strip()}",
+            f"Complexity: {_SPELLED[grade['complexity']]}, size: {review.size} "
+            f"({review.changed_files} files, {review.changed_lines} lines)",
+            *lines,
+            *rounds,
+        ]
     return "\n".join(f"> {line}" for line in lines)

@@ -68,7 +68,12 @@ def test_last_grade_skips_ungraded_entries():
     assert assess.last_grade([{"run": 1}]) is None
 
 
-def test_render_quotes_the_grade_and_one_line_per_round():
+def _review(grade: dict, history: list[dict], **kw) -> assess.Review:
+    defaults = {"size": "M", "changed_files": 8, "changed_lines": 412, "next_depth": "max"}
+    return assess.Review(grade=grade, history=history, **(defaults | kw))
+
+
+def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
     grade = {"risk": "high", "complexity": "med", "why": " whole-body rewrites can corrupt the ref "}
     history = [
         {"run": 1, "depth": "high", "found": {"low": [40]}, "regressions": 0},
@@ -76,15 +81,19 @@ def test_render_quotes_the_grade_and_one_line_per_round():
         {"run": 2, "depth": "xhigh", "found": {"high": [41], "med": [42, 44]}, "regressions": 1},
         {"run": 3, "depth": "xhigh", "found": {}, "regressions": 0},
     ]
-    out = assess.render(size="M", changed_files=8, changed_lines=412, grade=grade, history=history, next_depth="max")
-    assert out == (
+    assert assess.render(issue=39, review=_review(grade, history)) == (
         "> **Risk: high**: whole-body rewrites can corrupt the ref\n"
-        "> **Size: M** (8 files, 412 lines)\n"
-        "> **Complexity: medium**\n"
+        "> Complexity: medium, size: M (8 files, 412 lines)\n"
+        "> Feature tracking issue: closes #39\n"
         "> **Review round 1** (high). Findings: 1 low (#40).\n"
         "> **Review round 2** (xhigh). Findings: 1 high (#41), 2 med (#42, #44), 1 of them back after a fix.\n"
         "> **Review round 3** (xhigh). Findings: none. Next round would run at max."
     )
+
+
+def test_render_before_any_review_is_the_reference_alone():
+    # `closes` is what makes GitHub close the issue on merge.
+    assert assess.render(issue=39, review=None) == "> Feature tracking issue: closes #39"
 
 
 def test_render_shows_rounds_recorded_before_found_existed():
@@ -94,7 +103,7 @@ def test_render_shows_rounds_recorded_before_found_existed():
         {"run": 2, "new_blocking": 2, "new_low": 1, "regressions": 0},
         {"run": 3, "depth": "low", "new_blocking": 0, "new_low": 0, "regressions": 0},
     ]
-    out = assess.render(size="S", changed_files=1, changed_lines=3, grade=grade, history=history, next_depth="low")
+    out = assess.render(issue=39, review=_review(grade, history, next_depth="low"))
     assert out.splitlines()[-3:] == [
         "> **Review round 1**. Not recorded.",
         "> **Review round 2**. Findings: 2 blocking, 1 low.",

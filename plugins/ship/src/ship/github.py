@@ -146,13 +146,13 @@ def open_pr_for_branch(branch: str) -> int | None:
     return int(out) if out else None
 
 
-def link_pr_to_feature(pr: int, issue: int) -> bool:
-    """Put a native `Closes #<issue>` reference in the PR body, creating a real GitHub link that
-    shows in the PR's sidebar and closes the tracking issue when the PR merges. Returns True if
-    the body changed.
+def set_pr_block(pr: int, quote: str, issue: int) -> bool:
+    """Set ship's block in the PR body to `quote` (from `assess.render`). The block carries a native
+    `closes #<issue>` reference, a real GitHub link that shows in the PR's sidebar and closes the
+    tracking issue when the PR merges. Returns True if the body changed.
 
-    This used to be a deliberately non-closing `Part of #<issue>`, on the theory that the feature
-    issue outlives the PR and should be closed by `feature merge` once the gate is clean. In
+    The reference used to be a deliberately non-closing `Part of #<issue>`, on the theory that the
+    feature issue outlives the PR and should be closed by `feature merge` once the gate is clean. In
     practice that theory produced a graveyard: `feature merge` is a step a human has to remember
     *after* clicking merge in the GitHub UI, by which point the PR is gone from view and the branch
     is deleted, so nobody ever ran it — one repo reached 12 open tracking issues whose PRs had
@@ -162,29 +162,22 @@ def link_pr_to_feature(pr: int, issue: int) -> bool:
     the PR merges into the **default branch**, so a stacked feature merged into its parent still
     needs closing by hand, and the auto-close writes no record — the state block stays at
     `in-review` and nothing names the debt that shipped.
-
-    The reference lives in ship's block of the body (`prbody`), so re-linking replaces it there,
-    and an old standalone reference line is moved into the block rather than left as a second one.
     """
     body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
-    new_body = prbody.with_ref(body, issue)
+    new_body = prbody.with_block(body, quote, issue)
     if new_body == body:
-        return False  # already linked to this issue
+        return False
     run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=new_body)
     return True
 
 
-def set_pr_assessment(pr: int, text: str) -> None:
-    body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
-    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=prbody.with_assessment(body, text))
-
-
-def set_pr_description(pr: int, text: str, title: str | None, issue: int) -> None:
-    body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
+def set_pr_description(pr: int, text: str, title: str | None, quote: str) -> None:
+    """Replace the PR's description with `text` (and its title with `title`), with ship's block
+    set to `quote` below it."""
     cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
     if title:
         cmd += ["--title", title]
-    run(cmd, input_text=prbody.with_description(body, text, issue))
+    run(cmd, input_text=prbody.with_description(text, quote))
 
 
 def create_draft_pr(*, branch: str, base: str, title: str, body: str, cwd: str) -> str:

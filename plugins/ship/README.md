@@ -137,7 +137,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 
 ## PR ↔ issue linkage
 
-`feature pr` writes a `Closes #<issue>` reference into the PR body, so **merging the PR closes the
+`feature pr` writes a `closes #<issue>` reference into ship's block of the PR body, so **merging the PR closes the
 tracking issue** with nobody having to remember a follow-up command. It used to write a
 non-closing `Part of #<issue>` on the theory that the umbrella issue should outlive its PR and be
 closed deliberately by `feature merge` — in practice that step happens after the merge button, when

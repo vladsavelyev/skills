@@ -103,30 +103,34 @@ Ship owns one tagged block in the PR body, and it is the only part of the body t
 
 <!-- ship -->
 > **Risk: low**: only rewrites ship's own tagged block of the PR body
-> **Size: M** (8 files, 412 lines)
-> **Complexity: low**
+> Complexity: low, size: M (8 files, 412 lines)
+> Feature tracking issue: closes #39
 > **Review round 1** (high). Findings: 1 low (#40).
 > **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
 > **Review round 3** (medium). Findings: none. Next round would run at low.
-
-Closes #39
 <!-- /ship -->
 
 🤖 Claude Opus 5.5 in Claude Code (T3 Code)
 ```
 
-`feature review record` sets the quoted assessment and `feature pr` the `Closes` line, each by
-rewriting what is between the tags (`prbody.py`). A body without the block gets it above the
-author's signature (a trailing paragraph starting with `🤖`, the attribution line an agent harness
-asks for), or at the end. `feature describe` takes its input as the new description, as written,
-and carries the block over. The quote sets the meta apart from the description. The grade is
-Sol's latest; each round's line lists what it found by severity (recorded with the round from
-`--found`), which never changes after the round, so the block can't go stale between writes.
+Every command that writes the block (`feature pr`, `feature describe`, `feature review record`,
+`feature reconcile`) renders the whole quote from the feature's state (`assess.render`) and sets
+it between the tags (`prbody.py`), so the block always shows the current state. Before any review
+it is the reference line alone. A body without the block gets it above the author's signature (a
+trailing one-line paragraph starting with `🤖`, the attribution line an agent harness asks for),
+or at the end. `feature describe` takes its input as the new description, as written, with the
+block below it. The grade is Sol's latest; each round's line lists what it found by severity
+(recorded with the round from `--found`), which never changes after the round.
+
+The reference keeps the `closes` keyword: GitHub closes the issue on merge only when the keyword
+comes right before the number (checked on PR #38's `closingIssuesReferences`: a quoted
+`Feature tracking issue: closes #39` closes it, `Feature tracking issue: #39` doesn't).
 
 Before the block held it, the reference was a standalone line, `Closes #<issue> <!-- ship -->`
 (`<!-- feature-workflow -->` before the rename, and the non-closing `Part of #<issue>` before
-that). PR bodies on GitHub still carry those, so while a body's block holds no reference yet, a
-write moves that line into the block; once it does, nothing outside the block is touched.
+that), and the block was tagged `ship:assessment`. PR bodies on GitHub still carry those, so the
+first write under the current tags drops those lines and replaces the old block; after that,
+nothing outside the block is touched.
 
 ## Lifecycle
 
@@ -233,7 +237,7 @@ first repo to use this workflow reached 17 open tracking issues whose PRs had me
 earlier, all still claiming `in-review`. A step that depends on remembering, at the one moment
 attention has moved on, is not a mechanism.
 
-So the linkage is now GitHub-native and self-firing: `feature pr` writes `Closes #<issue>` into
+So the linkage is now GitHub-native and self-firing: `feature pr` writes `closes #<issue>` into
 ship's tagged block of the PR body (see "The PR body"), apart from the PR's own hand-written
 `Closes #<problem>` lines, which re-linking must not disturb, and
 merging closes the tracking issue with nobody in the loop. The original design chose a non-closing

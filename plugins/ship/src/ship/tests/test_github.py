@@ -33,61 +33,38 @@ def _fake_pr_body_editor(monkeypatch, body: str) -> dict:
     return captured
 
 
-def _linked(issue: int) -> str:
-    return f"<!-- ship -->\nCloses #{issue}\n<!-- /ship -->"
+QUOTE = "> Feature tracking issue: closes #1964"
+BLOCK = f"<!-- ship -->\n{QUOTE}\n<!-- /ship -->"
 
 
-def test_link_pr_puts_the_closing_reference_in_the_block(monkeypatch):
+def test_set_pr_block_adds_the_block(monkeypatch):
     captured = _fake_pr_body_editor(monkeypatch, "Some PR description.")
-    assert github.link_pr_to_feature(1910, 1964) is True
-    # A closing keyword, so merging the PR closes the tracking issue with nobody remembering to.
-    assert captured["body"] == f"Some PR description.\n\n{_linked(1964)}\n"
+    assert github.set_pr_block(1910, QUOTE, 1964) is True
+    assert captured["body"] == f"Some PR description.\n\n{BLOCK}\n"
 
 
-def test_link_pr_is_idempotent_when_already_linked(monkeypatch):
-    captured = _fake_pr_body_editor(monkeypatch, f"Desc.\n\n{_linked(1964)}\n")
-    # Already references this issue — no edit, no duplicate line.
-    assert github.link_pr_to_feature(1910, 1964) is False
+def test_set_pr_block_skips_the_edit_when_nothing_changes(monkeypatch):
+    captured = _fake_pr_body_editor(monkeypatch, f"Desc.\n\n{BLOCK}\n")
+    assert github.set_pr_block(1910, QUOTE, 1964) is False
     assert "body" not in captured
 
 
-def test_link_pr_replaces_stale_reference(monkeypatch):
-    captured = _fake_pr_body_editor(monkeypatch, f"Desc.\n\n{_linked(1981)}\n")
-    # Re-linking to a different issue replaces the old reference rather than stacking a second one.
-    assert github.link_pr_to_feature(1910, 1964) is True
-    assert captured["body"] == f"Desc.\n\n{_linked(1964)}\n"
+def test_set_pr_block_replaces_only_the_block(monkeypatch):
+    # The PR body's own `Closes #<problem>` lines must survive, or re-running `feature pr` would
+    # silently stop those problem sub-issues from auto-closing.
+    old = "Desc.\n\nCloses #2173\n\n<!-- ship -->\n> Feature tracking issue: closes #1981\n<!-- /ship -->\n"
+    captured = _fake_pr_body_editor(monkeypatch, old)
+    assert github.set_pr_block(1910, QUOTE, 1964) is True
+    assert captured["body"] == f"Desc.\n\nCloses #2173\n\n{BLOCK}\n"
 
 
-def test_link_pr_upgrades_the_old_non_closing_reference(monkeypatch):
-    # PRs opened before the reference became a closing one carry `Part of #<issue>`; linking again
-    # replaces that line instead of leaving two references to the same issue behind.
-    captured = _fake_pr_body_editor(monkeypatch, "Desc.\n\nPart of #1964\n")
-    assert github.link_pr_to_feature(1910, 1964) is True
-    assert captured["body"] == f"Desc.\n\n{_linked(1964)}\n"
-
-
-def test_link_pr_upgrades_the_standalone_marked_lines(monkeypatch):
-    # PRs linked before the block held the reference carry a marked line of its own, under the
-    # current marker or the pre-rename one; linking again moves it into the block.
-    for marker in ("ship", "feature-workflow"):
-        captured = _fake_pr_body_editor(monkeypatch, f"Desc.\n\nCloses #1981 <!-- {marker} -->\n")
-        assert github.link_pr_to_feature(1910, 1964) is True
-        assert captured["body"] == f"Desc.\n\n{_linked(1964)}\n"
-
-
-def test_link_pr_leaves_hand_written_problem_closures_alone(monkeypatch):
-    # A PR body's own `Closes #<problem>` lines — including a lone one on its own line — must
-    # survive re-linking, or re-running `feature pr` would silently stop those problem sub-issues
-    # from auto-closing.
-    captured = _fake_pr_body_editor(monkeypatch, "Desc.\n\nCloses #2173\n")
-    assert github.link_pr_to_feature(1910, 1964) is True
-    assert captured["body"] == f"Desc.\n\nCloses #2173\n\n{_linked(1964)}\n"
-
-
-def test_link_pr_handles_empty_body(monkeypatch):
-    captured = _fake_pr_body_editor(monkeypatch, "")
-    assert github.link_pr_to_feature(1910, 1964) is True
-    assert captured["body"] == f"{_linked(1964)}\n"
+def test_set_pr_block_drops_the_old_reference_lines(monkeypatch):
+    # PRs linked before the block held the reference carry a line of their own: the marked
+    # `Closes` under the current or the pre-rename marker, or the non-closing `Part of #<issue>`.
+    for line in ("Closes #1964 <!-- ship -->", "Closes #1964 <!-- feature-workflow -->", "Part of #1964"):
+        captured = _fake_pr_body_editor(monkeypatch, f"Desc.\n\n{line}\n")
+        assert github.set_pr_block(1910, QUOTE, 1964) is True
+        assert captured["body"] == f"Desc.\n\n{BLOCK}\n"
 
 
 def test_pr_states_batches_into_one_aliased_query(monkeypatch):
