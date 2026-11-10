@@ -28,6 +28,7 @@ git -C "$clone" init -q
 git -C "$clone" add -A
 git -C "$clone" -c user.name=t -c user.email=t commit -qm init
 ln -s "$clone/agents" "$home/linked-agents"
+ln -s "$clone/agents/AGENTS.md" "$home/linked-rules.md"
 
 check() { # <name> <file path> <expected substring of the reason, or "allow">
   out=$(jq -n --arg p "$2" '{tool_name: "Edit", tool_input: {file_path: $p}}' | "$scripts/guard.sh")
@@ -45,6 +46,10 @@ check() { # <name> <file path> <expected substring of the reason, or "allow">
 check "shared rules" "$clone/agents/AGENTS.md" "in agents/AGENTS.md, on a branch with a PR"
 check "shared rules say where machine rules go" "$clone/agents/AGENTS.md" "below the fleet"
 check "shared rules through a symlink" "$home/linked-agents/AGENTS.md" "in agents/AGENTS.md"
+check "shared rules through a file symlink" "$home/linked-rules.md" "in agents/AGENTS.md"
+if [ -e "$clone/AGENTS/agents.md" ]; then # a case-insensitive filesystem (macOS)
+  check "shared rules in another case" "$clone/AGENTS/agents.md" "in agents/AGENTS.md"
+fi
 check "new file in a new directory" "$clone/plugins/new/x.md" "in plugins/new/x.md"
 check "cached plugin maps to its directory" "$plugins/cache/vlad-skills/ship/abc123/skills/start/SKILL.md" \
   "in plugins/ship/skills/start/SKILL.md"

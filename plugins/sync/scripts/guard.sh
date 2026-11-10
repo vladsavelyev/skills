@@ -14,8 +14,13 @@ set -eu
 path=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 [ -n "$path" ] || exit 0
 
-# The path with symlinks resolved, also for a file (or directories) that don't exist yet.
+# The path with symlinks resolved and, on a case-insensitive filesystem, its case as stored; also for a
+# file (or directories) that don't exist yet.
 resolve() {
+  if [ -e "$1" ]; then
+    realpath "$1"
+    return
+  fi
   p=$1 rest=
   while [ ! -d "$p" ]; do
     rest="/$(basename "$p")$rest"
