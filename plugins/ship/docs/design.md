@@ -107,7 +107,7 @@ Ship owns one tagged block in the PR body, and it is the only part of the body t
 > Feature tracking issue: closes #39
 > **Review round 1** (high). Findings: 1 low (#40).
 > **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
-> **Review round 3** (medium). Findings: none. Next round would run at low.
+> **Review round 3** (medium). Findings: none. A re-review after new commits would run at low.
 <!-- /ship -->
 
 🤖 Claude Opus 5.5 in Claude Code (T3 Code)
@@ -120,7 +120,10 @@ it is the reference line alone. A body without the block gets it above the autho
 trailing one-line paragraph starting with `🤖`, the attribution line an agent harness asks for),
 or at the end. `feature describe` takes its input as the new description, as written, with the
 block below it. The grade is Sol's latest; each round's line lists what it found by severity
-(recorded with the round from `--found`), which never changes after the round.
+(recorded with the round from `--found`), which never changes after the round. The latest round's
+line ends with the depth Sol's grade buys the next round. After a clean round no round is due (the
+gate only reopens if new commits move the head), so it reads `A re-review after new commits would
+run at <depth>` instead of `Next round would run at <depth>`.
 
 The reference keeps the `closes` keyword: GitHub closes the issue on merge only when the keyword
 comes right before the number (checked on PR #38's `closingIssuesReferences`: a quoted

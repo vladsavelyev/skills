@@ -85,7 +85,7 @@ FOUND_SEVS = ("high", "med", "low", "?")
 _SPELLED = {"low": "low", "med": "medium", "high": "high"}
 
 
-def _found(entry: dict) -> str:
+def _found_parts(entry: dict) -> list[str]:
     if "found" in entry:
         parts = [
             f"{len(nums)} {sev} ({', '.join(f'#{n}' for n in nums)})"
@@ -98,6 +98,11 @@ def _found(entry: dict) -> str:
         # rounds are already written into feature issues of PRs in flight.
         counts = (("blocking", entry["new_blocking"]), ("low", entry["new_low"]))
         parts = [f"{n} {kind}" for kind, n in counts if n]
+    return parts
+
+
+def _found(entry: dict) -> str:
+    parts = _found_parts(entry)
     if not parts:
         return "none"
     regressions = f", {entry['regressions']} of them back after a fix" if entry["regressions"] else ""
@@ -125,6 +130,15 @@ class Review:
     next_depth: str
 
 
+def _next_round(last: dict, depth: str) -> str:
+    """The depth the next round would run at. After a clean round no round is due, so the line
+    says one only follows new commits (they move the head off the reviewed SHA and reopen the gate),
+    rather than read as if another round were pending."""
+    if not last.get("placeholder") and not _found_parts(last):
+        return f" A re-review after new commits would run at {depth}."
+    return f" Next round would run at {depth}."
+
+
 def render(*, issue: int, review: Review | None) -> str:
     """The quote in the PR body's ship block: Sol's latest grade, the closing reference to the
     feature issue, and one line per review round. A round's line lists what it found, which never
@@ -133,8 +147,9 @@ def render(*, issue: int, review: Review | None) -> str:
     lines = [f"Feature tracking issue: closes #{issue}"]
     if review is not None:
         grade = review.grade
-        rounds = [_round_line(e) for e in review.history if "run" in e]
-        rounds[-1] += f" Next round would run at {review.next_depth}."
+        runs = [e for e in review.history if "run" in e]
+        rounds = [_round_line(e) for e in runs]
+        rounds[-1] += _next_round(runs[-1], review.next_depth)
         lines = [
             f"**Risk: {_SPELLED[grade['risk']]}**: {grade['why'].strip()}",
             f"Complexity: {_SPELLED[grade['complexity']]}, size: {review.size} "

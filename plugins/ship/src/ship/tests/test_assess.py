@@ -88,7 +88,7 @@ def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
         "> Feature tracking issue: closes #39\n"
         "> **Review round 1** (high). Findings: 1 low (#40).\n"
         "> **Review round 2** (xhigh). Findings: 1 high (#41), 2 med (#42, #44), 1 of them back after a fix.\n"
-        "> **Review round 3** (xhigh). Findings: none. Next round would run at max."
+        "> **Review round 3** (xhigh). Findings: none. A re-review after new commits would run at max."
     )
 
 
@@ -118,5 +118,5 @@ def test_render_shows_rounds_recorded_before_found_existed():
     assert out.splitlines()[-3:] == [
         "> **Review round 1**. Not recorded.",
         "> **Review round 2**. Findings: 2 blocking, 1 low.",
-        "> **Review round 3** (low). Findings: none. Next round would run at low.",
+        "> **Review round 3** (low). Findings: none. A re-review after new commits would run at low.",
     ]
