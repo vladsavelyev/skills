@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Use only when the user explicitly asks to ship a PR, branch or feature, or when a previous ship report's next steps say to call it again (another round, close-out).
+description: Use when the user asks to ship a PR.
 context: fork
 background: false
 ---
