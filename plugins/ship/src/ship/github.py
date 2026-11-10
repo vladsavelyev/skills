@@ -163,13 +163,14 @@ def link_pr_to_feature(pr: int, issue: int) -> bool:
     needs closing by hand, and the auto-close writes no record — the state block stays at
     `in-review` and nothing names the debt that shipped.
 
-    Any stale reference line of ours is replaced, so re-linking (or upgrading an old
-    `Part of #…`) never stacks a second one; `prbody` places it in the body's layout.
+    The reference lives in ship's block of the body (`prbody`), so re-linking replaces it there,
+    and an old standalone reference line is moved into the block rather than left as a second one.
     """
     body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
-    if prbody.parse(body).ref == prbody.feature_ref(issue):
+    new_body = prbody.with_ref(body, issue)
+    if new_body == body:
         return False  # already linked to this issue
-    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=prbody.with_ref(body, issue))
+    run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=new_body)
     return True
 
 

@@ -96,41 +96,38 @@ than read with guessed-at defaults.
 
 ### The PR body
 
-The PR body has three parts, in this order: the author's prose, the CLI's meta (the assessment
-from `feature review record`, then the `Closes #<issue>` line from `feature pr`), and the
-author's signature (trailing one-line paragraphs starting with `🤖`, the attribution line an agent
-harness asks for) at the very end:
+Ship owns one tagged block in the PR body, and it is the only part of the body the CLI edits:
 
 ```
-<prose>
+<the author's description>
 
-> **Risk: high**: whole-body rewrites can corrupt the closing reference
+<!-- ship:assessment -->
+> **Risk: low**: only rewrites ship's own tagged block of the PR body
 > **Size: M** (8 files, 412 lines)
-> **Complexity: med**
-> **Reviewed** with Sol, next round would run at xhigh:
+> **Complexity: low**
+> **Reviewed** with Sol, next round would run at medium:
 > - round 1 at high: 1 low (#40)
 > - round 2 at xhigh: 4 med (#41, #42, #43, #44)
-> - round 3 at xhigh: nothing found
+> - round 3 at medium: nothing found
 
 Closes #39
+<!-- /ship:assessment -->
 
 🤖 Claude Opus 5.5 in Claude Code (T3 Code)
 ```
 
-The quote sets the meta apart from the prose. The grade is Sol's latest; each round's line lists
-what it found by severity (recorded with the round from `--found`), which never changes after the
-round, so the block can't go stale between writes.
+`feature review record` sets the quoted assessment and `feature pr` the `Closes` line, each by
+rewriting what is between the tags (`prbody.py`). A body without the block gets it above the
+author's signature (a trailing paragraph starting with `🤖`, the attribution line an agent harness
+asks for), or at the end. `feature describe` takes its input as the new description, as written,
+and carries the block over. The quote sets the meta apart from the description. The grade is
+Sol's latest; each round's line lists what it found by severity (recorded with the round from
+`--found`), which never changes after the round, so the block can't go stale between writes.
 
-`prbody.py` parses the whole body into those parts and composes it back on every write, so the
-layout comes out the same whichever command ran last. It reads the meta and the signature only
-from the end of the body, in any order, because every writer has always put them there: matching
-ship's lines anywhere took quoted examples (a PR about ship, a code block) and an author's own
-`Part of #12` for ours. Reading the tail in any order also puts right a body from before this
-layout, which had the meta after the signature. The cost: if someone writes text below the meta,
-the meta is no longer found there, and the next write adds a fresh copy under it. `feature
-describe` replaces the prose and the signature together with its input's, since the signature
-belongs to whoever wrote the prose; it splits only a trailing signature off its input, so a ship
-line the input quotes stays prose.
+Before the block held it, the reference was a standalone line, `Closes #<issue> <!-- ship -->`
+(`<!-- feature-workflow -->` before the rename, and the non-closing `Part of #<issue>` before
+that). PR bodies on GitHub still carry those, so while a body's block holds no reference yet, a
+write moves that line into the block; once it does, nothing outside the block is touched.
 
 ## Lifecycle
 
@@ -237,9 +234,9 @@ first repo to use this workflow reached 17 open tracking issues whose PRs had me
 earlier, all still claiming `in-review`. A step that depends on remembering, at the one moment
 attention has moved on, is not a mechanism.
 
-So the linkage is now GitHub-native and self-firing: `feature pr` writes `Closes #<issue>` into the
-PR body (marked with an invisible `<!-- ship -->` comment (PRs linked before the rename carry `<!-- feature-workflow -->`, which is still recognised) so it can never be confused
-with the PR's own hand-written `Closes #<problem>` lines, which re-linking must not disturb), and
+So the linkage is now GitHub-native and self-firing: `feature pr` writes `Closes #<issue>` into
+ship's tagged block of the PR body (see "The PR body"), apart from the PR's own hand-written
+`Closes #<problem>` lines, which re-linking must not disturb, and
 merging closes the tracking issue with nobody in the loop. The original design chose a non-closing
 `Part of #<issue>` deliberately — the umbrella issue outlives the PR, and its problem sub-issues can
 still be open — but "closed with open children" is a state GitHub renders fine, and a closed issue
@@ -303,7 +300,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | Command | Does |
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>` (the base must be on origin), a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
-| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description's prose and signature (and optionally the title), keeping the assessment section and the feature reference line between them (see "The PR body"). `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
+| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description (and optionally the title), keeping ship's block (see "The PR body"). `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
 | `feature depth [--branch <b>]` | Print the reasoning effort for the next review round (`assess.py`): size from the diff stats; risk from the paths touched (sensitive → high, docs/tests only → low) until a review has graded the PR, then the last grade's risk and complexity. |
 | `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
