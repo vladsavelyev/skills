@@ -506,13 +506,15 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
             f"disposition would change nothing. If it really blocks, re-file it at its true severity "
             f"(`feature problem add --sev high|med …`) and close this one as a duplicate."
         )
+    # Reopen first: if removing a label fails afterwards, the problem is open and blocks with a stale
+    # label, which a re-run fixes. The other order could leave it closed and unlabelled, looking fixed.
+    if sub["state"] != "OPEN":
+        github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
     # Both labels are earlier decisions this revokes. A `wontfix` left on a reopened problem would
     # outlive the fix, and close-out would record the fixed problem as shipped unfixed.
     for label in (problems.DEFERRED, problems.WONTFIX):
         if label in sub["labels"]:
             github.remove_label(args.number, label)
-    if sub["state"] != "OPEN":
-        github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
     github.comment(args.number, f"⛔ Blocking again — the earlier disposition is revoked: {args.reason}")
     print(f"Problem #{args.number} [{problems.severity(sub)}] blocks the gate again")
 
@@ -821,11 +823,15 @@ def _reconcile_note(pr: int, triaged: problems.Triage) -> str:
     shipped = _shipped_problems(triaged)
     if not shipped:
         return f"{note} {triaged.summary()}."
+    # Open blocking problems in a merged PR mean the gate never vetted this merge. A won't-fix one is a
+    # recorded decision, which the gate allows, so it gets no such claim.
     vetted = (
-        "The gate either never opened or was bypassed outside this CLI; this comment is the record of what "
+        " The gate either never opened or was bypassed outside this CLI; this comment is the record of what "
         "actually shipped."
+        if triaged.blocking
+        else ""
     )
-    return note + "".join(f"\n\n⚠️ {line}" for line in shipped) + f" {vetted}\n{triaged.summary()}."
+    return note + "".join(f"\n\n⚠️ {line}" for line in shipped) + f"{vetted}\n{triaged.summary()}."
 
 
 def _abandoned_note(pr: int, triaged: problems.Triage) -> str:
