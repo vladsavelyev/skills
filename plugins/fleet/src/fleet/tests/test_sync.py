@@ -1,5 +1,7 @@
 """`fleet`: what of CLAUDE.md and the settings it copies, and what each machine keeps."""
 
+import subprocess
+
 import pytest
 
 from fleet import sync as fleet
@@ -113,15 +115,34 @@ def test_with_machine_section_without_an_end_marker_refuses():
 AGENTS = ".claude/plugins/marketplaces/m/agents/AGENTS.md"
 
 
+def _git(*args: str, cwd) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _publish(tmp_path, rules: str) -> None:
+    """Commit new rules to the repo every machine clones them from."""
+    origin = tmp_path / "origin"
+    (origin / "agents" / "AGENTS.md").write_text(rules)
+    _git("commit", "-qam", "rules", cwd=origin)
+
+
 def _home(tmp_path, monkeypatch, *, imports: bool = True, rules: bool = True):
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
+    for who in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{who}_NAME", "t")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "t@example.com")
     shared = f"@~/{AGENTS}\n" if imports else "rules inline\n"
     (home / fleet.CLAUDE_MD).write_text(shared + fleet.MARKER + "\nmine\n")
     if rules:
-        (home / AGENTS).parent.mkdir(parents=True)
-        (home / AGENTS).write_text("rules\n")
+        origin = tmp_path / "origin"
+        (origin / "agents").mkdir(parents=True)
+        (origin / "agents" / "AGENTS.md").write_text("rules\n")
+        _git("init", "-q", "-b", "main", cwd=origin)
+        _git("add", "-A", cwd=origin)
+        _git("commit", "-qm", "rules", cwd=origin)
+        _git("clone", "-q", str(origin), str((home / AGENTS).parent.parent), cwd=tmp_path)
     return home
 
 
@@ -156,7 +177,8 @@ def test_agents_md_regenerates_codex_rules_when_either_half_changes(tmp_path, mo
     home = _home(tmp_path, monkeypatch)
     (home / ".codex").mkdir()
     _sync(apply=True)
-    (home / AGENTS).write_text("new rules\n")
+    _publish(tmp_path, "new rules\n")
+    # Only the clone is behind: the Codex copy still matches the rules the clone holds.
     assert _sync(apply=False).unresolved == 1
     _sync(apply=True)
     (home / fleet.CLAUDE_MD).write_text(f"@~/{AGENTS}\n" + fleet.MARKER + "\nmoved\n")
@@ -189,3 +211,28 @@ def test_agents_md_replaces_a_codex_symlink_and_leaves_its_target(tmp_path, monk
 def test_agents_md_flags_a_missing_import_or_file(tmp_path, monkeypatch):
     _home(tmp_path, monkeypatch, imports=False, rules=False)
     assert _sync(apply=True).unresolved == 2
+
+
+def test_agents_md_fast_forwards_a_clone_behind_before_generating_codex_rules(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    (home / ".codex").mkdir()
+    _publish(tmp_path, "new rules\n")
+    assert _sync(apply=True).unresolved == 0
+    assert (home / AGENTS).read_text() == "new rules\n"
+    assert _codex(home).endswith("\n\nnew rules\n\nmine\n")
+
+
+def test_agents_md_in_a_modified_clone_is_a_problem_and_not_copied(tmp_path, monkeypatch, capsys):
+    home = _home(tmp_path, monkeypatch)
+    (home / ".codex").mkdir()
+    (home / AGENTS).write_text("edited here\n")
+    assert _sync(apply=True).unresolved == 1
+    assert "M agents/AGENTS.md" in capsys.readouterr().out
+    assert not (home / fleet.CODEX_AGENTS_MD).exists()
+
+
+def test_agents_md_outside_git_is_a_problem(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch, rules=False)
+    (home / AGENTS).parent.mkdir(parents=True)
+    (home / AGENTS).write_text("rules\n")
+    assert _sync(apply=True).unresolved == 1

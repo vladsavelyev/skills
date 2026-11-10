@@ -7,3 +7,4 @@ README.md for the layout.
   inside the plugin's directory (from the repo root pytest collects every plugin's tests):
   `uv run pytest -q`, `uv run ruff check . && uv run ruff format --check .`.
   ship's design and history are in `plugins/ship/docs/`.
+- `plugins/sync` is POSIX sh with `jq`; its tests are `plugins/sync/tests/test.sh`.

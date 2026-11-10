@@ -12,8 +12,9 @@ it. A check reports drift; `--apply` fixes what can be fixed without a human:
   with a generated section naming the machine, the fleet, and that its memory is its own.
 - `~/.claude/settings*.json`: every key copied, except the machine's own (`machine_settings`).
 - `agents_md` (optional): the shared agent instructions file. The shared part of `~/.claude/CLAUDE.md`
-  must import it, it must exist on every machine, and wherever Codex is installed
-  `~/.codex/AGENTS.md` is generated from it plus the machine's own part of `~/.claude/CLAUDE.md`.
+  must import it, it must exist on every machine in an unmodified clone of its repo, fast-forwarded to
+  the default branch, and wherever Codex is installed `~/.codex/AGENTS.md` is generated from it plus the
+  machine's own part of `~/.claude/CLAUDE.md`.
 
 Reported only: helper commands the statusline and hooks call (`helpers`), and T3 Code, which pins a
 remote's server to the app's own version every time it connects.
@@ -21,6 +22,7 @@ remote's server to the app's own version every time it connects.
 
 import difflib
 import json
+import posixpath
 import re
 import shlex
 import subprocess
@@ -491,9 +493,9 @@ def codex_agents_md(agents_md: str, rules: str, own: str) -> str:
 
 def sync_agents_md(machines: list[Machine], config: Config, apply: bool, report: Report) -> None:
     """The file CLAUDE.md imports has to exist everywhere: a missing `@` import loads nothing, without a
-    word, and every session runs without its rules. Codex has no imports: it reads one global file,
-    `~/.codex/AGENTS.md`, which fleet generates from the same rules plus the machine's own part of
-    CLAUDE.md."""
+    word, and every session runs without its rules. It has to be the same everywhere too, so its clone is
+    checked (`sync_rules_repo`). Codex has no imports: it reads one global file, `~/.codex/AGENTS.md`,
+    which fleet generates from the same rules plus the machine's own part of CLAUDE.md."""
     path = config.agents_md
     if path is None:
         return
@@ -505,15 +507,41 @@ def sync_agents_md(machines: list[Machine], config: Config, apply: bool, report:
     if import_line(path) not in shared.splitlines():
         report.problem(f"the shared part of ~/{CLAUDE_MD} doesn't import it: add the line `{import_line(path)}`")
     for machine in machines:
-        rules = machine.read(path)
-        if rules is None:
+        if machine.read(path) is None:
             report.problem(
                 f"{machine.name}: no ~/{path}, so its CLAUDE.md imports nothing and its Codex instructions can't "
                 "be generated. Pull the repo it lives in there (for a plugin marketplace, "
                 "`claude plugin marketplace update <name>`)"
             )
             continue
+        if not sync_rules_repo(machine, path, apply, report):
+            continue
+        rules = machine.read(path)
+        assert rules is not None
         sync_codex_agents_md(machine, path, rules, apply, report)
+
+
+def sync_rules_repo(machine: Machine, agents_md: str, apply: bool, report: Report) -> bool:
+    """Every machine reads the rules from its own clone of the repo they live in, so the clones must all be at
+    its default branch: a clone with local changes has rules no other machine has, and one behind has old rules
+    (and Codex's copy is generated from it). Returns False when the clone's rules aren't the repo's to copy."""
+    folder = posixpath.dirname(agents_md)
+    cdup = machine.run(["git", "-C", folder, "rev-parse", "--show-cdup"], check=False)
+    if cdup.returncode != 0:
+        report.problem(f"{machine.name}: ~/{agents_md} is not in a git repo, so nothing keeps it the same everywhere")
+        return False
+    repo = posixpath.normpath(posixpath.join(folder, cdup.stdout.strip()))
+    changes = machine.out(["git", "-C", repo, "status", "--porcelain"])
+    if changes:
+        report.problem(
+            f"{machine.name}: ~/{repo} has local changes, which no other machine has: make them in the repo with a "
+            f"PR, then discard them here. Its Codex instructions aren't generated until then."
+        )
+        for line in changes.splitlines():
+            report.note(line)
+        return False
+    sync_repo(machine, repo, machine.out(["git", "-C", repo, "remote", "get-url", "origin"]), apply, report)
+    return True
 
 
 def sync_codex_agents_md(machine: Machine, agents_md: str, rules: str, apply: bool, report: Report) -> None:

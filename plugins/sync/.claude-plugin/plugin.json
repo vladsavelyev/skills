@@ -1,6 +1,6 @@
 {
   "name": "sync",
-  "description": "Keeps the vlad-skills marketplace and its installed plugins updated from GitHub at every session start.",
+  "description": "Keeps the vlad-skills marketplace and its installed plugins updated from GitHub at every session start, and refuses edits to their installed copies, pointing to the repo.",
   "author": {
     "name": "Vlad Savelyev"
   }
