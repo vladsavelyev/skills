@@ -225,36 +225,38 @@ def default_branch(machine: Machine, repo: str) -> str:
     return ref.stdout.strip().removeprefix("origin/")
 
 
-def sync_repo(machine: Machine, repo: str, url: str, apply: bool, report: Report) -> None:
+def sync_repo(machine: Machine, repo: str, url: str, apply: bool, report: Report) -> bool:
+    """Returns whether the clone is now at its default branch's tip."""
     where = f"{machine.name}: ~/{repo}"
     if machine.run(["test", "-d", f"{repo}/.git"], check=False).returncode != 0:
         report.drift(f"{where} is not cloned", apply)
         if not apply:
-            return
+            return False
         machine.run(["git", "clone", "-q", url, repo])
         report.fixed(f"{where}: cloned {url}")
-        return
+        return True
     machine.run(["git", "-C", repo, "fetch", "-q", "origin"])
     branch = default_branch(machine, repo)
     current = machine.out(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])
     counts = machine.out(["git", "-C", repo, "rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"])
     ahead, behind = (int(n) for n in counts.split())
     if current != branch:
-        report.problem(f"{where} is on {current}, not {branch}: its skills are that branch's, not {branch}'s")
-        return
+        report.problem(f"{where} is on {current}, not {branch}: its files are that branch's, not {branch}'s")
+        return False
     if ahead:
         report.problem(f"{where} has {ahead} commit(s) not on origin/{branch}: push or drop them")
-        return
+        return False
     if not behind:
         report.ok(f"{where} at origin/{branch}")
-        return
+        return True
     if machine.out(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"]):
         report.problem(f"{where} is {behind} behind origin/{branch} but has uncommitted changes")
-        return
+        return False
     report.drift(f"{where} is {behind} commit(s) behind origin/{branch}", apply)
     if apply:
         machine.run(["git", "-C", repo, "merge", "-q", "--ff-only", f"origin/{branch}"])
         report.fixed(f"{where} fast-forwarded to origin/{branch}")
+    return apply
 
 
 def sync_skill_link(machine: Machine, source: SkillSource, apply: bool, report: Report) -> None:
@@ -517,7 +519,9 @@ def sync_agents_md(machines: list[Machine], config: Config, apply: bool, report:
         if not sync_rules_repo(machine, path, apply, report):
             continue
         rules = machine.read(path)
-        assert rules is not None
+        if rules is None:
+            report.problem(f"{machine.name}: ~/{path} is gone from its repo's default branch: update `agents_md`")
+            continue
         sync_codex_agents_md(machine, path, rules, apply, report)
 
 
@@ -540,8 +544,7 @@ def sync_rules_repo(machine: Machine, agents_md: str, apply: bool, report: Repor
         for line in changes.splitlines():
             report.note(line)
         return False
-    sync_repo(machine, repo, machine.out(["git", "-C", repo, "remote", "get-url", "origin"]), apply, report)
-    return True
+    return sync_repo(machine, repo, machine.out(["git", "-C", repo, "remote", "get-url", "origin"]), apply, report)
 
 
 def sync_codex_agents_md(machine: Machine, agents_md: str, rules: str, apply: bool, report: Report) -> None:

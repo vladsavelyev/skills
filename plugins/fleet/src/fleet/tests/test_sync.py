@@ -178,7 +178,7 @@ def test_agents_md_regenerates_codex_rules_when_either_half_changes(tmp_path, mo
     (home / ".codex").mkdir()
     _sync(apply=True)
     _publish(tmp_path, "new rules\n")
-    # Only the clone is behind: the Codex copy still matches the rules the clone holds.
+    # The clone is behind; its Codex copy waits for the fast-forward.
     assert _sync(apply=False).unresolved == 1
     _sync(apply=True)
     (home / fleet.CLAUDE_MD).write_text(f"@~/{AGENTS}\n" + fleet.MARKER + "\nmoved\n")
@@ -229,6 +229,24 @@ def test_agents_md_in_a_modified_clone_is_a_problem_and_not_copied(tmp_path, mon
     assert _sync(apply=True).unresolved == 1
     assert "M agents/AGENTS.md" in capsys.readouterr().out
     assert not (home / fleet.CODEX_AGENTS_MD).exists()
+
+
+def test_agents_md_in_a_clone_ahead_of_its_repo_is_a_problem_and_not_copied(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    (home / ".codex").mkdir()
+    clone = (home / AGENTS).parent.parent
+    (home / AGENTS).write_text("committed here only\n")
+    _git("commit", "-qam", "local", cwd=clone)
+    assert _sync(apply=True).unresolved == 1
+    assert not (home / fleet.CODEX_AGENTS_MD).exists()
+
+
+def test_agents_md_removed_upstream_is_a_problem(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    _git("rm", "-q", "agents/AGENTS.md", cwd=tmp_path / "origin")
+    _git("commit", "-qm", "moved", cwd=tmp_path / "origin")
+    assert _sync(apply=True).unresolved == 1
+    assert not (home / AGENTS).exists()
 
 
 def test_agents_md_outside_git_is_a_problem(tmp_path, monkeypatch):
