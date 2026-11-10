@@ -249,6 +249,18 @@ def test_agents_md_removed_upstream_is_a_problem(tmp_path, monkeypatch):
     assert not (home / AGENTS).exists()
 
 
+def test_agents_md_in_a_linked_worktree_is_synced_like_a_clone(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    clone = (home / AGENTS).parent.parent
+    clone.rename(tmp_path / "main-clone")
+    _git("worktree", "add", "-q", "--detach", str(clone), cwd=tmp_path / "main-clone")
+    _git("switch", "-q", "-C", "main", "--ignore-other-worktrees", cwd=clone)
+    (home / ".codex").mkdir()
+    _publish(tmp_path, "new rules\n")
+    assert _sync(apply=True).unresolved == 0
+    assert _codex(home).endswith("\n\nnew rules\n\nmine\n")
+
+
 def test_agents_md_outside_git_is_a_problem(tmp_path, monkeypatch):
     home = _home(tmp_path, monkeypatch, rules=False)
     (home / AGENTS).parent.mkdir(parents=True)
