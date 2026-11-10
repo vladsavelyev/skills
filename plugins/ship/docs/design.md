@@ -344,7 +344,7 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
    4. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
       ─▶ raw findings + Sol's grade of risk and complexity (Sol never sees tracked state)
    5. NOW load tracked state, and for each finding decide (real code + problems):
-       ├─ reproducible?      no ─▶ drop (false positive)
+       ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
        ├─ caused by THIS PR? no ─▶ sev:low, or file + `problem defer` (never blocking)
        └─ duplicate of a tracked problem? (judged by MEANING)
               ├─ matches an OPEN issue      ─▶ skip (already tracked)
@@ -433,8 +433,16 @@ title)`, but two reviews word the same bug differently every time, so a title fi
 never matched across runs — breaking both dedup and regression detection. Instead the agent,
 which is reading the real code, judges *by meaning* whether each finding is the same underlying
 bug as an already-tracked problem: matches an OPEN issue → skip; matches a CLOSED issue →
-regression (reopen, count as new); distinct → file. It also confirms reproducibility so false
+regression (reopen, count as new); distinct → file. It also checks each finding's evidence so false
 positives never reach the gate.
+
+**Evidence is a ladder, and a finding names its rung.** A finding that sounds right reads the same
+whether it is true or not, so Sol says how far it proved each one: *cited* (it read the line),
+*traced* (it walked the failure step by step), or *ran* (a script or test against the real code
+fails as described). The agent takes each finding at least to traced, and to ran when that is
+cheap, and drops what stays at cited. Sol's brief also names where breakage hides past a symbol
+search: wire formats, stored data another reader parses, flags, code a few hops downstream.
+Both come from pstack's `blast-radius` skill (`cursor/plugins`).
 
 `feature review record --found <#>...` takes the problems the round filed or brought back as
 regressions, and counts them by their severity labels: the high/med ones are the round's new

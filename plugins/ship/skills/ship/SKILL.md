@@ -90,13 +90,18 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    no edits, commits, pushes or GitHub comments.
 
    Find real defects this PR introduces: wrong results, crashes, data loss, security holes,
-   broken edge cases on realistic paths, races, missing error handling, regressions in callers
-   of changed code. Check each against the code before reporting it. Skip style and taste.
+   broken edge cases on realistic paths, races, missing error handling, and breakage outside
+   the diff. Callers are the easy part of that. Follow what a symbol search misses: a wire
+   format, a DB column or stored file another reader parses, a config key or feature flag,
+   another language reading the same bytes, code a few hops downstream, the source of a library
+   the change leans on. Check each against the code before reporting it. Skip style and taste.
 
    For each finding give: a title; severity (high = data loss, security hole, crash or silently
    wrong result on a realistic path; med = a real bug on a narrower path; low = anything else);
-   file:line; a concrete failure scenario (inputs or state → wrong outcome); the smallest fix.
-   If you find nothing, say so plainly.
+   file:line; a concrete failure scenario (inputs or state → wrong outcome); the evidence, as
+   far up this ladder as is cheap: cited (you read the line), traced (you walked the failure
+   step by step and it gets there), ran (a script or test calling the real code fails as
+   described; include it); the smallest fix. If you find nothing, say so plainly.
 
    Then grade the PR as a whole, each with low/med/high, plus one or two sentences on what
    drives both:
@@ -115,7 +120,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    ```
 5. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
 6. **Verify and dedup each finding** against the real code:
-   - Can't reproduce it concretely → drop it.
+   - Take its evidence at least to traced, and to ran when a script or test against the real
+     code is cheap. Stuck at cited → drop it.
    - Outside the PR's intent (other paths, rare cases, small perf) → `low`. So is code, a test or
      a guard the intent doesn't need.
    - Same meaning as an OPEN problem → skip.
@@ -132,7 +138,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      everything else. Only `low` is non-blocking, and an unlabelled problem blocks, so always
      pass `--sev`.
 7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
-   the repro, `file:line` and the suggested smallest fix.
+   the repro, its evidence (traced or ran, with the script if ran), `file:line` and the suggested
+   smallest fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
    the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
