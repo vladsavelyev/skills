@@ -100,12 +100,16 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 
    Then grade the PR as a whole, each with low/med/high, plus one or two sentences on what
    drives both:
-   - risk, what a missed bug would cost. high: data loss or corruption, security or auth, money,
-     migrations or stored formats, concurrency, shared infra or deploys, anything hard to roll
-     back. med: user-visible behaviour on a main path, public APIs, error handling. low: docs,
-     tests, tooling, internal refactors with good coverage, and text written to GitHub (PR
-     bodies, issues, comments), which keeps every edit. Grade the cost of a bug left in this
-     change, not how serious its subject sounds.
+   - risk, what a bug left in this change would cost: who it would reach and how hard it would
+     be to undo. Judge the stakes from the repo (its README, what it ships and to whom): the same
+     bug costs far less in a personal tooling repo than in a service with users. high: lasting
+     harm to others that is hard to undo, like data lost or corrupted beyond easy restore,
+     security or auth, money, migrations of stored data, shared infra or deploys. med: wrong
+     behaviour that users or other systems hit on a main path, public APIs, error handling. low:
+     a mistake its author sees and fixes by hand: docs, tests, tooling only its author runs,
+     internal refactors with good coverage, and text written to GitHub (PR bodies, issues,
+     comments), which keeps every edit. Risk is the cost of a bug, not how likely one is (that
+     is complexity) or how serious the subject sounds.
    - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
      invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
@@ -133,9 +137,12 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
    the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
    sentence about what was reviewed and found, never a bare "clean pass". Pass the effort Sol ran
-   at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`; raise a grade if the
-   findings show Sol underrated it, never lower one. The CLI writes the grade into the PR body and
-   sizes the next round's depth from it.
+   at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`, never lowered. Raise
+   complexity when the findings show the change was harder to get right than Sol graded. Raise
+   risk only when a finding shows a bug costs more than Sol graded: it reaches further or is
+   harder to undo. Many findings in a low-risk change still mean low risk. The CLI writes the
+   grade into the PR body and sizes the next round's depth from it: low risk always reviews at
+   low.
 
 ## Gate verdict
 
