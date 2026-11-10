@@ -97,17 +97,18 @@ def _found(entry: dict) -> str:
         counts = (("blocking", entry["new_blocking"]), ("low", entry["new_low"]))
         parts = [f"{n} {kind}" for kind, n in counts if n]
     if not parts:
-        return "nothing found"
-    regressions = f"; {entry['regressions']} of them back after a fix" if entry["regressions"] else ""
+        return "none"
+    regressions = f", {entry['regressions']} of them back after a fix" if entry["regressions"] else ""
     return ", ".join(parts) + regressions
 
 
 def _round_line(entry: dict) -> str:
+    title = f"**Review round {entry['run']}**"
     if entry.get("placeholder"):
-        return f"- round {entry['run']}: not recorded"
+        return f"{title}. Not recorded."
     # Rounds from before review sizing carry no depth; also already written into feature issues.
-    at = f" at {entry['depth']}" if "depth" in entry else ""
-    return f"- round {entry['run']}{at}: {_found(entry)}"
+    depth = f" ({entry['depth']})" if "depth" in entry else ""
+    return f"{title}{depth}. Findings: {_found(entry)}."
 
 
 def render(
@@ -115,12 +116,12 @@ def render(
 ) -> str:
     """The PR body's assessment: Sol's latest grade and one line per review round. A round's line
     lists what it found, which never changes afterwards, so the block can't go stale."""
-    rounds = [e for e in history if "run" in e]
+    rounds = [_round_line(e) for e in history if "run" in e]
+    rounds[-1] += f" Next round would run at {next_depth}."
     lines = [
         f"**Risk: {_SPELLED[grade['risk']]}**: {grade['why'].strip()}",
         f"**Size: {size}** ({changed_files} files, {changed_lines} lines)",
         f"**Complexity: {_SPELLED[grade['complexity']]}**",
-        f"**Reviewed** with Sol, next round would run at {next_depth}:",
-        *map(_round_line, rounds),
+        *rounds,
     ]
     return "\n".join(f"> {line}" for line in lines)

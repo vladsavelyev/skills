@@ -105,10 +105,9 @@ Ship owns one tagged block in the PR body, and it is the only part of the body t
 > **Risk: low**: only rewrites ship's own tagged block of the PR body
 > **Size: M** (8 files, 412 lines)
 > **Complexity: low**
-> **Reviewed** with Sol, next round would run at medium:
-> - round 1 at high: 1 low (#40)
-> - round 2 at xhigh: 4 med (#41, #42, #43, #44)
-> - round 3 at medium: nothing found
+> **Review round 1** (high). Findings: 1 low (#40).
+> **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
+> **Review round 3** (medium). Findings: none. Next round would run at low.
 
 Closes #39
 <!-- /ship:assessment -->
