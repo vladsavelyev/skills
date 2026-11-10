@@ -14,7 +14,7 @@ Always build code cleanly, modularly, and with proper architecture and separatio
 
 **Never assume. Don't leave it to me to test.** Be independent: run the app, verify UI changes in a browser (see Browsers below), test user scenarios.
 
-**Prove user-facing changes on video.** When a PR changes what a user sees or does, screencast the browser test that shows it working (cdt's `screencast_start` and `screencast_stop`; copy out the .mp4 it saves) and link the video from the PR description. Where to host it is in this machine's own instructions; when they don't say, give me the local path and say the PR has no video. Anyone the host serves can open the link, so record only data the PR's readers may see.
+**Prove user-facing changes on video.** When a PR changes what a user sees or does, screencast the browser test that shows it working (cdt's `screencast_start` and `screencast_stop`; copy out the .mp4 it saves) and embed it in the PR description with `gh pr edit <n> --attach <file>.mp4`, which uploads it to GitHub so it plays inline. To place it, write `![](./<file>.mp4)` where it belongs in the `--body-file` body; otherwise it's appended. If your `gh pr edit --help` has no `--attach`, upgrade `gh`. Record only data the PR's readers may see.
 
 ### Coding rules
 
