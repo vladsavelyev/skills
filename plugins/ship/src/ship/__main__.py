@@ -506,10 +506,15 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
             f"disposition would change nothing. If it really blocks, re-file it at its true severity "
             f"(`feature problem add --sev high|med …`) and close this one as a duplicate."
         )
-    if problems.DEFERRED in sub["labels"]:
-        github.remove_label(args.number, problems.DEFERRED)
+    # Reopen first: if removing a label fails afterwards, the problem is open and blocks with a stale
+    # label, which a re-run fixes. The other order could leave it closed and unlabelled, looking fixed.
     if sub["state"] != "OPEN":
         github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
+    # Both labels are earlier decisions this revokes. A `wontfix` left on a reopened problem would
+    # outlive the fix, and close-out would record the fixed problem as shipped unfixed.
+    for label in (problems.DEFERRED, problems.WONTFIX):
+        if label in sub["labels"]:
+            github.remove_label(args.number, label)
     github.comment(args.number, f"⛔ Blocking again — the earlier disposition is revoked: {args.reason}")
     print(f"Problem #{args.number} [{problems.severity(sub)}] blocks the gate again")
 
@@ -673,9 +678,9 @@ def cmd_budget(args: argparse.Namespace) -> None:
 def cmd_escalate(args: argparse.Namespace) -> None:
     """Hand the feature to a human: the review loop isn't converging on its own.
 
-    This is the recorded form of "stop and decide" — ship the remaining debt, buy another review
-    round, split the PR, or redesign. It posts the current gate state alongside the reason so the
-    human sees the evidence, and parks the feature at `needs-decision` (visible on the board).
+    This is the recorded form of "stop and decide": the gate's next step says what the human chooses
+    between. It posts the current gate state alongside the reason so the human sees the evidence,
+    and parks the feature at `needs-decision` (visible on the board).
     """
     branch = args.branch or current_branch()
     issue, state, triaged, decision = _gate_for(branch)
@@ -689,8 +694,7 @@ def cmd_escalate(args: argparse.Namespace) -> None:
         f"Gate: {decision}\n\n"
         f"Blocking: {len(triaged.blocking)} — {blocking_refs}\n"
         f"{triaged.summary()}\n\n"
-        f"Options: ship the rest as debt (`feature problem defer <#> --reason …`), buy another "
-        f"review round (`feature budget --set <n>`), split the PR, or redesign.",
+        f"Next: {decision.next_step}",
     )
     print(f"Escalated #{issue} for a human decision; status is now needs-decision.")
 
@@ -723,6 +727,16 @@ def _blocking_refs(triaged: problems.Triage) -> str:
 
 def _unfixed_refs(triaged: problems.Triage) -> str:
     return ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.shipped_unfixed)
+
+
+def _shipped_problems(triaged: problems.Triage) -> list[str]:
+    """One line per kind of blocking problem that went in with the merge, for the close-out record."""
+    lines = []
+    if triaged.blocking:
+        lines.append(f"Blocking problems that shipped open: {_blocking_refs(triaged)}.")
+    if triaged.shipped_unfixed:
+        lines.append(f"Blocking problems closed as won't-fix, shipped unfixed: {_unfixed_refs(triaged)}.")
+    return lines
 
 
 def cmd_merge(args: argparse.Namespace) -> None:
@@ -768,12 +782,9 @@ def cmd_merge(args: argparse.Namespace) -> None:
             f"⚠️ Recorded as merged with `--force` while the gate was **{decision.verdict}** "
             f"({'; '.join(decision.reasons) or 'nothing outstanding'}).\n\n{triaged.summary()}."
         )
-    elif decision.reasons or triaged.shipped_unfixed:
+    elif decision.reasons or _shipped_problems(triaged):
         note = f"⚠️ Merged with this still outstanding: {'; '.join(decision.reasons) or 'no open blocking problems'}."
-        if triaged.blocking:
-            note += f"\n\nBlocking problems that shipped open: {_blocking_refs(triaged)}."
-        if triaged.shipped_unfixed:
-            note += f"\n\nBlocking problems closed as won't-fix, shipped unfixed: {_unfixed_refs(triaged)}."
+        note += "".join(f"\n\n{line}" for line in _shipped_problems(triaged))
         note += f"\n{triaged.summary()}."
     else:
         note = f"✅ Merged. No blocking problems; {triaged.summary()}."
@@ -809,16 +820,18 @@ def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_
 
 def _reconcile_note(pr: int, triaged: problems.Triage) -> str:
     note = f"✅ Merged in PR #{pr} — recorded after the fact by `feature reconcile`."
-    if triaged.blocking:
-        note += (
-            f"\n\n⚠️ {len(triaged.blocking)} blocking problem(s) were still open when it merged: "
-            f"{_blocking_refs(triaged)}. The gate either never opened or was bypassed outside this "
-            f"CLI; this comment is the record of what actually shipped."
-        )
-    if triaged.shipped_unfixed:
-        note += f"\n\n⚠️ Blocking problems closed as won't-fix, shipped unfixed: {_unfixed_refs(triaged)}."
-    separator = "\n" if triaged.blocking or triaged.shipped_unfixed else " "
-    return f"{note}{separator}{triaged.summary()}."
+    shipped = _shipped_problems(triaged)
+    if not shipped:
+        return f"{note} {triaged.summary()}."
+    # Open blocking problems in a merged PR mean the gate never vetted this merge. A won't-fix one is a
+    # recorded decision, which the gate allows, so it gets no such claim.
+    vetted = (
+        " The gate either never opened or was bypassed outside this CLI; this comment is the record of what "
+        "actually shipped."
+        if triaged.blocking
+        else ""
+    )
+    return note + "".join(f"\n\n⚠️ {line}" for line in shipped) + f"{vetted}\n{triaged.summary()}."
 
 
 def _abandoned_note(pr: int, triaged: problems.Triage) -> str:

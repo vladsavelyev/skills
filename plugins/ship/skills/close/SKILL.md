@@ -42,7 +42,10 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
        without a word.
 
      `--untracked-files=all` overrides a `status.showUntrackedFiles=no` setting, which would hide
-     both kinds. Anything a check turns up stays: name it and ask before removing.
+     both kinds. Anything a check turns up stays: name it and ask before removing. So does a
+     worktree with an initialized submodule (`git -C <checkout> submodule status` lists one without
+     a leading `-`): `git worktree remove` refuses those, and forcing it would delete the
+     submodule's own work.
 
      Then, if your session is in it, leave it (`ExitWorktree`, `action: "keep"`). A linked
      worktree goes with `git worktree remove <worktree>`. The main checkout can't be removed:

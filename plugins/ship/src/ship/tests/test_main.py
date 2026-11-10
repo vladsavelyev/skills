@@ -71,8 +71,8 @@ def test_reconcile_note_names_blocking_problems_that_shipped():
     triaged = problems.triage([_problem(7, "sev:high"), _problem(8, "sev:low")])
     note = cli._reconcile_note(123, triaged)
     # Recorded after the fact means the gate never vetted this merge — say so, with the numbers.
-    assert "#7 [sev:high]" in note
-    assert "1 blocking problem(s) were still open" in note
+    assert "Blocking problems that shipped open: #7 [sev:high]" in note
+    assert "never opened or was bypassed" in note
     assert "#8 [sev:low/open]" in note
 
 
@@ -266,4 +266,33 @@ def test_a_low_problem_closed_as_wontfix_is_not_a_shipped_blocker():
 
 def test_reconcile_names_a_blocker_decided_wontfix():
     triaged = problems.triage([_problem(8, "sev:med", state="CLOSED", extra=(problems.WONTFIX,))])
-    assert "shipped unfixed: #8 [sev:med]" in cli._reconcile_note(123, triaged)
+    note = cli._reconcile_note(123, triaged)
+    assert "shipped unfixed: #8 [sev:med]" in note
+    # A won't-fix is a recorded decision, not a merge the gate never vetted.
+    assert "never opened or was bypassed" not in note
+
+
+def test_block_drops_a_wontfix_label_so_a_reopened_problem_is_not_recorded_as_shipped_unfixed(monkeypatch):
+    removed: list[str] = []
+    sub = _problem(8, "sev:high", state="CLOSED", extra=(problems.WONTFIX,))
+    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: sub)
+    monkeypatch.setattr(github, "remove_label", lambda number, label: removed.append(label))
+    monkeypatch.setattr(github, "comment", lambda number, body: None)
+    monkeypatch.setattr(github, "reopen_issue", lambda number, body: removed.append("reopened"))
+    cli.cmd_problem_block(cli.argparse.Namespace(branch="add-oauth", number=8, reason="rediscovered"))
+    # Reopened before the label goes, so a failure in between leaves it open and blocking.
+    assert removed == ["reopened", problems.WONTFIX]
+
+
+def test_escalate_offers_what_the_gate_says_next(monkeypatch):
+    """The comment used to hard-code the old options, deferral first, contradicting the gate."""
+    posted: list[str] = []
+    decision = cli.gate.GateDecision(
+        verdict=cli.gate.Verdict.NEEDS_DECISION, reasons=[], next_step=cli.gate._NEXT_DECISION, rounds_used=2, budget=2
+    )
+    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, _merged_state(), problems.triage([]), decision))
+    monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
+    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
+    monkeypatch.setattr(github, "comment", lambda number, body: posted.append(body))
+    cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="budget spent"))
+    assert "not fixes" in posted[0] and "ship the rest as debt" not in posted[0]
