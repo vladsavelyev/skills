@@ -76,8 +76,9 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    model the `codex` provider lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`,
    `timeoutMs: 3600000`, and
    `target: {providerInstanceId: "codex", model: <sol model>, options: {reasoningEffort: <depth>}}`.
-   The `task` is the brief below, and nothing about
-   tracked problems or earlier rounds: Sol must find without them. If the wait times out, keep
+   The `task` is the brief below, with the user's request filled in from the `Last prompt` line
+   of `feature status`, and nothing about tracked problems or earlier rounds: Sol must find
+   without them. If the wait times out, keep
    waiting (`t3_thread_wait` on the child thread) until it finishes; never cancel it or review
    yourself instead. If Sol isn't listed, or its task comes back failed (an auth or gateway
    error, a crash), stop: record no review, put Sol's error verbatim in the report, and don't
@@ -103,6 +104,31 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    step by step and it gets there), ran (a script or test calling the real code fails as
    described; include it); the smallest fix. If you find nothing, say so plainly.
 
+   Then, separately from the defects, two more checks, each under its own heading. Give each
+   finding a title, file:line where there is one, and the smallest fix; no severity.
+   - Spec: what the PR's intent asks for that the diff leaves missing or partial, and behaviour
+     the diff adds that nothing asked for. The intent is the PR description, the issues it or its
+     commits reference, and the user's request: <recorded request, or "none recorded">. Don't
+     open issues labelled `feature` or `problem`: they're this review's own bookkeeping. Quote the
+     line of intent each finding rests on. Something asked for but built wrong is a defect: report
+     it with the defects above.
+   - Design: breaches of the repo's documented coding rules (AGENTS.md, CLAUDE.md,
+     CONTRIBUTING.md and the like, and your own instructions), citing the file and the rule; and
+     these smells in the PR's own code, each a judgement call ("possible Feature Envy"):
+     - Mysterious Name: a name that hides or misstates what the thing does or holds.
+     - Duplicated Code: the same logic shape in more than one place in the change.
+     - Feature Envy: a function that works on another object's data more than its own.
+     - Data Clumps: the same few fields or parameters travelling together, a type wanting to exist.
+     - Primitive Obsession: a string or number standing in for a domain concept.
+     - Repeated Switches: the same switch or if-cascade on the same type in several places.
+     - Shotgun Surgery: one logical change scattered as edits across many files.
+     - Divergent Change: one module edited for several unrelated reasons.
+     - Speculative Generality: abstractions, parameters or hooks for needs nothing has.
+     - Message Chains: callers walking `a.b().c().d()` they shouldn't depend on.
+     - Middle Man: a class or function that mostly just delegates onward.
+     - Refused Bequest: a subclass or implementer that ignores most of what it inherits.
+     A documented rule wins over a smell. Skip what a linter or formatter enforces.
+
    Then grade the PR as a whole, each with low/med/high, plus one or two sentences on what
    drives both:
    - risk, what a bug left in this change would cost: who it would reach and how hard it would
@@ -127,9 +153,11 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Same meaning as an OPEN problem → skip.
    - Same as a CLOSED fixed problem → regression. `feature problem block <#> --reason
      "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, count it in `--regressions`).
-     Never `gh issue reopen`.
+     Never `gh issue reopen`. `block` refuses a `low` problem, since low never blocks: file a low
+     regression fresh at low instead, naming the closed one in its body.
    - Same as a REJECTED problem → skip, unless the new repro answers the rejection reason. Then
-     `block` it. A problem disputed twice goes to the human: escalate with both sides.
+     `block` it (a low one: file it fresh, as above). A problem disputed twice goes to the human:
+     escalate with both sides.
    - Same as a WONTFIX problem (closed as not planned) → skip, unless the new repro makes it worse
      than the reason allowed for. Then file it fresh at its real severity.
    - Not caused by this PR → never blocking. File it `--sev low`, or defer it.
@@ -137,13 +165,19 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      silently wrong result on a realistic path; `med` = real bug on a narrower path; `low` =
      everything else. Only `low` is non-blocking, and an unlabelled problem blocks, so always
      pass `--sev`.
+   - Spec and design findings go through the same dedup, then `--sev low`, always: they are
+     tracked debt that never holds the gate. Their evidence is a citation, not a trace: drop a
+     spec gap whose quoted intent doesn't say what Sol claims, a rule breach the cited rule
+     doesn't cover, and a smell outside the PR's own code. Title them `Spec: …` or `Design: …`.
 7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
-   the repro, its evidence (traced or ran, with the script if ran), `file:line` and the suggested
+   the repro, its evidence (traced or ran, with the script if ran; for a spec gap, the quoted
+   intent; for a design finding, the rule or smell and the code), `file:line` and the suggested
    smallest fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
    the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
-   sentence about what was reviewed and found, never a bare "clean pass". Pass the effort Sol ran
+   sentence about what was reviewed and found, never a bare "clean pass"; name any spec and design
+   findings in it. Pass the effort Sol ran
    at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`, never lowered. Raise
    complexity when the findings show the change was harder to get right than Sol graded. Raise
    risk only when a finding shows a bug costs more than Sol graded: it reaches further or is

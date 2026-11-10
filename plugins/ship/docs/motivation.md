@@ -152,6 +152,19 @@ ship under the split skills left two open under a closed parent, with no owner a
 now refuses until each open problem is a `follow-up` (backlog, on purpose) or `wontfix` (closed as
 not planned), and the human makes that call.
 
+**8. Bugs only → bugs, plus spec gaps and design smells as debt.** Sol was told to find defects and
+skip style and taste, so a PR that left out part of what was asked for, or bolted a feature on
+where it should have been built in, passed as long as nothing crashed. Sol now also reports, under
+their own headings, what the intent asked for that the diff lacks or never asked for, and breaches
+of the repo's documented rules plus a fixed list of Fowler's code smells. Both axes come from
+Matt Pocock's [`code-review`](https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review)
+skill (MIT, © 2026 Matt Pocock), whose smell list the brief adapts. His runs them as two separate
+reviewers and reports without triage; here they ride in the same Sol run, so a round costs no
+extra review, and go through the same verify-and-dedup step. They're always filed `low`: a missing
+nice-to-have or a "possible Feature Envy" is a judgement call, and letting judgement calls hold the
+gate is the endless loop #5 got out of. Something asked for but built wrong stays a defect, at its
+real severity.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

@@ -342,15 +342,18 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
    2. `feature describe` ─▶ title + description from the motivation and commit messages
    3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
    4. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
-      ─▶ raw findings + Sol's grade of risk and complexity (Sol never sees tracked state)
+      ─▶ raw defects, spec gaps and design smells + Sol's grade of risk and complexity
+         (Sol gets the recorded request as intent, never tracked state)
    5. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
        ├─ caused by THIS PR? no ─▶ sev:low, or file + `problem defer` (never blocking)
        └─ duplicate of a tracked problem? (judged by MEANING)
               ├─ matches an OPEN issue      ─▶ skip (already tracked)
               ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
+              │                                (a low one: filed fresh, `block` refuses low)
               ├─ matches a REJECTED one     ─▶ skip, unless the repro answers the rejection
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
+                                                    (spec gaps and design smells: always low)
    6. `feature review record --found <problems filed & regressed>
                              --regressions <blocking reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
