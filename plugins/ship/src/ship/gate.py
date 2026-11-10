@@ -9,6 +9,13 @@ The gate has **three** outcomes, because a review loop has three real endings:
                     says another round won't help. A human decides: ship with recorded
                     deferrals, buy another round, split the PR, or redesign.
 
+Once the PR has merged none of them applies, so a fourth verdict ends the loop for good:
+
+  MERGED          — the PR is in. There is nothing left to review or fix in it; what remains is
+                    closing the feature out. The reasons still say what was outstanding when it
+                    merged (an unreviewed tail, open blocking problems), because the close-out
+                    record must name them.
+
 Why three. The old gate demanded a review run with *zero* findings. But the reviewer is built
 to report at every altitude — real defects, nits, pre-existing issues in touched files — so a
 zero-finding run is an event that never happens, and the loop had no other exit. Only *blocking*
@@ -20,11 +27,19 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 # What to do next, per verdict — the gate's most useful output for an agent driving the loop.
-_NEXT_OPEN = "Human merges the PR, then `feature merge`."
+_NEXT_OPEN = "Human merges the PR, then close it out with `Skill(ship:close)`."
+# A review after the merge can block nothing, and the old advice ("review again") sent agents to do
+# exactly that on a merged PR whose last commits were never reviewed.
+_NEXT_MERGED = "Don't review: the PR has merged. Close the feature out with `Skill(ship:close)`."
+# The budget limits review rounds, not fixes. The old wording listed only "ship the rest as debt",
+# "buy a round" or "split/redesign", so an agent at a spent budget deferred real blockers it could
+# have fixed in minutes and asked the human for permission to fix them.
 _NEXT_DECISION = (
-    "STOP reviewing — a human decides. Run `feature escalate --reason '<what you recommend>'`, "
-    "then one of: ship the rest as debt (`feature problem defer <#> --reason '<why>'`), buy "
-    "another round (`feature budget --set <n>`), or split/redesign the PR."
+    "STOP reviewing, but still fix the blocking problems: the budget limits review rounds, not "
+    "fixes. Then `feature escalate --reason '<what you recommend>'`, and a human decides whether to "
+    "review the fixes in another round (`feature budget --set <n>`), merge with them unreviewed, or "
+    "split/redesign the PR. Defer (`feature problem defer <#> --reason '<why>'`) only a blocker "
+    "this PR can't fix."
 )
 
 
@@ -32,13 +47,14 @@ class Verdict(StrEnum):
     OPEN = "OPEN"
     REVIEW_AGAIN = "REVIEW_AGAIN"
     NEEDS_DECISION = "NEEDS_DECISION"
+    MERGED = "MERGED"
 
 
 # Exit codes are the machine interface. Deliberately NOT 1 and 2: those are already spoken for by
 # "the command failed" — an uncaught exception and `sys.exit("message")` exit 1, argparse usage
 # errors exit 2. If REVIEW_AGAIN were 1, a lost `feature-issue` git-config key or a `gh` 503 would
 # read as "spend another review round", and a mistyped flag would read as "escalate to a human".
-EXIT_CODES = {Verdict.OPEN: 0, Verdict.REVIEW_AGAIN: 10, Verdict.NEEDS_DECISION: 20}
+EXIT_CODES = {Verdict.OPEN: 0, Verdict.REVIEW_AGAIN: 10, Verdict.NEEDS_DECISION: 20, Verdict.MERGED: 30}
 
 
 @dataclass(frozen=True)
@@ -61,6 +77,9 @@ class GateDecision:
         used = f"reviews {self.rounds_used}/{self.budget}"
         if self.open:
             return f"OPEN: nothing blocking, last review clean ({used}). Safe to merge."
+        if self.verdict is Verdict.MERGED:
+            shipped = "; ".join(self.reasons) if self.reasons else "nothing blocking, last review covered it"
+            return f"MERGED: the PR is in, nothing left to review (merged with: {shipped}; {used})"
         return f"{self.verdict}: " + "; ".join([*self.reasons, used])
 
 
@@ -135,6 +154,7 @@ def evaluate(
     budget: int,
     head_sha: str,
     budget_is_explicit: bool = False,
+    pr_merged: bool = False,
 ) -> GateDecision:
     """Decide the gate from the open blocking problems and whether a review covers the current code.
 
@@ -149,6 +169,9 @@ def evaluate(
     correctly: a fix commits, so HEAD moves and a fresh review is required; a deferral doesn't, so
     the existing review still stands and the human's decision takes effect. Counts remain in
     `review_history` for the convergence trend.
+
+    `pr_merged` short-circuits to MERGED but keeps the reasons: the loop is over either way, and the
+    close-out record names what was still outstanding when the PR went in.
     """
     rounds = rounds_since_invalidation(history)
     used = len(rounds)
@@ -164,6 +187,8 @@ def evaluate(
             f"that code has never been reviewed"
         )
 
+    if pr_merged:
+        return GateDecision(Verdict.MERGED, reasons, _NEXT_MERGED, used, budget)
     if not reasons:
         return GateDecision(Verdict.OPEN, [], _NEXT_OPEN, used, budget)
 

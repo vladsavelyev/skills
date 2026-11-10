@@ -63,6 +63,9 @@ class Triage:
     blocking: list[dict]  # open, not explicitly low, not deferred — these hold the gate
     debt: list[dict]  # open, non-blocking (low severity, or disposed) — ships with the PR
     undecided: list[dict]  # open and not yet a `follow-up` — these hold the close-out
+    # Closed as won't-fix at a blocking severity: no longer open, but the code still has the bug, so
+    # the close-out record must name it whether the decision came before the merge or after it.
+    shipped_unfixed: list[dict]
 
     def summary(self) -> str:
         """One line naming the debt that ships, so it is never invisible at merge time."""
@@ -78,4 +81,9 @@ def triage(subs: list[dict]) -> Triage:
         blocking=[s for s in open_subs if is_blocking(s)],
         debt=[s for s in open_subs if not is_blocking(s)],
         undecided=[s for s in open_subs if FOLLOW_UP not in s["labels"]],
+        shipped_unfixed=[
+            s
+            for s in subs
+            if s["state"] == "CLOSED" and WONTFIX in s["labels"] and severity(s) not in NON_BLOCKING_SEVS
+        ],
     )

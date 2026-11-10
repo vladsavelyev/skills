@@ -103,4 +103,4 @@ The PR is **ready** when, on the latest head:
 Stop there and report it ready. Merge only when the user explicitly asked for a merge. Right before
 merging, `git fetch` and check the gate again; if the base moved, sync, push, and wait for green
 again. *Ship-tracked:* never merge; ship leaves the merge to the user. Report it ready with the
-debt ship named, and after the user merges, call `Skill(ship:ship)` to close the feature out.
+debt ship named, and after the user merges, call `Skill(ship:close)` to close the feature out.

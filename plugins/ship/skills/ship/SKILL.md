@@ -7,9 +7,13 @@ background: false
 
 # ship
 
-You run in a forked subagent. Do the one job the caller asked for (a review round, a gate check,
-a resume or a close-out), then end with the **report** below. The caller never sees this file,
-so the report must tell it everything it needs.
+You run in a forked subagent. Do the one job the caller asked for (a review round, a gate check
+or a resume), then end with the **report** below. The caller never sees this file, so the report
+must tell it everything it needs.
+
+A merged PR is not yours: reviewing it can block nothing, and closing it out is
+`Skill(ship:close)`. If the PR has merged, or the gate says `MERGED`, do nothing else and report
+that the caller must call `Skill(ship:close)`.
 
 The `feature` CLI (`plugins/ship` in the `vladsavelyev/skills` repo, design in its
 `docs/design.md`) keeps all state in GitHub + git config. A tracked feature is a branch, its
@@ -31,7 +35,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Situation | Command |
 | --- | --- |
 | Track the branch | `feature adopt` (also creates the workflow labels if the repo lacks them) |
-| Resume | `feature status`. If it warns merged-but-not-closed-out, run `feature merge` first. |
+| Resume | `feature status`. If the gate says `MERGED`, stop and hand back to `Skill(ship:close)`. |
 | Record the user's request | `feature prompt "<request>"` |
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
@@ -41,16 +45,15 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Review budget | `feature budget [--set <n> \| --auto]` |
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
 | Sync with base | `feature sync [--stack]` |
-| Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION; 1/2 mean the command failed |
-| Close-out decision | `feature problem follow-up\|wontfix <#> --reason "…"` |
-| Close out | `feature merge`, or `feature reconcile [--dry-run]` repo-wide |
+| Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
 
 ## Review round
 
 1. **Track the PR.** Take the PR the caller named, else the current branch's open PR
-   (`gh pr view --json number,headRefName,baseRefName,isDraft`). No PR → don't review; report
-   that the caller must open one against the parent branch. The **worktree** is the checkout that
+   (`gh pr view --json number,headRefName,baseRefName,isDraft,state`). No PR → don't review;
+   report that the caller must open one against the parent branch. Merged → don't review; report
+   that the caller must call `Skill(ship:close)`. The **worktree** is the checkout that
    has its branch (`git worktree list`). If none has it, run `gh pr checkout <PR#>` inside a new
    `git worktree add --detach .claude/worktrees/<branch>` from the main checkout.
    - Untracked branch (`feature status` says so): `feature adopt`. It links the open PR and takes the PR's base as the parent, or refuses if
@@ -191,28 +194,21 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
   (`gh pr ready <PR#>`) only when the caller asked to ship; for a plain review, say in `Next`
   that it's still a draft. The human merges.
 - `REVIEW_AGAIN` (10): the caller fixes the blocking problems, then calls this skill again.
-- `NEEDS_DECISION` (20): no more rounds. `feature escalate` with exactly one recommendation: ship
-  it (defer the rest with reasons), buy one round (`feature budget --set`, only with a concrete
-  reason), split the PR, or redesign.
-
-## Close out
-
-After the human merges, every problem still open needs a decision before the feature closes:
-`feature merge` and `feature reconcile` refuse until there is one, because once the feature is
-closed nothing comes back to an undecided problem. The two decisions:
-
-- `feature problem follow-up <#> --reason "…"`: worth fixing later; stays open as a backlog issue.
-- `feature problem wontfix <#> --reason "…"`: not worth fixing; closed as not planned.
-
-Don't decide them yourself. List them in the report with one recommendation each and the reason,
-and let the caller ask the user. Then run `feature merge`.
+- `MERGED` (30): the PR is in. Don't review; the caller closes it out with `Skill(ship:close)`.
+- `NEEDS_DECISION` (20): no more review rounds without a human. The budget limits reviews, not
+  fixes: the blocking problems still get fixed, exactly as for `REVIEW_AGAIN`. `feature escalate`
+  with one recommendation for after the fixes: review them in one more round (`feature budget
+  --set`), merge with them unreviewed (close-out records that), split the PR, or redesign it.
+  Recommend deferring a blocker only when this PR can't fix it, and say why. When the gate names
+  churn (fixes re-opening old bugs, findings rising), say so: splitting or redesigning may beat
+  another fix.
 
 ## Rules
 
 - Never lower a severity, or Sol's risk or complexity grade, to open the gate or buy a cheaper
   review.
   Defer with a reason instead.
-- Never `feature merge --force`. Never merge for the human.
+- Never close a feature out here, and never merge for the human.
 - Close fixed problems with `problem resolve`, not a `Closes #a, #b` PR line (GitHub links only the
   first number).
 - Don't hand-edit the JSON block in a feature issue, or the assessment section in a PR body.
@@ -241,7 +237,10 @@ Always include these caller rules in `Next` when they apply:
   "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for the next round, without
   asking the user."
 - With `OPEN`: "Tell the user it's safe to merge and what debt ships. After they merge, call
-  `Skill(ship:ship)` to close out."
-- With open problems at close-out: "Ask the user to decide each (follow-up or wontfix, with your
-  recommendation), then call `Skill(ship:ship)` with their decisions to close out."
-- With `NEEDS_DECISION`: "Stop. Present the recommendation to the user."
+  `Skill(ship:close)` to close out."
+- With `MERGED`: "Don't review. Call `Skill(ship:close)` to close the feature out."
+- With `NEEDS_DECISION`: "Fix the blocking problems as for `REVIEW_AGAIN` (commit, push,
+  `feature problem resolve`); the budget limits review rounds, not fixes, so don't defer a
+  blocker you can fix. Then stop and present the recommendation to the user: another review round
+  of the fixes (`feature budget --set <n>`, then `Skill(ship:ship)`), or merge with them
+  unreviewed."
