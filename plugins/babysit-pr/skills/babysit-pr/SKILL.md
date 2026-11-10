@@ -100,7 +100,8 @@ The PR is **ready** when, on the latest head:
   `feature gate` yourself to decide this; a review round has to cover the head first, and only
   ship runs one.
 
-Stop there and report it ready. Merge only when the user explicitly asked for a merge. Right before
+Stop there and report it ready. Never merge on your own initiative, but when the user explicitly
+asked for a merge, that ask is the authorization: merge without asking again. Right before
 merging, `git fetch` and check the gate again; if the base moved, sync, push, and wait for green
-again. *Ship-tracked:* never merge; ship leaves the merge to the user. Report it ready with the
-debt ship named, and after the user merges, call `Skill(ship:ship)` to close the feature out.
+again. *Ship-tracked:* the same, and never `feature merge --force`. Name the debt ship reported,
+and after the merge (yours or the user's), call `Skill(ship:ship)` to close the feature out.

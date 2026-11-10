@@ -136,7 +136,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 
 - `OPEN` (0): safe to merge. Name the debt that ships. If the PR is still a draft, mark it ready
   (`gh pr ready <PR#>`), whether the caller asked for a review or a ship, and say so in `Did`.
-  Leave it a draft only if the caller explicitly asked to keep it one. The human merges.
+  Leave it a draft only if the caller explicitly asked to keep it one. The user merges, or the
+  caller does when the user explicitly asked it to.
 - `REVIEW_AGAIN` (10): the caller fixes the blocking problems, then calls this skill again.
 - `NEEDS_DECISION` (20): no more rounds. `feature escalate` with exactly one recommendation: ship
   it (defer the rest with reasons), buy one round (`feature budget --set`, only with a concrete
@@ -144,7 +145,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 
 ## Close out
 
-After the human merges, every problem still open needs a decision before the feature closes:
+After the merge, every problem still open needs a decision before the feature closes:
 `feature merge` and `feature reconcile` refuse until there is one, because once the feature is
 closed nothing comes back to an undecided problem. The two decisions:
 
@@ -159,7 +160,8 @@ and let the caller ask the user. Then run `feature merge`.
 - Never lower a severity, or Sol's risk or complexity grade, to open the gate or buy a cheaper
   review.
   Defer with a reason instead.
-- Never `feature merge --force`. Never merge for the human.
+- Never `feature merge --force`. Never merge on your own initiative: only the user's explicit ask
+  authorizes a merge, and then only on `OPEN`.
 - Close fixed problems with `problem resolve`, not a `Closes #a, #b` PR line (GitHub links only the
   first number).
 - Don't hand-edit the JSON block in a feature issue, or the assessment section in a PR body.
@@ -187,8 +189,10 @@ Always include these caller rules in `Next` when they apply:
   resolve <#> --commit <sha>`. If a finding is wrong, `feature problem reject <#> --reason
   "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for the next round, without
   asking the user."
-- With `OPEN`: "Tell the user it's safe to merge and what debt ships. After they merge, call
-  `Skill(ship:ship)` to close out."
+- With `OPEN`: "If the user explicitly asked you to merge, that ask is the authorization: `git
+  fetch`, check the head is still the one ship reviewed, the required checks are green and the PR
+  isn't `BEHIND` or `DIRTY`, then merge it. Otherwise tell the user it's safe to merge. Either way,
+  say what debt ships. After the merge, call `Skill(ship:ship)` to close out."
 - With open problems at close-out: "Ask the user to decide each (follow-up or wontfix, with your
   recommendation), then call `Skill(ship:ship)` with their decisions to close out."
 - With `NEEDS_DECISION`: "Stop. Present the recommendation to the user."

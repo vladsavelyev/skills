@@ -109,7 +109,7 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
                           └────────┬───────────┘
                                    ▼
                     gate: 0 blocking problems AND last_review.new_blocking == 0
-                       ├─ yes ──────────────▶ ready ──▶ (human merges) ──▶ merged
+                       ├─ yes ──────────────▶ ready ──▶ (user merges, or asks) ──▶ merged
                        └─ no ──┬─ budget left, converging ──▶ REVIEW_AGAIN (loop)
                                └─ budget spent or churning ──▶ needs-decision (human)
 ```

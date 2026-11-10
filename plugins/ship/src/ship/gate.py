@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 # What to do next, per verdict — the gate's most useful output for an agent driving the loop.
-_NEXT_OPEN = "Human merges the PR, then `feature merge`."
+_NEXT_OPEN = "Safe to merge: the user merges, or you do if they explicitly asked; then `feature merge`."
 _NEXT_DECISION = (
     "STOP reviewing — a human decides. Run `feature escalate --reason '<what you recommend>'`, "
     "then one of: ship the rest as debt (`feature problem defer <#> --reason '<why>'`), buy "
