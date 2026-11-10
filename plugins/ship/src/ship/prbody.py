@@ -2,12 +2,12 @@
 
     <the author's description>
 
-    <!-- ship:assessment -->
+    <!-- ship -->
     > **Risk: low**: …
     > …
 
     Closes #39
-    <!-- /ship:assessment -->
+    <!-- /ship -->
 
     🤖 <model> in <harness>
 
@@ -18,9 +18,12 @@ signature (a trailing paragraph starting with `🤖`), or at the end if there is
 
 import re
 
-_BEGIN = "<!-- ship:assessment -->"
-_END = "<!-- /ship:assessment -->"
-_BLOCK_RE = re.compile(re.escape(_BEGIN) + r"(.*?)" + re.escape(_END), re.S)
+_BEGIN = "<!-- ship -->"
+_END = "<!-- /ship -->"
+# Tags count only on a line of their own: the legacy reference line below ends in the same
+# `<!-- ship -->` text. The block was `ship:assessment` before it held the reference too; PR bodies
+# on GitHub carry that name, so it is read as the block (and renamed on write) ON PURPOSE.
+_BLOCK_RE = re.compile(r"(?ms)^<!-- ship(?::assessment)? -->[ \t]*$(.*?)^<!-- /ship(?::assessment)? -->[ \t]*$")
 _REF_RE = re.compile(r"Closes #\d+")
 _SIGNATURE_PREFIX = "🤖"
 # Before the block held it, the reference was a line of its own, marked so it could be told from

@@ -101,7 +101,7 @@ Ship owns one tagged block in the PR body, and it is the only part of the body t
 ```
 <the author's description>
 
-<!-- ship:assessment -->
+<!-- ship -->
 > **Risk: low**: only rewrites ship's own tagged block of the PR body
 > **Size: M** (8 files, 412 lines)
 > **Complexity: low**
@@ -110,7 +110,7 @@ Ship owns one tagged block in the PR body, and it is the only part of the body t
 > **Review round 3** (medium). Findings: none. Next round would run at low.
 
 Closes #39
-<!-- /ship:assessment -->
+<!-- /ship -->
 
 🤖 Claude Opus 5.5 in Claude Code (T3 Code)
 ```

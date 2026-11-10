@@ -34,7 +34,7 @@ def _fake_pr_body_editor(monkeypatch, body: str) -> dict:
 
 
 def _linked(issue: int) -> str:
-    return f"<!-- ship:assessment -->\nCloses #{issue}\n<!-- /ship:assessment -->"
+    return f"<!-- ship -->\nCloses #{issue}\n<!-- /ship -->"
 
 
 def test_link_pr_puts_the_closing_reference_in_the_block(monkeypatch):

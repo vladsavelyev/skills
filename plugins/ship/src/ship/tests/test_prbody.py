@@ -6,7 +6,7 @@ SIG = "🤖 Claude Opus 5.5 in Claude Code (T3 Code)"
 
 
 def _block(*inner: str) -> str:
-    return "<!-- ship:assessment -->\n" + "\n\n".join(inner) + "\n<!-- /ship:assessment -->"
+    return "<!-- ship -->\n" + "\n\n".join(inner) + "\n<!-- /ship -->"
 
 
 def test_the_block_goes_above_the_signature():
@@ -55,3 +55,16 @@ def test_a_legacy_part_of_line_for_this_issue_moves_into_the_block():
     assert prbody.with_ref("Why.\n\nPart of #7\n", 7) == f"Why.\n\n{_block('Closes #7')}\n"
     # Someone else's issue is the author's text.
     assert prbody.with_ref("Why.\n\nPart of #42\n", 7) == f"Why.\n\nPart of #42\n\n{_block('Closes #7')}\n"
+
+
+def test_an_old_assessment_block_is_replaced_and_renamed():
+    # The block's old tag name, on PR bodies written before it held the reference too.
+    old = "Why.\n\n<!-- ship:assessment -->\n**Risk high** · …\n<!-- /ship:assessment -->\n\nCloses #7 <!-- ship -->\n"
+    assert prbody.with_assessment(old, "> grade") == f"Why.\n\n{_block('> grade', 'Closes #7')}\n"
+
+
+def test_the_legacy_inline_marker_is_not_an_opening_tag():
+    # `Closes #7 <!-- ship -->` ends in the same text as the opening tag. Only a tag on its own line
+    # opens the block, so the block below is found and the old line folded into it.
+    old = f"Why.\n\nCloses #7 <!-- ship -->\n\n{_block('> old')}\n"
+    assert prbody.with_assessment(old, "> grade") == f"Why.\n\n{_block('> grade', 'Closes #7')}\n"
