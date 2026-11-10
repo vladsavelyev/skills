@@ -249,3 +249,21 @@ def test_an_open_pr_is_still_judged_by_the_branch_tip(monkeypatch):
     _stub_gate_inputs(monkeypatch, pr_state="OPEN", reviewed="fff666", branch_tip="aaa111", pr_head="fff666aaaa")
     _, _, _, decision = cli._gate_for("add-oauth")
     assert decision.verdict is cli.gate.Verdict.REVIEW_AGAIN
+
+
+def test_a_blocker_decided_wontfix_before_close_out_is_still_named_as_shipped_unfixed(monkeypatch):
+    """Deciding a shipped blocker won't-fix closes it, so it drops out of the gate; the record must keep it."""
+    triaged = problems.triage([_problem(8, "sev:high", state="CLOSED", extra=(problems.WONTFIX,))])
+    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED), triaged)
+    cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
+    assert not notes[0].startswith("✅")
+    assert "shipped unfixed: #8 [sev:high]" in notes[0]
+
+
+def test_a_low_problem_closed_as_wontfix_is_not_a_shipped_blocker():
+    assert problems.triage([_problem(9, "sev:low", state="CLOSED", extra=(problems.WONTFIX,))]).shipped_unfixed == []
+
+
+def test_reconcile_names_a_blocker_decided_wontfix():
+    triaged = problems.triage([_problem(8, "sev:med", state="CLOSED", extra=(problems.WONTFIX,))])
+    assert "shipped unfixed: #8 [sev:med]" in cli._reconcile_note(123, triaged)

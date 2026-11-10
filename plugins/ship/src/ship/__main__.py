@@ -721,6 +721,10 @@ def _blocking_refs(triaged: problems.Triage) -> str:
     return ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.blocking) or "none"
 
 
+def _unfixed_refs(triaged: problems.Triage) -> str:
+    return ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.shipped_unfixed)
+
+
 def cmd_merge(args: argparse.Namespace) -> None:
     """Final transition: verify the PR merged, mark the feature merged, close the feature issue.
 
@@ -764,10 +768,12 @@ def cmd_merge(args: argparse.Namespace) -> None:
             f"⚠️ Recorded as merged with `--force` while the gate was **{decision.verdict}** "
             f"({'; '.join(decision.reasons) or 'nothing outstanding'}).\n\n{triaged.summary()}."
         )
-    elif decision.reasons:
-        note = f"⚠️ Merged with this still outstanding: {'; '.join(decision.reasons)}."
+    elif decision.reasons or triaged.shipped_unfixed:
+        note = f"⚠️ Merged with this still outstanding: {'; '.join(decision.reasons) or 'no open blocking problems'}."
         if triaged.blocking:
             note += f"\n\nBlocking problems that shipped open: {_blocking_refs(triaged)}."
+        if triaged.shipped_unfixed:
+            note += f"\n\nBlocking problems closed as won't-fix, shipped unfixed: {_unfixed_refs(triaged)}."
         note += f"\n{triaged.summary()}."
     else:
         note = f"✅ Merged. No blocking problems; {triaged.summary()}."
@@ -779,6 +785,8 @@ def cmd_merge(args: argparse.Namespace) -> None:
     print(f"  {triaged.summary()}")
     if decision.reasons:
         print(f"  shipped with: {'; '.join(decision.reasons)}")
+    if triaged.shipped_unfixed:
+        print(f"  closed as won't-fix, shipped unfixed: {_unfixed_refs(triaged)}")
 
 
 def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_closed: bool) -> None:
@@ -800,14 +808,17 @@ def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_
 
 
 def _reconcile_note(pr: int, triaged: problems.Triage) -> str:
+    note = f"✅ Merged in PR #{pr} — recorded after the fact by `feature reconcile`."
     if triaged.blocking:
-        return (
-            f"✅ Merged in PR #{pr} — recorded after the fact by `feature reconcile`.\n\n"
-            f"⚠️ {len(triaged.blocking)} blocking problem(s) were still open when it merged: "
+        note += (
+            f"\n\n⚠️ {len(triaged.blocking)} blocking problem(s) were still open when it merged: "
             f"{_blocking_refs(triaged)}. The gate either never opened or was bypassed outside this "
-            f"CLI; this comment is the record of what actually shipped.\n{triaged.summary()}."
+            f"CLI; this comment is the record of what actually shipped."
         )
-    return f"✅ Merged in PR #{pr} — recorded after the fact by `feature reconcile`. {triaged.summary()}."
+    if triaged.shipped_unfixed:
+        note += f"\n\n⚠️ Blocking problems closed as won't-fix, shipped unfixed: {_unfixed_refs(triaged)}."
+    separator = "\n" if triaged.blocking or triaged.shipped_unfixed else " "
+    return f"{note}{separator}{triaged.summary()}."
 
 
 def _abandoned_note(pr: int, triaged: problems.Triage) -> str:
