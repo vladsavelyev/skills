@@ -138,8 +138,8 @@ def test_adopt_without_a_pr_or_parent_bases_on_main(monkeypatch):
 
 
 def test_merge_refuses_while_any_problem_is_open(monkeypatch):
-    """A low problem, or one labelled by the old `follow-up`/`deferred` dispositions, holds the
-    close-out until it is handed off or closed."""
+    """A low problem, or one labelled `deferred` by the old CLI, holds the close-out until it is
+    handed off or closed. An old `follow-up` was a close-out decision already, so it doesn't."""
     state = _merged_state()
     blocking = problems.blocking(
         [
@@ -153,8 +153,8 @@ def test_merge_refuses_while_any_problem_is_open(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
     refusal = str(exc.value)
-    assert "#5 [sev:low]" in refusal and "#6 [sev:low]" in refusal and "#7 [sev:high]" in refusal
-    assert "#8" not in refusal
+    assert "#5 [sev:low]" in refusal and "#7 [sev:high]" in refusal
+    assert "#6" not in refusal and "#8" not in refusal
     assert "hand-off" in refusal and "wontfix" in refusal
 
 
@@ -296,18 +296,19 @@ def _stub_pr(monkeypatch, pr_state: str) -> None:
     monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
 
 
-@pytest.mark.parametrize("pr_state", ["MERGED", "CLOSED"])
-def test_hand_off_after_the_pr_is_done_records_the_reason_then_labels(monkeypatch, pr_state):
+def test_hand_off_after_the_merge_records_the_reason_then_labels(monkeypatch):
     did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
-    _stub_pr(monkeypatch, pr_state)
+    _stub_pr(monkeypatch, "MERGED")
     cli.cmd_problem_hand_off(cli.argparse.Namespace(branch="add-oauth", number=8, reason="fix in a separate PR"))
     # The label releases the close-out, so the reason goes on record first.
     assert did == ["init_labels", "comment", f"add {problems.HANDED_OFF}"]
 
 
-def test_hand_off_refuses_before_the_merge_because_that_would_ship_debt(monkeypatch):
+@pytest.mark.parametrize("pr_state", ["OPEN", "CLOSED"])
+def test_hand_off_refuses_unless_the_pr_merged(monkeypatch, pr_state):
+    """Open: that would ship debt. Closed unmerged: its problems never landed, so they're wontfix."""
     did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
-    _stub_pr(monkeypatch, "OPEN")
+    _stub_pr(monkeypatch, pr_state)
     with pytest.raises(SystemExit, match="nothing ships as debt"):
         cli.cmd_problem_hand_off(cli.argparse.Namespace(branch="add-oauth", number=8, reason="later"))
     assert did == []
@@ -318,6 +319,18 @@ def test_block_reopens_a_wontfix_problem_and_drops_the_label(monkeypatch):
     cli.cmd_problem_block(cli.argparse.Namespace(branch="add-oauth", number=8, reason="rediscovered"))
     # Reopened before the label goes, so a failure in between leaves it open and blocking.
     assert did == ["reopen", f"remove {problems.WONTFIX}", "comment"]
+
+
+def test_block_finishes_when_the_label_removal_failed_after_the_reopen(monkeypatch):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low", extra=(problems.WONTFIX,)))
+    cli.cmd_problem_block(cli.argparse.Namespace(branch="add-oauth", number=8, reason="rediscovered"))
+    assert did == [f"remove {problems.WONTFIX}", "comment"]
+
+
+def test_problem_list_marks_old_rejected_problems_wontfix_and_old_follow_ups_handed_off():
+    assert "wontfix" in cli._problem_line(_problem(1, "sev:med", state="CLOSED", extra=("rejected",)))
+    assert "fixed" in cli._problem_line(_problem(2, "sev:med", state="CLOSED"))
+    assert "handed-off" in cli._problem_line(_problem(3, "sev:low", extra=("follow-up",)))
 
 
 def test_block_refuses_an_open_problem_which_already_blocks(monkeypatch):

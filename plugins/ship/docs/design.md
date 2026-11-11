@@ -182,8 +182,8 @@ PR merged nothing visited them again, and the gate's own report ("four low probl
 made shipping them the default instead of a decision. A PR merged past the gate is the one exception, and only because its fix
 needs a new PR anyway: close-out (`feature merge`, `feature reconcile`) refuses until each open
 problem is handed off (`feature problem hand-off`, label `handed-off`: a separate fix PR, or kept as
-an issue, the user's call) or closed. Hand-off refuses while the PR is still open, so it can't be
-used to ship debt; a handed-off problem stays open on its own, and the close-out record names it.
+an issue, the user's call) or closed. Hand-off refuses until the PR has merged, so it can't be
+used to ship debt (a PR closed unmerged never landed its problems: those close as `wontfix`); a handed-off problem stays open on its own, and the close-out record names it.
 
 A closed problem gets back in front of the gate through `feature problem block`, which reopens it
 (and drops `wontfix`): a later round rediscovering a fixed problem (a regression), or answering a
@@ -326,7 +326,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
-| `feature problem hand-off <number> --reason <why>` | Only once the PR has merged or closed: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses while the PR is open: that would be shipping debt. |
+| `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses until then: that would be shipping debt. Old `follow-up` labels count as `handed-off`, and old `rejected` ones as `wontfix`. |
 | `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. Refuses an open problem, which already blocks. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |

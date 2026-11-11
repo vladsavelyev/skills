@@ -452,9 +452,9 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
 def cmd_problem_hand_off(args: argparse.Namespace) -> None:
     """After the merge: hand an open problem to a separate fix PR, or keep it as an issue.
 
-    Only once the PR has merged or been closed. Before that, an open problem left out of the way is
-    exactly the debt the gate exists to stop; after it, the fix needs a new PR anyway, and the
-    feature's close-out shouldn't wait for one.
+    Only once the PR has merged. Before that, an open problem left out of the way is exactly the debt
+    the gate exists to stop; after it, the fix needs a new PR anyway, and the feature's close-out
+    shouldn't wait for one. A PR closed unmerged never landed its problems: those close as `wontfix`.
     """
     branch = args.branch or current_branch()
     sub = _require_problem(branch, args.number)
@@ -462,17 +462,17 @@ def cmd_problem_hand_off(args: argparse.Namespace) -> None:
         sys.exit(f"#{args.number} is already closed.")
     _, state, _ = _load_state(branch)
     pr_state = github.pr_state(state["pr"]) if state["pr"] is not None else None
-    if pr_state not in ("MERGED", "CLOSED"):
+    if pr_state != "MERGED":
         sys.exit(
             f"Refusing to hand off #{args.number}: the PR hasn't merged ({pr_state or 'no PR linked'}), and "
-            f"nothing ships as debt. Fix it (`feature problem resolve`) or, if it isn't relevant, "
-            f"`feature problem wontfix`."
+            f"nothing ships as debt. Fix it (`feature problem resolve`) or, if it isn't relevant (as for a "
+            f"PR closed unmerged, whose problems never landed), `feature problem wontfix`."
         )
     # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
     github.init_labels()
     # Reason first, label second: the label is what releases the close-out, so it must never land
     # without the reason on record.
-    github.comment(args.number, f"📤 Handed off after PR #{state['pr']} {pr_state.lower()}: {args.reason}")
+    github.comment(args.number, f"📤 Handed off after PR #{state['pr']} merged: {args.reason}")
     github.add_label(args.number, problems.HANDED_OFF)
     print(f"Problem #{args.number} [{problems.severity(sub)}] handed off (open, outside the feature)")
 
@@ -501,13 +501,17 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
     block again; the `wontfix` label goes too, so the record doesn't call a live problem irrelevant.
     """
     sub = _require_problem(args.branch or current_branch(), args.number)
-    if sub["state"] == "OPEN":
+    stale = problems.WONTFIX in sub["labels"]
+    # An open problem still labelled `wontfix` is a block whose label removal failed after the reopen;
+    # the re-run finishes it rather than refusing.
+    if sub["state"] == "OPEN" and not stale:
         sys.exit(f"#{args.number} is open, so it already blocks the gate.")
     # Reopen first: if removing the label fails afterwards, the problem is open and blocks with a
     # stale label, which a re-run fixes. The other order could leave it closed and unlabelled,
     # looking fixed.
-    github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
-    if problems.WONTFIX in sub["labels"]:
+    if sub["state"] != "OPEN":
+        github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
+    if stale:
         github.remove_label(args.number, problems.WONTFIX)
     github.comment(args.number, f"⛔ Blocking again: {args.reason}")
     print(f"Problem #{args.number} [{problems.severity(sub)}] blocks the gate again")
@@ -515,9 +519,9 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
 
 def _problem_line(sub: dict) -> str:
     if problems.is_blocking(sub):
-        mark = "handed-off" if problems.HANDED_OFF in sub["labels"] else "BLOCKING"
+        mark = "handed-off" if problems.is_handed_off(sub) else "BLOCKING"
     else:
-        mark = "wontfix" if problems.WONTFIX in sub["labels"] else "fixed"
+        mark = "wontfix" if problems.is_wontfix(sub) else "fixed"
     return f"  #{sub['number']:>5}  {sub['state']:<6}  {problems.severity(sub):<9}  {mark:<12}  {sub['title']}"
 
 
