@@ -354,7 +354,8 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
          (Sol gets the recorded request as intent, never tracked state)
    5. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
-       ├─ caused by THIS PR? no ─▶ don't file it (named in the report instead)
+       ├─ caused by THIS PR? no ─▶ not a problem: reported as pre-existing; the user picks a
+       │                           separate fix PR or a plain issue
        └─ duplicate of a tracked problem? (judged by MEANING)
               ├─ matches an OPEN issue      ─▶ skip (already tracked)
               ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it

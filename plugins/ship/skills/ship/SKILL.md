@@ -166,8 +166,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Same as a WONTFIX problem (closed as not relevant; older ones are labelled `rejected`) → skip,
      unless the new repro answers the reason. Then `block` it. A problem disputed twice goes to the
      human: escalate with both sides.
-   - Not caused by this PR → don't file it: it isn't this PR's to fix. If it's a real bug, name it
-     in the report's `Did` line so the user can track it elsewhere.
+   - Not caused by this PR → not a problem of this PR, so don't `problem add` it and it doesn't hold
+     the gate. If it survives the same verification, list it under `Pre-existing` in the report.
    - Re-judge severity yourself, whatever Sol said: `high` = data loss, security hole, crash, or
      silently wrong result on a realistic path; `med` = real bug on a narrower path; `low` =
      everything else. Always pass `--sev`. Severity orders the work and feeds the churn trend; it
@@ -232,6 +232,7 @@ Did: <one line>
 Review: Sol <model> at <depth>; graded risk <…>, complexity <…>; next round at <depth>   (or not run)
 Gate: <verdict, or not run>
 Open: #<n> [sev] <title> — <file:line>, fix: <smallest fix>   (every open problem, low included, one per line; or none)
+Pre-existing: [sev] <title> — <file:line>, <failure scenario>, fix: <smallest fix>   (bugs this PR didn't cause, one per line; or none)
 Next:
 - <exact steps for the caller>
 ```
@@ -248,6 +249,10 @@ Always include these caller rules in `Next` when they apply:
 - With `OPEN`: "Tell the user it's safe to merge: every problem is closed. After they merge, call
   `Skill(ship:close)` to close out."
 - With `MERGED`: "Don't review. Call `Skill(ship:close)` to close the feature out."
+- With pre-existing bugs: "These aren't this PR's and don't hold its gate. Ask the user, for each,
+  whether to fix it in a separate PR (`Skill(ship:start)` off the base branch) or just file an
+  issue for it (`gh issue create`, with the failure scenario, `file:line` and the smallest fix).
+  Don't decide for them, and don't fix it in this PR."
 - With `NEEDS_DECISION`: "Close every open problem as for `REVIEW_AGAIN` (fix, commit, push,
   `feature problem resolve`, or `wontfix` if it isn't relevant); the budget limits review rounds,
   not fixes, and nothing ships as debt. Then stop and present the recommendation to the user:
