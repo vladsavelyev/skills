@@ -9,11 +9,19 @@ ones ship open, and they piled up as "tracked debt" nobody ever came back to.
 
 A closed problem that turns out to matter after all (a later round rediscovering it with a real
 repro) is reopened by `feature problem block`, and being open is all it takes to block again.
+
+**After the merge, an open problem can be handed off.** A PR merged past the gate can leave
+problems open, and its fix can only come in a new PR. Holding the feature's close-out until that
+PR lands bought nothing, since the problem is already a GitHub issue. So once the PR has merged (or
+was closed unmerged), the user chooses, per problem: a separate fix PR, or keep it as an issue.
+Either way `feature problem hand-off` labels it `handed-off` and it stays open on its own, outside
+the feature. Before the merge there is no such option: that would be shipping debt.
 """
 
 UNKNOWN_SEV = "sev:?"
 LOW_SEV = "sev:low"
 WONTFIX = "wontfix"
+HANDED_OFF = "handed-off"
 
 
 def severity(sub: dict) -> str:
@@ -27,5 +35,15 @@ def is_blocking(sub: dict) -> bool:
 
 
 def blocking(subs: list[dict]) -> list[dict]:
-    """The problems that hold the gate (and the close-out): all the open ones."""
+    """The problems that hold the gate: all the open ones."""
     return [s for s in subs if is_blocking(s)]
+
+
+def undecided(subs: list[dict]) -> list[dict]:
+    """The problems that hold the close-out: open, and not handed off after the merge."""
+    return [s for s in blocking(subs) if HANDED_OFF not in s["labels"]]
+
+
+def handed_off(subs: list[dict]) -> list[dict]:
+    """Open problems of a merged (or abandoned) PR, handed to a separate fix PR or kept as an issue."""
+    return [s for s in blocking(subs) if HANDED_OFF in s["labels"]]

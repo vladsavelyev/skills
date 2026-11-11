@@ -22,7 +22,9 @@ terminates — a real reviewer always finds *something*. After it, a fourth ends
 
 **Nothing ships as debt.** Every open problem blocks the gate, at every severity including `low`.
 It's either fixed (`feature problem resolve` with its commit) or, if it isn't relevant, closed with
-the `wontfix` label and the reason (`feature problem wontfix`). Severity orders the work and feeds
+the `wontfix` label and the reason (`feature problem wontfix`). Only after a PR has merged past the
+gate can an open problem be handed off (`feature problem hand-off`), to a separate fix PR or kept as
+an issue, so the close-out needn't wait for the fix. Severity orders the work and feeds
 the convergence trend; it doesn't decide what blocks. Reviews are budgeted (2–4 rounds, sized from
 the diff) so a non-converging loop ends in a recorded decision rather than unbounded spend.
 
@@ -123,14 +125,15 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (it blocks the gate until closed, at any severity). |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue as fixed. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. |
+| `feature problem hand-off <number> --reason <why>` | Only once the PR has merged (or closed): hand an open problem to a separate fix PR, or keep it as an issue. Labels it `handed-off`; it stays open, outside the feature, and stops holding the close-out. |
 | `feature problem block <number> --reason <why>` | Reopen a closed problem (a regression, or a `wontfix` overturned) so it blocks again. |
-| `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking, fixed or `wontfix`. |
+| `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking, handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto]` | Show or override the review-round budget. |
 | `feature escalate --reason <t>` | Park at `needs-decision` with your recommendation for a human. |
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |
 | `feature gate [--branch <b>]` | Exit 0 = OPEN, 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION, 30 = MERGED (1 and 2 stay "the command failed"). |
-| `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks that the PR really merged and records what the gate still had outstanding; refuses while any problem is open). |
+| `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks that the PR really merged and records what the gate still had outstanding; refuses while an open problem hasn't been handed off). |
 | `feature reconcile [--branch <b>] [--dry-run]` | Sweep the repo: close out every feature whose PR already merged, close as `abandoned` the ones whose PR was closed unmerged, and repair the issue link on still-open PRs. |
 | `feature migrate [--branch <b>]` | Upgrade a repo for this CLI version: (re-)create the workflow labels and the feature issue's state block. Run it once per repo after upgrading. |
 

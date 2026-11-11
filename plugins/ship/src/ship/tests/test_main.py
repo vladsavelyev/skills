@@ -68,9 +68,14 @@ def test_record_outcome_leaves_state_unwritten_if_closing_fails(monkeypatch):
 
 
 def test_reconcile_note_records_a_merge_with_no_open_problems():
-    # Reconcile refuses while any problem is open, so the note it writes has none to name.
-    note = cli._reconcile_note(123)
+    note = cli._reconcile_note(123, [])
     assert "Merged in PR #123" in note and "No open problems" in note
+
+
+def test_reconcile_note_names_the_handed_off_problems():
+    # Reconcile refuses while a problem is undecided, so every open one it gets here was handed off.
+    note = cli._reconcile_note(123, [_problem(7, "sev:med", extra=(problems.HANDED_OFF,))])
+    assert note.startswith("⚠️") and "Handed off, still open: #7 [sev:med]" in note
 
 
 def test_state_block_of_a_fresh_feature_is_current_schema():
@@ -79,7 +84,7 @@ def test_state_block_of_a_fresh_feature_is_current_schema():
 
 
 def test_abandoned_note_never_claims_a_merge():
-    note = cli._abandoned_note(123)
+    note = cli._abandoned_note(123, [])
     # The work never landed: saying "merged" here would put a false claim in the permanent record.
     assert "Abandoned" in note
     assert "Merged" not in note
@@ -133,8 +138,8 @@ def test_adopt_without_a_pr_or_parent_bases_on_main(monkeypatch):
 
 
 def test_merge_refuses_while_any_problem_is_open(monkeypatch):
-    """Nothing ships as debt: a low problem, or one labelled by the old `follow-up`/`deferred`
-    dispositions, holds the close-out until it is fixed or closed as wontfix."""
+    """A low problem, or one labelled by the old `follow-up`/`deferred` dispositions, holds the
+    close-out until it is handed off or closed."""
     state = _merged_state()
     blocking = problems.blocking(
         [
@@ -150,7 +155,7 @@ def test_merge_refuses_while_any_problem_is_open(monkeypatch):
     refusal = str(exc.value)
     assert "#5 [sev:low]" in refusal and "#6 [sev:low]" in refusal and "#7 [sev:high]" in refusal
     assert "#8" not in refusal
-    assert "wontfix" in refusal and "follow-up" not in refusal
+    assert "hand-off" in refusal and "wontfix" in refusal
 
 
 def _decision(verdict, reasons: list[str] | None = None) -> "cli.gate.GateDecision":
@@ -173,6 +178,15 @@ def test_merge_closes_out_a_merged_pr_whose_last_commits_were_never_reviewed(mon
     notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED, [tail]), [])
     cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
     assert len(notes) == 1 and tail in notes[0]
+    assert not notes[0].startswith("✅")
+
+
+def test_merge_closes_out_with_handed_off_problems_and_names_them(monkeypatch):
+    blocking = [_problem(5, "sev:low", extra=(problems.HANDED_OFF,))]
+    reasons = ["1 problem(s) open, every one blocking"]
+    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED, reasons), blocking)
+    cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
+    assert len(notes) == 1 and "Handed off, still open: #5 [sev:low]" in notes[0]
     assert not notes[0].startswith("✅")
 
 
@@ -274,6 +288,28 @@ def test_wontfix_refuses_a_closed_problem(monkeypatch):
     did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low", state="CLOSED"))
     with pytest.raises(SystemExit, match="already closed"):
         cli.cmd_problem_wontfix(cli.argparse.Namespace(branch="add-oauth", number=8, reason="by design"))
+    assert did == []
+
+
+def _stub_pr(monkeypatch, pr_state: str) -> None:
+    monkeypatch.setattr(cli, "_load_state", lambda branch: (7, _merged_state(), ""))
+    monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
+
+
+@pytest.mark.parametrize("pr_state", ["MERGED", "CLOSED"])
+def test_hand_off_after_the_pr_is_done_records_the_reason_then_labels(monkeypatch, pr_state):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
+    _stub_pr(monkeypatch, pr_state)
+    cli.cmd_problem_hand_off(cli.argparse.Namespace(branch="add-oauth", number=8, reason="fix in a separate PR"))
+    # The label releases the close-out, so the reason goes on record first.
+    assert did == ["init_labels", "comment", f"add {problems.HANDED_OFF}"]
+
+
+def test_hand_off_refuses_before_the_merge_because_that_would_ship_debt(monkeypatch):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
+    _stub_pr(monkeypatch, "OPEN")
+    with pytest.raises(SystemExit, match="nothing ships as debt"):
+        cli.cmd_problem_hand_off(cli.argparse.Namespace(branch="add-oauth", number=8, reason="later"))
     assert did == []
 
 

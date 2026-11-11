@@ -1,6 +1,6 @@
 """Tests for problem classification — what does and doesn't hold the merge gate."""
 
-from ship.problems import blocking, is_blocking, severity
+from ship.problems import HANDED_OFF, blocking, handed_off, is_blocking, severity, undecided
 
 
 def sub(number: int, *, sev: str = "sev:high", state: str = "OPEN", extra: list[str] | None = None) -> dict:
@@ -44,3 +44,10 @@ def test_blocking_is_every_open_problem_and_drops_closed():
         sub(4, sev="sev:low", state="CLOSED", extra=["wontfix"]),
     ]
     assert [s["number"] for s in blocking(subs)] == [1, 2]
+
+
+def test_a_handed_off_problem_still_blocks_but_no_longer_holds_the_close_out():
+    subs = [sub(1, sev="sev:low"), sub(2, sev="sev:med", extra=[HANDED_OFF]), sub(3, state="CLOSED")]
+    assert [s["number"] for s in blocking(subs)] == [1, 2]
+    assert [s["number"] for s in undecided(subs)] == [1]
+    assert [s["number"] for s in handed_off(subs)] == [2]

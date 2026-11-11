@@ -18,6 +18,7 @@ LABELS = [
     ("sev:med", "fbca04", "Medium severity problem (blocks the merge gate until closed)"),
     ("sev:low", "0e8a16", "Low severity problem (blocks the merge gate until closed)"),
     ("wontfix", "ffffff", "Not relevant, closed as not planned (reason on the issue)"),
+    ("handed-off", "1d76db", "Open problem of a merged PR, handed to a separate fix PR or kept as an issue"),
 ]
 
 

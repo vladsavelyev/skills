@@ -179,9 +179,11 @@ but it doesn't decide what blocks.
 This replaced a design where only high/med problems blocked, and `sev:low` problems, `deferred`
 ones (real, not fixed in this PR) and close-out `follow-up`s shipped open as "tracked debt". Once the
 PR merged nothing visited them again, and the gate's own report ("four low problems ship as debt")
-made shipping them the default instead of a decision. Close-out (`feature merge`, `feature
-reconcile`) keeps the same rule for a PR that merged past the gate: it refuses while any problem is
-open.
+made shipping them the default instead of a decision. A PR merged past the gate is the one exception, and only because its fix
+needs a new PR anyway: close-out (`feature merge`, `feature reconcile`) refuses until each open
+problem is handed off (`feature problem hand-off`, label `handed-off`: a separate fix PR, or kept as
+an issue, the user's call) or closed. Hand-off refuses while the PR is still open, so it can't be
+used to ship debt; a handed-off problem stays open on its own, and the close-out record names it.
 
 A closed problem gets back in front of the gate through `feature problem block`, which reopens it
 (and drops `wontfix`): a later round rediscovering a fixed problem (a regression), or answering a
@@ -246,8 +248,8 @@ ship's tagged block of the PR body (see "The PR body"), apart from the PR's own 
 `Closes #<problem>` lines, which re-linking must not disturb, and
 merging closes the tracking issue with nobody in the loop. The original design chose a non-closing
 `Part of #<issue>` deliberately — the umbrella issue outlives the PR, and its problem sub-issues can
-still be open — but close-out now refuses while any problem is open, so a closed tracking issue has
-none.
+still be open — but close-out refuses while one is undecided, so any still open under a closed
+tracking issue was handed off on purpose and is named in its record.
 
 Two gaps remain, and `feature reconcile` covers both:
 
@@ -258,7 +260,7 @@ Two gaps remain, and `feature reconcile` covers both:
 
 `reconcile` is a repo-wide sweep — one paginated query for every `feature`-labelled issue, one
 aliased GraphQL query for all their PRs' states — that closes out the merged ones (refusing, like
-`feature merge`, while one still has an open problem) and repairs the reference on still-open PRs. It
+`feature merge`, while one has an undecided open problem) and repairs the reference on still-open PRs. It
 touches **no git at all**, on purpose: the features that need it most are the oldest, whose branches
 and worktrees are long gone, and any git-dependent path (including `feature migrate`, which resolves
 its issue through `branch.<name>.feature-issue`) can no longer reach them. For the same reason it
@@ -324,8 +326,9 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
+| `feature problem hand-off <number> --reason <why>` | Only once the PR has merged or closed: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses while the PR is open: that would be shipping debt. |
 | `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. Refuses an open problem, which already blocks. |
-| `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), fixed or `wontfix`. |
+| `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
 | `feature escalate --reason <text> [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human. |
 | `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`wontfix` is newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |

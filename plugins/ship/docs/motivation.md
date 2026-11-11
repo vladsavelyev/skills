@@ -186,7 +186,9 @@ navari PR #4617 round 2 came back `OPEN` with four low problems still open, and 
 "Tell the user it's safe to merge. Four low problems ship as debt." Nothing came back to them. Now
 the gate stays shut while any problem is open. A problem is either fixed or closed as `wontfix`
 because it isn't relevant (`reject` folded into `wontfix`), and `defer` and `follow-up` are gone.
-Severity still feeds the churn signal, which reads high/med counts only.
+Severity still feeds the churn signal, which reads high/med counts only. A PR merged past the gate
+anyway is the one exception: its fix needs a new PR regardless, so close-out lets the user hand each
+open problem to a separate fix PR or keep it as an issue (`problem hand-off`) instead of waiting.
 
 ## Deliberately deferred
 
