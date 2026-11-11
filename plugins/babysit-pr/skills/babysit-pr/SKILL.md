@@ -60,7 +60,7 @@ its checks with `gh api repos/<owner>/<repo>/commits/<sha>/check-runs`.
 - Screenshots or videos help reviewers when you have a way to upload them.
 - *Ship-tracked:* when a bot finding is the same as an open ship problem
   (`feature problem list --open`), handle the problem too: `feature problem resolve <#> --commit
-  <sha>` after the fix, or `feature problem reject <#> --reason "…"` when you dismiss it. Every
+  <sha>` after the fix, or `feature problem wontfix <#> --reason "…"` when it isn't relevant. Every
   push moves HEAD past ship's last review, so once CI is green, call `Skill(ship:ship)` for the
   next review round and follow its report.
 
