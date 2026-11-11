@@ -17,7 +17,8 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
    says it's already closed out, go to step 5.
 3. **Decide the open problems.** A PR merged past the gate can leave problems open
    (`feature problem list --open --branch <branch>`), and `feature merge` refuses until each has a
-   decision. Ask the user, for each one:
+   decision. One the list marks `handed-off` is decided already: leave it. Ask the user, for each
+   of the others:
    - fix it in a separate PR: `feature problem hand-off <#> --reason "fix in a separate PR" --branch
      <branch>`, then, after closing out, start that PR (`Skill(ship:start)` off the base branch)
      with `Closes #<problem>` in its description;
