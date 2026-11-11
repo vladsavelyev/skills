@@ -180,6 +180,16 @@ the agent asked the user for permission to fix it. Now `NEEDS_DECISION` still ha
 fixed. The human only decides whether another review round goes over the fixes, and deferral is
 for a blocker the PR can't fix.
 
+**11. Low problems shipped as debt → every open problem blocks.** Only high/med problems held the
+gate; `sev:low` ones, `deferred` ones and close-out `follow-up`s shipped open as "tracked debt". On
+navari PR #4617 round 2 came back `OPEN` with four low problems still open, and the skill said
+"Tell the user it's safe to merge. Four low problems ship as debt." Nothing came back to them. Now
+the gate stays shut while any problem is open. A problem is either fixed or closed as `wontfix`
+because it isn't relevant (`reject` folded into `wontfix`), and `defer` and `follow-up` are gone.
+Severity still feeds the churn signal, which reads high/med counts only. A PR merged past the gate
+anyway is the one exception: its fix needs a new PR regardless, so close-out lets the user hand each
+open problem to a separate fix PR or keep it as an issue (`problem hand-off`) instead of waiting.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

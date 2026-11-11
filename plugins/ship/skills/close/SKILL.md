@@ -15,19 +15,23 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
    (don't `feature adopt` a merged PR).
 2. **Check the gate says `MERGED`.** Anything else means the PR hasn't merged: stop. If the status
    says it's already closed out, go to step 5.
-3. **Decide the open problems.** Each problem still open that isn't a follow-up yet
-   (`feature problem list --open --branch <branch>`) needs one of:
-   - `feature problem follow-up <#> --reason "…" --branch <branch>`: worth fixing later; it stays
-     open in the backlog.
-   - `feature problem wontfix <#> --reason "…" --branch <branch>`: not worth fixing; closed as not
-     planned.
+3. **Decide the open problems.** A PR merged past the gate can leave problems open
+   (`feature problem list --open --branch <branch>`), and `feature merge` refuses until each has a
+   decision. One the list marks `handed-off` is decided already: leave it. Ask the user, for each
+   of the others:
+   - fix it in a separate PR: `feature problem hand-off <#> --reason "fix in a separate PR" --branch
+     <branch>`, then, after closing out, start that PR (`Skill(ship:start)` off the base branch)
+     with `Closes #<problem>` in its description;
+   - or just keep it as an issue: `feature problem hand-off <#> --reason "kept as an issue: …"
+     --branch <branch>`.
 
-   These are the user's decisions. Use any they already gave in this conversation; otherwise ask,
-   with one recommendation and its reason for each, then apply them.
+   Either way it stays open, labelled `handed-off`, outside the feature. A problem that isn't
+   relevant (and for a PR closed unmerged, whose problems never landed) closes instead: `feature
+   problem wontfix <#> --reason "…" --branch <branch>`. Use decisions the user already gave in this
+   conversation; otherwise ask, with one recommendation and its reason for each, then apply them.
 4. **Close out**: `feature merge --branch <branch>`. Never `--force`: it exists for features that
    shipped without their PR merging. The command writes what the gate still had outstanding (an
-   unreviewed tail, blocking problems that shipped open) into the record; pass that on in the
-   report.
+   unreviewed tail, the problems handed off) into the record; pass that on in the report.
 5. **Tidy up.**
    - If the harness is watching the PR (T3's `watch_pull_request`), unwatch it.
    - The feature's checkout (`git worktree list`) is done with once it holds nothing the PR
@@ -54,8 +58,9 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
      parent; say so if you keep it): `git branch -D <branch>`, then
      `git config --unset git-town-branch.<branch>.parent`, the git-town pointer `git branch -D`
      leaves behind.
-6. **Report** in two or three lines: the feature closed, what shipped outstanding, the follow-ups
-   kept, and what you removed or left.
+6. **Report** in two or three lines: the feature closed, what shipped outstanding, what happened to
+   each open problem (handed off to a fix PR, kept as an issue, or wontfix), any fix PR you
+   started, and what you removed or left.
 
 `feature reconcile [--dry-run]` closes out every merged feature in the repo at once, for features
-whose branch is long gone; the same problem decisions apply.
+whose branch is long gone; it refuses the same way while a feature has an undecided problem.

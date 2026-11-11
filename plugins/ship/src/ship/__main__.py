@@ -99,8 +99,8 @@ def _review_head(branch: str, state: dict, pr_merged: bool) -> str:
     return github.pr_head_sha(state["pr"]) if pr_merged else branch_head_sha(branch)
 
 
-def _triage(issue: int) -> problems.Triage:
-    return problems.triage(github.sub_issues(issue))
+def _blocking(issue: int) -> list[dict]:
+    return problems.blocking(github.sub_issues(issue))
 
 
 def _require_problem(branch: str, number: int) -> dict:
@@ -307,7 +307,9 @@ def cmd_depth(args: argparse.Namespace) -> None:
 
 def _round_finds(issue: int, subs: list[dict], numbers: list[int]) -> tuple[dict[str, list[int]], int, int]:
     """A round's `--found` problems by severity (only the severities it found), and how many of
-    them block and how many don't. Aborts on a number that isn't one of the feature's problems."""
+    them are high/med (or unlabelled) and how many low. Every one of them blocks the gate; the
+    split feeds the convergence trend, where a rising count of nits is not a sign of a bad design.
+    Aborts on a number that isn't one of the feature's problems."""
     by_number = {s["number"]: s for s in subs}
     if unknown := sorted(set(numbers) - by_number.keys()):
         sys.exit(
@@ -318,7 +320,7 @@ def _round_finds(issue: int, subs: list[dict], numbers: list[int]) -> tuple[dict
     found: dict[str, list[int]] = {}
     for number in sorted(set(numbers)):
         found.setdefault(problems.severity(by_number[number]).removeprefix("sev:"), []).append(number)
-    new_low = sum(len(found.get(sev.removeprefix("sev:"), [])) for sev in problems.NON_BLOCKING_SEVS)
+    new_low = len(found.get(problems.LOW_SEV.removeprefix("sev:"), []))
     return found, len(set(numbers)) - new_low, new_low
 
 
@@ -347,16 +349,16 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # The round's finds by severity come from the problems themselves: the PR body lists them per
     # round, and the gate's counts can't disagree with the labels the gate reads.
     subs = github.sub_issues(issue)
-    found, new_blocking, new_low = _round_finds(issue, subs, args.found)
-    if args.regressions > new_blocking:
+    found, new_serious, new_low = _round_finds(issue, subs, args.found)
+    if args.regressions > new_serious:
         sys.exit(
             f"Refusing to record a review for #{issue}: --regressions {args.regressions} is more than "
-            f"the {new_blocking} blocking problem(s) in --found, and a regression is one of those."
+            f"the {new_serious} high/med problem(s) in --found, and a regression is one of those."
         )
     entry = record_review(
         state,
         sha=args.sha,
-        new_blocking=new_blocking,
+        new_blocking=new_serious,
         new_low=new_low,
         regressions=args.regressions,
         summary=args.summary,
@@ -371,12 +373,12 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # once. (A duplicated timeline comment, the one thing a retry can repeat, is harmless noise; a
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
-    triaged = problems.triage(subs)
+    blocking = problems.blocking(subs)
     _write_block(state, issue)
     rounds, pinned, _ = _resolve_budget(state)
     merged = _pr_merged(state)
     decision = gate.evaluate(
-        blocking_open=len(triaged.blocking),
+        blocking_open=len(blocking),
         last_review=state["last_review"],
         history=state["review_history"],
         budget=rounds,
@@ -386,8 +388,9 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     )
     github.comment(
         issue,
-        f"🔍 Review run {run_num} ({args.sha}): {new_blocking} new blocking, {new_low} new low, "
-        f"{args.regressions} regression(s). {len(triaged.blocking)} blocking open. {args.summary}\n\n"
+        f"🔍 Review run {run_num} ({args.sha}): {new_serious} new high/med, {new_low} new low, "
+        f"{args.regressions} regression(s). {len(blocking)} problem(s) open, every one blocking. "
+        f"{args.summary}\n\n"
         f"Gate: {decision}",
     )
     # Re-read the body: it was fetched before several seconds of network calls, and writing the stale
@@ -427,101 +430,98 @@ def cmd_problem_resolve(args: argparse.Namespace) -> None:
     print(f"Resolved problem #{args.number}")
 
 
-def cmd_problem_defer(args: argparse.Namespace) -> None:
-    """Real problem, not fixed in this PR: stays OPEN and visible, stops holding the gate.
+def cmd_problem_wontfix(args: argparse.Namespace) -> None:
+    """Not relevant: a false positive, by design, or outside what this PR is for.
 
-    Deliberately not closed — deferred work is debt, and debt you can't see isn't tracked. It
-    keeps its severity (so nobody has to lie about how bad it is) and gains a `deferred` label
-    plus a reason on its timeline, which is what makes shipping it a decision rather than a leak.
+    The only way besides a fix to close a problem, and so the only way to get one out of the gate
+    without changing code. Nothing ships as debt: there is no "open but not blocking" disposition,
+    so a problem that matters is fixed, and one that doesn't is closed here with the reason on it.
     """
     sub = _require_problem(args.branch or current_branch(), args.number)
-    # Reason FIRST, label second. The label is what stops the problem blocking, so if the comment
-    # fails (a `gh` 5xx) after labelling, the problem is out of the gate's way with no reason
-    # recorded anywhere — the silent, unattributable downgrade dispositions exist to prevent. This
-    # order fails the other way: reason posted, still blocking.
-    github.comment(args.number, f"⏸ Deferred — not fixed in this PR, no longer blocking: {args.reason}")
-    github.add_label(args.number, problems.DEFERRED)
-    print(f"Deferred problem #{args.number} [{problems.severity(sub)}] (still open, no longer blocking)")
-
-
-def cmd_problem_reject(args: argparse.Namespace) -> None:
-    """Not a real problem (false positive or by design): closed with the reasoning recorded."""
-    _require_problem(args.branch or current_branch(), args.number)
-    github.add_label(args.number, problems.REJECTED)
-    github.close_issue(args.number, f"🚫 Rejected — not a real problem: {args.reason}")
-    print(f"Rejected problem #{args.number}")
-
-
-def _require_open_problem(args: argparse.Namespace) -> dict:
-    sub = _require_problem(args.branch or current_branch(), args.number)
     if sub["state"] != "OPEN":
-        sys.exit(f"#{args.number} is already closed; a close-out decision is only for open problems.")
-    return sub
-
-
-def cmd_problem_follow_up(args: argparse.Namespace) -> None:
-    """Close-out decision: keep this problem open as a backlog issue, on purpose."""
-    sub = _require_open_problem(args)
-    # Labels may predate these two (a repo onboarded on an older CLI); creating them is idempotent.
+        sys.exit(f"#{args.number} is already closed.")
+    # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
     github.init_labels()
-    github.comment(args.number, f"📌 Follow-up — shipped unfixed, kept open as a backlog issue: {args.reason}")
-    github.add_label(args.number, problems.FOLLOW_UP)
-    print(f"Problem #{args.number} [{problems.severity(sub)}] is a follow-up (open, in the backlog)")
-
-
-def cmd_problem_wontfix(args: argparse.Namespace) -> None:
-    """Close-out decision: a real problem nobody will fix. Closed as not planned, with the reason."""
-    _require_open_problem(args)
-    github.init_labels()
+    # Label first, close second: if the close fails, the problem is still open and still blocks,
+    # and a re-run finishes the job.
     github.add_label(args.number, problems.WONTFIX)
-    github.close_issue(args.number, f"🙅 Won't fix — not planned: {args.reason}", not_planned=True)
-    print(f"Problem #{args.number} closed as not planned")
+    github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
+    print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
-def _undecided_refusal(issue: int, triaged: problems.Triage) -> str:
-    listed = "\n".join(f"  #{s['number']} [{problems.severity(s)}] {s['title']}" for s in triaged.undecided)
-    return (
-        f"Refusing to close out #{issue}: {len(triaged.undecided)} problem(s) are still open with no "
-        f"close-out decision:\n{listed}\n"
-        f'Decide each, with a reason: `feature problem follow-up <#> --reason "…"` keeps it open as a '
-        f'backlog issue, `feature problem wontfix <#> --reason "…"` closes it as not planned. Then re-run.'
-    )
+def cmd_problem_hand_off(args: argparse.Namespace) -> None:
+    """After the merge: hand an open problem to a separate fix PR, or keep it as an issue.
 
-
-def cmd_problem_block(args: argparse.Namespace) -> None:
-    """Revoke a deferral: this problem holds the merge after all.
-
-    The inverse of `defer`, and it needs to exist. A later review round can rediscover a deferred
-    problem with a repro that changes the call, and without this the deferral was permanent — the
-    problem would sit outside the gate with no way to put it back.
+    Only once the PR has merged. Before that, an open problem left out of the way is exactly the debt
+    the gate exists to stop; after it, the fix needs a new PR anyway, and the feature's close-out
+    shouldn't wait for one. A PR closed unmerged never landed its problems: those close as `wontfix`.
     """
     branch = args.branch or current_branch()
     sub = _require_problem(branch, args.number)
-    # Severity outranks disposition in `is_blocking`, so clearing the label on a `sev:low` problem
-    # would change nothing while this command printed that it had. Refuse and name the real fix
-    # rather than report a success the gate doesn't agree with.
-    if problems.severity(sub) in problems.NON_BLOCKING_SEVS:
+    if sub["state"] != "OPEN":
+        sys.exit(f"#{args.number} is already closed.")
+    _, state, _ = _load_state(branch)
+    pr_state = github.pr_state(state["pr"]) if state["pr"] is not None else None
+    if pr_state != "MERGED":
         sys.exit(
-            f"#{args.number} is {problems.severity(sub)}, and low severity never blocks — clearing its "
-            f"disposition would change nothing. If it really blocks, re-file it at its true severity "
-            f"(`feature problem add --sev high|med …`) and close this one as a duplicate."
+            f"Refusing to hand off #{args.number}: the PR hasn't merged ({pr_state or 'no PR linked'}), and "
+            f"nothing ships as debt. Fix it (`feature problem resolve`) or, if it isn't relevant (as for a "
+            f"PR closed unmerged, whose problems never landed), `feature problem wontfix`."
         )
-    # Reopen first: if removing a label fails afterwards, the problem is open and blocks with a stale
-    # label, which a re-run fixes. The other order could leave it closed and unlabelled, looking fixed.
+    # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
+    github.init_labels()
+    # Reason first, label second: the label is what releases the close-out, so it must never land
+    # without the reason on record.
+    github.comment(args.number, f"📤 Handed off after PR #{state['pr']} merged: {args.reason}")
+    github.add_label(args.number, problems.HANDED_OFF)
+    print(f"Problem #{args.number} [{problems.severity(sub)}] handed off (open, outside the feature)")
+
+
+def _undecided_refusal(issue: int, undecided: list[dict]) -> str:
+    listed = "\n".join(f"  #{s['number']} [{problems.severity(s)}] {s['title']}" for s in undecided)
+    return (
+        f"Refusing to close out #{issue}: {len(undecided)} problem(s) are still open:\n{listed}\n"
+        f"Decide each with the user: a separate fix PR or keep it as an issue (`feature problem "
+        f'hand-off <#> --reason "…"`), or, if it isn\'t relevant, `feature problem wontfix <#> --reason "…"`. '
+        f"Then re-run."
+    )
+
+
+def _handed_off_line(subs: list[dict]) -> str:
+    """The close-out record's line for problems that stay open outside the feature, or ''."""
+    handed = problems.handed_off(subs)
+    return f"\n\nHanded off, still open: {_blocking_refs(handed)}." if handed else ""
+
+
+def cmd_problem_block(args: argparse.Namespace) -> None:
+    """Reopen a closed problem: it holds the merge after all.
+
+    A later review round can rediscover a fixed problem (a regression) or answer the reason a
+    problem was closed as `wontfix` with a repro that changes the call. Reopening is all it takes to
+    block again; the `wontfix` label goes too, so the record doesn't call a live problem irrelevant.
+    """
+    sub = _require_problem(args.branch or current_branch(), args.number)
+    stale = problems.WONTFIX in sub["labels"]
+    # An open problem still labelled `wontfix` is a block whose label removal failed after the reopen;
+    # the re-run finishes it rather than refusing.
+    if sub["state"] == "OPEN" and not stale:
+        sys.exit(f"#{args.number} is open, so it already blocks the gate.")
+    # Reopen first: if removing the label fails afterwards, the problem is open and blocks with a
+    # stale label, which a re-run fixes. The other order could leave it closed and unlabelled,
+    # looking fixed.
     if sub["state"] != "OPEN":
         github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
-    # Both labels are earlier decisions this revokes. A `wontfix` left on a reopened problem would
-    # outlive the fix, and close-out would record the fixed problem as shipped unfixed.
-    for label in (problems.DEFERRED, problems.WONTFIX):
-        if label in sub["labels"]:
-            github.remove_label(args.number, label)
-    github.comment(args.number, f"⛔ Blocking again — the earlier disposition is revoked: {args.reason}")
+    if stale:
+        github.remove_label(args.number, problems.WONTFIX)
+    github.comment(args.number, f"⛔ Blocking again: {args.reason}")
     print(f"Problem #{args.number} [{problems.severity(sub)}] blocks the gate again")
 
 
 def _problem_line(sub: dict) -> str:
-    disposed = problems.disposition(sub)
-    mark = "BLOCKING" if problems.is_blocking(sub) else (disposed or "non-blocking")
+    if problems.is_blocking(sub):
+        mark = "handed-off" if problems.is_handed_off(sub) else "BLOCKING"
+    else:
+        mark = "wontfix" if problems.is_wontfix(sub) else "fixed"
     return f"  #{sub['number']:>5}  {sub['state']:<6}  {problems.severity(sub):<9}  {mark:<12}  {sub['title']}"
 
 
@@ -529,10 +529,8 @@ def cmd_problem_list(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
     parent = _resolve_issue(branch)
     subs = github.sub_issues(parent)
-    if args.blocking:
-        subs = [s for s in subs if problems.is_blocking(s)]
-    elif args.open:
-        subs = [s for s in subs if s["state"] == "OPEN"]
+    if args.open:
+        subs = problems.blocking(subs)
     if not subs:
         print("No problems.")
         return
@@ -548,7 +546,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"Branch '{branch}' is not a tracked feature (no wired issue).")
         return
     _, state, _ = _load_state(branch)
-    triaged = _triage(issue)
+    blocking = _blocking(issue)
     # The PR's real state, not just its number: a merged PR whose feature never reached `merged` is
     # the failure that left a repo full of open tracking issues for PRs merged weeks earlier, and
     # this is the one place an agent reliably looks (the SessionStart hook prints it).
@@ -556,7 +554,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     needs_close_out = pr_state == "MERGED" and state["status"] != "merged"
     rounds, pinned, rounds_why = _resolve_budget(state)
     decision = gate.evaluate(
-        blocking_open=len(triaged.blocking),
+        blocking_open=len(blocking),
         last_review=state["last_review"],
         history=state["review_history"],
         budget=rounds,
@@ -580,8 +578,7 @@ def cmd_status(args: argparse.Namespace) -> None:
                         "reasons": decision.reasons,
                         "next_step": decision.next_step,
                     },
-                    "blocking_problems": triaged.blocking,
-                    "non_blocking_problems": triaged.debt,
+                    "blocking_problems": blocking,
                 },
                 indent=2,
             )
@@ -613,21 +610,18 @@ def cmd_status(args: argparse.Namespace) -> None:
             f"⚠️  PR #{state['pr']} is MERGED but this feature is still '{state['status']}' — "
             f"close it out with `Skill(ship:close)` (or `feature reconcile` for every such feature in the repo)."
         )
-    print(f"Blocking problems ({len(triaged.blocking)}):")
-    for s in triaged.blocking:
+    print(f"Open problems, every one blocking ({len(blocking)}):")
+    for s in blocking:
         print(f"  #{s['number']} [{problems.severity(s)}] {s['title']}")
-    print(f"Non-blocking, open ({len(triaged.debt)}):")
-    for s in triaged.debt:
-        print(f"  #{s['number']} [{problems.severity(s)}/{problems.disposition(s) or 'open'}] {s['title']}")
 
 
-def _gate_for(branch: str) -> tuple[int, dict, problems.Triage, gate.GateDecision]:
+def _gate_for(branch: str) -> tuple[int, dict, list[dict], gate.GateDecision]:
     issue, state, _ = _load_state(branch)
-    triaged = _triage(issue)
+    blocking = _blocking(issue)
     rounds, pinned, _ = _resolve_budget(state)
     merged = _pr_merged(state)
     decision = gate.evaluate(
-        blocking_open=len(triaged.blocking),
+        blocking_open=len(blocking),
         last_review=state["last_review"],
         history=state["review_history"],
         budget=rounds,
@@ -635,15 +629,15 @@ def _gate_for(branch: str) -> tuple[int, dict, problems.Triage, gate.GateDecisio
         budget_is_explicit=pinned,
         pr_merged=merged,
     )
-    return issue, state, triaged, decision
+    return issue, state, blocking, decision
 
 
 def cmd_gate(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    issue, _, triaged, decision = _gate_for(branch)
+    issue, _, blocking, decision = _gate_for(branch)
     print(f"GATE {decision} (#{issue})")
     print(f"  → {decision.next_step}")
-    print(f"  {triaged.summary()}")
+    print(f"  open problems: {_blocking_refs(blocking)}")
     # Exit code is the machine interface: 0 ship, 10 review again, 20 human decision needed, 30 merged.
     # (1 and 2 mean the command itself failed — see gate.EXIT_CODES.)
     sys.exit(decision.exit_code)
@@ -683,17 +677,15 @@ def cmd_escalate(args: argparse.Namespace) -> None:
     and parks the feature at `needs-decision` (visible on the board).
     """
     branch = args.branch or current_branch()
-    issue, state, triaged, decision = _gate_for(branch)
+    issue, state, blocking, decision = _gate_for(branch)
     body = github.get_issue_body(issue)
     set_status(state, "needs-decision")
     _save_state(issue, body, state)
-    blocking_refs = ", ".join(f"#{s['number']}" for s in triaged.blocking) or "none"
     github.comment(
         issue,
         f"🚧 **Escalated for a human decision.** {args.reason}\n\n"
         f"Gate: {decision}\n\n"
-        f"Blocking: {len(triaged.blocking)} — {blocking_refs}\n"
-        f"{triaged.summary()}\n\n"
+        f"Open problems, every one blocking: {len(blocking)} — {_blocking_refs(blocking)}\n\n"
         f"Next: {decision.next_step}",
     )
     print(f"Escalated #{issue} for a human decision; status is now needs-decision.")
@@ -703,10 +695,8 @@ def cmd_migrate(args: argparse.Namespace) -> None:
     """Upgrade a repo + feature issue to what the current CLI expects (one-way).
 
     This is the single upgrade entry point, which is why it also (re-)creates the workflow labels:
-    `deferred` and `rejected` are newer than the original label set, and `gh issue edit --add-label`
-    hard-fails on a label the repo doesn't have — so on every repo onboarded before dispositions
-    existed, `feature problem defer` (the main escape hatch out of a closed gate) would abort with
-    an opaque error. Labels first, then the state block.
+    `wontfix` is newer than the original label set, and `gh issue edit --add-label` hard-fails on a
+    label the repo doesn't have. Labels first, then the state block.
     """
     branch = args.branch or current_branch()
     issue = _resolve_issue(branch)
@@ -721,22 +711,8 @@ def cmd_migrate(args: argparse.Namespace) -> None:
     print(f"Workflow labels are up to date; migrated #{issue} state from schema {was} to {SCHEMA}.")
 
 
-def _blocking_refs(triaged: problems.Triage) -> str:
-    return ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.blocking) or "none"
-
-
-def _unfixed_refs(triaged: problems.Triage) -> str:
-    return ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.shipped_unfixed)
-
-
-def _shipped_problems(triaged: problems.Triage) -> list[str]:
-    """One line per kind of blocking problem that went in with the merge, for the close-out record."""
-    lines = []
-    if triaged.blocking:
-        lines.append(f"Blocking problems that shipped open: {_blocking_refs(triaged)}.")
-    if triaged.shipped_unfixed:
-        lines.append(f"Blocking problems closed as won't-fix, shipped unfixed: {_unfixed_refs(triaged)}.")
-    return lines
+def _blocking_refs(blocking: list[dict]) -> str:
+    return ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in blocking) or "none"
 
 
 def cmd_merge(args: argparse.Namespace) -> None:
@@ -751,7 +727,7 @@ def cmd_merge(args: argparse.Namespace) -> None:
     review a merged PR). What the gate still had outstanding goes into the record instead.
     """
     branch = args.branch or current_branch()
-    issue, state, triaged, decision = _gate_for(branch)
+    issue, state, blocking, decision = _gate_for(branch)
     # "Merged" is a claim about the world, and this command writes it into the permanent record.
     # Verify it instead of trusting the caller's timing: run too early and the feature reads as
     # shipped while the PR is still open — or was closed unmerged, in which case the work never
@@ -769,35 +745,31 @@ def cmd_merge(args: argparse.Namespace) -> None:
             f"Use --force to record it anyway."
         )
 
-    # Problems that ship open must each have been decided, or nothing ever visits them again.
-    if triaged.undecided:
-        sys.exit(_undecided_refusal(issue, triaged))
+    # Once the feature is closed nothing visits its problems again, so each open one must have been
+    # handed off (a separate fix PR, or kept as an issue) or closed as not relevant first.
+    if undecided := problems.undecided(blocking):
+        sys.exit(_undecided_refusal(issue, undecided))
 
-    # Name what actually shipped, derived from the gate and the triage rather than asserted. Deferred
-    # and low-severity problems stay open on purpose, and blocking problems or unreviewed commits may
-    # have gone in too — a note claiming "no blocking problems" there would put a false statement in
-    # the feature's permanent record, which is the exact failure this workflow exists to prevent.
+    # Name what is still outstanding (an unreviewed tail), derived from the gate rather than
+    # asserted: a note claiming a clean merge there would put a false statement in the feature's
+    # permanent record, which is the exact failure this workflow exists to prevent.
     if decision.verdict is not gate.Verdict.MERGED:
         note = (
             f"⚠️ Recorded as merged with `--force` while the gate was **{decision.verdict}** "
-            f"({'; '.join(decision.reasons) or 'nothing outstanding'}).\n\n{triaged.summary()}."
+            f"({'; '.join(decision.reasons) or 'nothing outstanding'})."
         )
-    elif decision.reasons or _shipped_problems(triaged):
-        note = f"⚠️ Merged with this still outstanding: {'; '.join(decision.reasons) or 'no open blocking problems'}."
-        note += "".join(f"\n\n{line}" for line in _shipped_problems(triaged))
-        note += f"\n{triaged.summary()}."
+    elif decision.reasons:
+        note = f"⚠️ Merged with this still outstanding: {'; '.join(decision.reasons)}."
     else:
-        note = f"✅ Merged. No blocking problems; {triaged.summary()}."
+        note = "✅ Merged. No open problems, and the last review covered it."
+    note += _handed_off_line(blocking)
     # The issue may already be closed: the PR's `Closes #<issue>` reference fires the moment it
     # merges into the default branch, which is usually seconds before anyone runs this. Comment
     # either way, close only if it's still open.
     _record_outcome(issue, state, note, status="merged", already_closed=github.get_issue(issue)["state"] != "OPEN")
     print(f"Marked feature #{issue} merged and closed it.")
-    print(f"  {triaged.summary()}")
     if decision.reasons:
         print(f"  shipped with: {'; '.join(decision.reasons)}")
-    if triaged.shipped_unfixed:
-        print(f"  closed as won't-fix, shipped unfixed: {_unfixed_refs(triaged)}")
 
 
 def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_closed: bool) -> None:
@@ -818,23 +790,15 @@ def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_
     _save_state(issue, github.get_issue_body(issue), state)
 
 
-def _reconcile_note(pr: int, triaged: problems.Triage) -> str:
-    note = f"✅ Merged in PR #{pr} — recorded after the fact by `feature reconcile`."
-    shipped = _shipped_problems(triaged)
-    if not shipped:
-        return f"{note} {triaged.summary()}."
-    # Open blocking problems in a merged PR mean the gate never vetted this merge. A won't-fix one is a
-    # recorded decision, which the gate allows, so it gets no such claim.
-    vetted = (
-        " The gate either never opened or was bypassed outside this CLI; this comment is the record of what "
-        "actually shipped."
-        if triaged.blocking
-        else ""
+def _reconcile_note(pr: int, blocking: list[dict]) -> str:
+    if not blocking:
+        return f"✅ Merged in PR #{pr} — recorded after the fact by `feature reconcile`. No open problems."
+    return f"⚠️ Merged in PR #{pr} with problems open — recorded after the fact by `feature reconcile`." + (
+        _handed_off_line(blocking)
     )
-    return note + "".join(f"\n\n⚠️ {line}" for line in shipped) + f"{vetted}\n{triaged.summary()}."
 
 
-def _abandoned_note(pr: int, triaged: problems.Triage) -> str:
+def _abandoned_note(pr: int, blocking: list[dict]) -> str:
     """The record for a feature whose PR was closed without merging: the work never landed."""
     # Strictly what is known: the tracked PR closed unmerged. Whether the work later landed some
     # other way is not something this sweep can see (it checked only for an *open* successor PR), so
@@ -845,11 +809,7 @@ def _abandoned_note(pr: int, triaged: problems.Triage) -> str:
         f"`feature reconcile`. If the work resumed or landed under a different PR, reopen this issue "
         f"and re-link it with `feature pr <number>`."
     )
-    # Reconcile only gets here once every open problem is a decided follow-up; name them.
-    follow_ups = ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.blocking + triaged.debt)
-    if follow_ups:
-        note += f"\n\nKept open as follow-ups: {follow_ups}."
-    return note
+    return note + _handed_off_line(blocking)
 
 
 def cmd_reconcile(args: argparse.Namespace) -> None:
@@ -861,7 +821,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
     tracking issues whose PRs had merged weeks earlier, each still claiming `in-review`. PR bodies
     now carry a `Closes #<issue>` reference so GitHub closes the issue on merge, but that only fires
     for merges into the default branch (never for a stacked feature merged into its parent) and it
-    writes no record — the state block stays at `in-review` and nothing names the debt that shipped.
+    writes no record — the state block stays at `in-review` and nothing names what shipped.
 
     A feature whose PR was closed *unmerged* is the same orphan seen from the other side — an open
     tracking issue for work that will never land — so it closes too, as `abandoned` rather than
@@ -934,23 +894,20 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
         # From here the feature reaches a terminal status, so the state block gets written — which
         # means an old schema has to be upgraded first, right here: `feature migrate` resolves its
         # issue through the branch's git config and these branches are gone.
-        triaged = _triage(issue)
-        # Every problem still open needs a close-out decision first, merged or abandoned alike: once
-        # the feature is closed, nothing would ever come back to an undecided one.
-        if triaged.undecided:
-            refs = ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in triaged.undecided)
+        blocking = _blocking(issue)
+        # Every open problem needs a decision first, merged or abandoned alike: once the feature is
+        # closed nothing would ever come back to an undecided one.
+        if undecided := problems.undecided(blocking):
             print(
-                f"#{issue} ({row['title']}): PR #{pr} {pr_state}, but {len(triaged.undecided)} open problem(s) "
-                f"need a close-out decision first: {refs} — `feature problem follow-up|wontfix <#> --reason …`"
+                f"#{issue} ({row['title']}): PR #{pr} {pr_state}, but {len(undecided)} open problem(s) need a "
+                f"decision first: {_blocking_refs(undecided)} — `feature problem hand-off|wontfix <#> --reason …`"
             )
             needs_human += 1
             continue
         merged = pr_state == "MERGED"
         upgrade = "" if state["schema"] == SCHEMA else f" + state upgraded from schema {state['schema']}"
         if args.dry_run:
-            outcome = (
-                f"would close out{upgrade}. {triaged.summary()}" if merged else f"would close as abandoned{upgrade}"
-            )
+            outcome = f"would close out{upgrade}" if merged else f"would close as abandoned{upgrade}"
             print(f"#{issue} ({row['title']}): PR #{pr} {pr_state}, status '{state['status']}' → {outcome}")
             if merged:
                 closed_out += 1
@@ -969,18 +926,15 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
         _record_outcome(
             issue,
             state,
-            _reconcile_note(pr, triaged) if merged else _abandoned_note(pr, triaged),
+            _reconcile_note(pr, blocking) if merged else _abandoned_note(pr, blocking),
             status="merged" if merged else "abandoned",
             already_closed=row["state"] != "OPEN",
         )
         if merged:
-            blocking = f"; {len(triaged.blocking)} blocking problem(s) shipped open" if triaged.blocking else ""
-            print(f"#{issue} ({row['title']}): closed out — merged in PR #{pr}{upgrade}{blocking}")
+            print(f"#{issue} ({row['title']}): closed out — merged in PR #{pr}{upgrade}")
             closed_out += 1
         else:
-            left = len(triaged.blocking) + len(triaged.debt)
-            leftover = f"; {left} problem(s) left open to triage" if left else ""
-            print(f"#{issue} ({row['title']}): closed as abandoned — PR #{pr} never merged{upgrade}{leftover}")
+            print(f"#{issue} ({row['title']}): closed as abandoned — PR #{pr} never merged{upgrade}")
             abandoned += 1
 
     scope = f"feature for branch '{args.branch}'" if args.branch else f"{len(rows)} feature issue(s)"
@@ -1124,35 +1078,27 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--commit")
     pr.add_argument("--branch")
     pr.set_defaults(func=cmd_problem_resolve)
-    pd = psub.add_parser("defer", help="Real problem, not fixed here: keep it open but non-blocking")
-    pd.add_argument("number", type=int)
-    pd.add_argument("--reason", required=True, help="Why it is acceptable to ship without fixing this")
-    pd.add_argument("--branch")
-    pd.set_defaults(func=cmd_problem_defer)
-    pj = psub.add_parser("reject", help="Not a real problem (false positive / by design): close it")
-    pj.add_argument("number", type=int)
-    pj.add_argument("--reason", required=True, help="Why this is not a real problem")
-    pj.add_argument("--branch")
-    pj.set_defaults(func=cmd_problem_reject)
-    pf = psub.add_parser("follow-up", help="Close-out decision: keep an open problem as a backlog issue")
-    pf.add_argument("number", type=int)
-    pf.add_argument("--reason", required=True, help="Why it's worth fixing later")
-    pf.add_argument("--branch")
-    pf.set_defaults(func=cmd_problem_follow_up)
-    pw = psub.add_parser("wontfix", help="Close-out decision: close an open problem as not planned")
+    pw = psub.add_parser(
+        "wontfix", help="Not relevant (false positive, by design, out of scope): label it wontfix and close it"
+    )
     pw.add_argument("number", type=int)
-    pw.add_argument("--reason", required=True, help="Why it won't be fixed")
+    pw.add_argument("--reason", required=True, help="Why it isn't relevant")
     pw.add_argument("--branch")
     pw.set_defaults(func=cmd_problem_wontfix)
-    pb = psub.add_parser("block", help="Revoke a disposition: this problem holds the merge after all")
+    ph = psub.add_parser(
+        "hand-off", help="After the merge only: hand an open problem to a separate fix PR, or keep it as an issue"
+    )
+    ph.add_argument("number", type=int)
+    ph.add_argument("--reason", required=True, help="Which: the fix PR to come, or why it stays an issue")
+    ph.add_argument("--branch")
+    ph.set_defaults(func=cmd_problem_hand_off)
+    pb = psub.add_parser("block", help="Reopen a closed problem: it holds the merge after all")
     pb.add_argument("number", type=int)
     pb.add_argument("--reason", required=True, help="What changed — why it must block now")
     pb.add_argument("--branch")
     pb.set_defaults(func=cmd_problem_block)
     pl = psub.add_parser("list", help="List problem sub-issues")
-    which = pl.add_mutually_exclusive_group()
-    which.add_argument("--open", action="store_true", help="Only open problems")
-    which.add_argument("--blocking", action="store_true", help="Only problems that hold the merge gate")
+    pl.add_argument("--open", action="store_true", help="Only open problems (every one holds the merge gate)")
     pl.add_argument("--branch")
     pl.set_defaults(func=cmd_problem_list)
 

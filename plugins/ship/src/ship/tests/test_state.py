@@ -146,7 +146,7 @@ def test_record_review_spends_one_round_per_call():
 
 
 def test_a_second_round_at_an_unchanged_sha_is_a_real_round():
-    """`problem defer` makes progress without committing, so re-reviewing the same sha is genuine.
+    """`problem wontfix` makes progress without committing, so re-reviewing the same sha is genuine.
 
     Collapsing these into one entry (an earlier attempt at retry-safety) rewrote a real round's
     counts and never spent budget, which made the review loop unbounded again. Retry-safety is the

@@ -1,89 +1,66 @@
 """Which problem sub-issues hold the merge gate — pure classification over sub-issue dicts.
 
-Two ideas do the work:
+**Every open problem blocks the merge.** Nothing ships as debt. A problem a review filed is
+either fixed (closed by `feature problem resolve` with its commit) or not relevant (closed by
+`feature problem wontfix`, which applies the `wontfix` label and posts the reason). Severity is
+still recorded on each problem, for the round counts and the convergence trend, but it no longer
+decides whether a problem holds the gate: an earlier design let `sev:low` problems and `deferred`
+ones ship open, and they piled up as "tracked debt" nobody ever came back to.
 
-**Severity decides whether a problem blocks.** A reviewer always finds low-severity material
-(nits, naming, duplication, hypotheticals), so a gate that waits for "no findings at all" never
-opens. `sev:high` and `sev:med` block the merge; `sev:low` is tracked debt that ships.
+A closed problem that turns out to matter after all (a later round rediscovering it with a real
+repro) is reopened by `feature problem block`, and being open is all it takes to block again.
 
-**A disposition takes a problem out of the blocking set, on the record.** `deferred` (real, but not
-being fixed in this PR) and `rejected` (not a real problem) both require a reason that is posted on
-the issue, so shipping known debt is an explicit, auditable act — not a silent severity downgrade.
-Deferred problems stay open and are named at merge time; rejected ones are closed, because a
-non-problem is not debt.
-
-**Close-out needs a decision on every problem still open.** Deferred and low-severity problems ship
-open, and once the PR merges nothing ever visits them again: the feature issue closes, no session
-works on the branch, and "tracked debt" turns into a graveyard. So closing a feature out requires
-each open problem to be either a `follow-up` (kept open as a backlog issue, on purpose) or closed
-as `wontfix` (not planned). Both take a reason.
-
-Only `deferred` suppresses blocking. A `rejected` problem expresses itself by being *closed*, so if
-one is OPEN again someone overturned the rejection — a later review round rediscovering it with a
-real repro, per the skill's regression rule — and it must hold the merge like any other open
-problem. Suppressing on the label instead would let a reopened high-severity bug sit outside the
-gate with no way to put it back (`feature problem block` is the explicit way to revoke a deferral).
+**After the merge, an open problem can be handed off.** A PR merged past the gate can leave
+problems open, and its fix can only come in a new PR. Holding the feature's close-out until that
+PR lands bought nothing, since the problem is already a GitHub issue. So once the PR has merged,
+the user chooses, per problem: a separate fix PR, or keep it as an issue. Either way `feature
+problem hand-off` labels it `handed-off` and it stays open on its own, outside the feature. Before
+the merge there is no such option: that would be shipping debt. (A PR closed unmerged never landed
+its problems, so those close as `wontfix`.)
 """
 
-from dataclasses import dataclass
-
-# Only an EXPLICIT `sev:low` is non-blocking. Stated this way round on purpose: severity is the
-# value the gate now depends on, so an unlabelled problem — a human filing a sub-issue through the
-# GitHub UI without picking a label, or a label removed later — must fail *safe* and hold the merge.
-# Enumerating the blocking severities instead would silently let `sev:?` through.
-NON_BLOCKING_SEVS = ("sev:low",)
 UNKNOWN_SEV = "sev:?"
-
-DEFERRED = "deferred"
-REJECTED = "rejected"
-FOLLOW_UP = "follow-up"
+LOW_SEV = "sev:low"
 WONTFIX = "wontfix"
-DISPOSITIONS = (DEFERRED, REJECTED)
+HANDED_OFF = "handed-off"
+# Labels the old CLI already wrote onto problem issues on GitHub, kept ON PURPOSE: `rejected` was its
+# not-relevant close (now `wontfix`), and `follow-up` its close-out decision to keep a merged PR's
+# problem open as a backlog issue (now `handed-off`). Without these, `problem list` would call old
+# rejections fixed, and reconcile would hold archived features on decisions already made.
+LEGACY_WONTFIX = "rejected"
+LEGACY_HANDED_OFF = "follow-up"
 
 
 def severity(sub: dict) -> str:
-    """The `sev:*` label on a problem, or `sev:?` if it has none (which blocks — see above)."""
+    """The `sev:*` label on a problem, or `sev:?` if it has none."""
     return next((label for label in sub["labels"] if label.startswith("sev:")), UNKNOWN_SEV)
 
 
-def disposition(sub: dict) -> str | None:
-    """The recorded disposition label (`deferred`/`rejected`), or None if undisposed."""
-    return next((label for label in sub["labels"] if label in DISPOSITIONS), None)
-
-
 def is_blocking(sub: dict) -> bool:
-    """True if this sub-issue holds the merge gate. See the module docstring for the two rules."""
-    return sub["state"] == "OPEN" and severity(sub) not in NON_BLOCKING_SEVS and DEFERRED not in sub["labels"]
+    """True if this sub-issue holds the merge gate: every open problem does, at every severity."""
+    return sub["state"] == "OPEN"
 
 
-@dataclass(frozen=True)
-class Triage:
-    """A feature's open sub-issues split the way every caller needs them."""
-
-    blocking: list[dict]  # open, not explicitly low, not deferred — these hold the gate
-    debt: list[dict]  # open, non-blocking (low severity, or disposed) — ships with the PR
-    undecided: list[dict]  # open and not yet a `follow-up` — these hold the close-out
-    # Closed as won't-fix at a blocking severity: no longer open, but the code still has the bug, so
-    # the close-out record must name it whether the decision came before the merge or after it.
-    shipped_unfixed: list[dict]
-
-    def summary(self) -> str:
-        """One line naming the debt that ships, so it is never invisible at merge time."""
-        if not self.debt:
-            return "no open non-blocking problems"
-        parts = [f"#{s['number']} [{severity(s)}{'/' + (disposition(s) or 'open')}]" for s in self.debt]
-        return f"{len(self.debt)} non-blocking problem(s) ship as debt: " + ", ".join(parts)
+def blocking(subs: list[dict]) -> list[dict]:
+    """The problems that hold the gate: all the open ones."""
+    return [s for s in subs if is_blocking(s)]
 
 
-def triage(subs: list[dict]) -> Triage:
-    open_subs = [s for s in subs if s["state"] == "OPEN"]
-    return Triage(
-        blocking=[s for s in open_subs if is_blocking(s)],
-        debt=[s for s in open_subs if not is_blocking(s)],
-        undecided=[s for s in open_subs if FOLLOW_UP not in s["labels"]],
-        shipped_unfixed=[
-            s
-            for s in subs
-            if s["state"] == "CLOSED" and WONTFIX in s["labels"] and severity(s) not in NON_BLOCKING_SEVS
-        ],
-    )
+def is_wontfix(sub: dict) -> bool:
+    """Closed as not relevant, by this CLI or (as `rejected`) the old one."""
+    return WONTFIX in sub["labels"] or LEGACY_WONTFIX in sub["labels"]
+
+
+def is_handed_off(sub: dict) -> bool:
+    """Handed off after the merge, by this CLI or (as `follow-up`) the old one."""
+    return HANDED_OFF in sub["labels"] or LEGACY_HANDED_OFF in sub["labels"]
+
+
+def undecided(subs: list[dict]) -> list[dict]:
+    """The problems that hold the close-out: open, and not handed off after the merge."""
+    return [s for s in blocking(subs) if not is_handed_off(s)]
+
+
+def handed_off(subs: list[dict]) -> list[dict]:
+    """Open problems of a merged PR, handed to a separate fix PR or kept as an issue."""
+    return [s for s in blocking(subs) if is_handed_off(s)]

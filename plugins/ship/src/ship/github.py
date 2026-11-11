@@ -14,13 +14,11 @@ from .shell import run
 LABELS = [
     ("feature", "0e8a16", "Feature tracking issue"),
     ("problem", "d93f0b", "Review-found problem"),
-    ("sev:high", "b60205", "High severity problem (blocks the merge gate)"),
-    ("sev:med", "fbca04", "Medium severity problem (blocks the merge gate)"),
-    ("sev:low", "0e8a16", "Low severity problem (tracked debt, does not block)"),
-    ("deferred", "c5def5", "Real problem, deliberately not fixed in this PR (reason on the issue)"),
-    ("rejected", "cfd3d7", "Not a real problem — false positive or by design (reason on the issue)"),
-    ("follow-up", "1d76db", "Shipped unfixed, kept open as a backlog issue (reason on the issue)"),
-    ("wontfix", "ffffff", "Real problem, closed as not planned (reason on the issue)"),
+    ("sev:high", "b60205", "High severity problem (blocks the merge gate until closed)"),
+    ("sev:med", "fbca04", "Medium severity problem (blocks the merge gate until closed)"),
+    ("sev:low", "0e8a16", "Low severity problem (blocks the merge gate until closed)"),
+    ("wontfix", "ffffff", "Not relevant, closed as not planned (reason on the issue)"),
+    ("handed-off", "1d76db", "Open problem of a merged PR, handed to a separate fix PR or kept as an issue"),
 ]
 
 
@@ -161,7 +159,7 @@ def set_pr_block(pr: int, quote: str, issue: int) -> bool:
     Two gaps remain, and `feature reconcile` exists for both: GitHub only honours the keyword when
     the PR merges into the **default branch**, so a stacked feature merged into its parent still
     needs closing by hand, and the auto-close writes no record — the state block stays at
-    `in-review` and nothing names the debt that shipped.
+    `in-review` and nothing names what shipped.
     """
     body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
     new_body = prbody.with_block(body, quote, issue)
@@ -294,12 +292,12 @@ def pr_changed_paths(number: int, *, expected: int) -> list[str]:
 
 
 def add_label(number: int, label: str) -> None:
-    """Add a label to an issue (used to stamp a problem's recorded disposition)."""
+    """Add a label to an issue (used to stamp `wontfix` on a problem closed as not relevant)."""
     run(["gh", "issue", "edit", str(number), "--add-label", label])
 
 
 def remove_label(number: int, label: str) -> None:
-    """Remove a label from an issue (used to revoke a disposition, so it blocks again)."""
+    """Remove a label from an issue (used to clear `wontfix` from a reopened problem)."""
     run(["gh", "issue", "edit", str(number), "--remove-label", label])
 
 
