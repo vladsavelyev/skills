@@ -3,11 +3,11 @@
 A CLI + SessionStart hook for running multiple Claude features in parallel. A feature starts as
 a branch, a worktree and a draft PR (the `start` skill); when it's shipped (the `ship` skill) it
 gets a GitHub tracking issue and a review by Sol (Codex, via T3) at a reasoning effort sized from
-the PR: real defects, plus spec gaps and design smells as non-blocking debt, and Sol's grade of the PR's risk and complexity goes into the PR body. Features can be **stacked** on each
+the PR: real defects, plus spec gaps and design smells, and Sol's grade of the PR's risk and complexity goes into the PR body. Features can be **stacked** on each
 other (via git-town). Review-found problems are tracked as GitHub sub-issues, and a **merge
-gate** blocks until the *blocking* ones are resolved and a review comes back clean. A new Claude
+gate** blocks until every one is closed and a review covers the branch head. A new Claude
 session on an existing branch reconstructs full context (base branch, last prompt, last review,
-blocking problems) from GitHub. Once the PR merges, the `close` skill closes the feature out: it
+open problems) from GitHub. Once the PR merges, the `close` skill closes the feature out: it
 records what shipped and closes the tracking issue, and never reviews.
 
 Before the merge the gate has three verdicts, because "review until a run finds nothing" never
@@ -15,15 +15,15 @@ terminates — a real reviewer always finds *something*. After it, a fourth ends
 
 | `feature gate` | Exit | Meaning |
 | --- | --- | --- |
-| `OPEN` | 0 | No blocking problems, and a review has covered the current branch head. Ship it. |
-| `REVIEW_AGAIN` | 10 | Blocking work left, review budget remains. |
-| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Blocking problems still get fixed; a human decides whether to review the fixes in another round, merge, split, or redesign. |
+| `OPEN` | 0 | No open problems, and a review has covered the current branch head. Ship it. |
+| `REVIEW_AGAIN` | 10 | Open problems or unreviewed code left, review budget remains. |
+| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign. |
 | `MERGED` | 30 | The PR is in. Nothing left to review; close the feature out. |
 
-Only an explicit `sev:low` is non-blocking: it's tracked debt that ships. A problem with no
-severity label blocks until someone labels it, so a missing label can't quietly loosen the gate.
-Anything you decide to ship unfixed gets an explicit, reasoned disposition (`feature problem
-defer`) instead of a silent severity downgrade, and reviews are budgeted (2–4 rounds, sized from
+**Nothing ships as debt.** Every open problem blocks the gate, at every severity including `low`.
+It's either fixed (`feature problem resolve` with its commit) or, if it isn't relevant, closed with
+the `wontfix` label and the reason (`feature problem wontfix`). Severity orders the work and feeds
+the convergence trend; it doesn't decide what blocks. Reviews are budgeted (2–4 rounds, sized from
 the diff) so a non-converging loop ends in a recorded decision rather than unbounded spend.
 
 See [docs/design.md](docs/design.md) for the full design, and
@@ -96,11 +96,11 @@ feature problem add --title "…" --sev high    # file each genuinely-new proble
 feature review record --sha $(git rev-parse HEAD) --found 46 47 48 49 50 \
     --summary "Token refresh race + unchecked PKCE verifier; 3 nits filed as low" \
     --depth xhigh --risk high --complexity med --why "Token handling; refresh has ordering"
-feature problem list --blocking                # what actually holds the merge
-# ... fix the blocking ones, then:
+feature problem list --open                    # every one holds the merge, low included
+# ... fix each, or close the ones that aren't relevant:
 feature problem resolve 46 --commit abc1234
-feature problem reject 48 --reason "verifier is validated upstream in middleware.py:40"
-# re-review, then record a clean pass (no new blocking) to open the gate:
+feature problem wontfix 48 --reason "verifier is validated upstream in middleware.py:40"
+# re-review, then record it; the gate opens once nothing is open and the review covers HEAD:
 feature review record --sha $(git rev-parse HEAD) --found 51 \
     --summary "Re-reviewed oauth.py; #46 fixed; one naming nit filed" \
     --depth max --risk high --complexity med --why "Token handling; refresh has ordering"
@@ -120,20 +120,17 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
 | `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
-| `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (anything but `low` blocks the gate). |
+| `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (it blocks the gate until closed, at any severity). |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue as fixed. |
-| `feature problem defer <number> --reason <why>` | Real problem, shipped unfixed: stays open, stops blocking, reason recorded. |
-| `feature problem reject <number> --reason <why>` | False positive / by design: closed with the reasoning. |
-| `feature problem follow-up <number> --reason <why>` | Close-out decision: keep an open problem as a backlog issue. |
-| `feature problem wontfix <number> --reason <why>` | Close-out decision: close an open problem as not planned. |
-| `feature problem block <number> --reason <why>` | Revoke a disposition so the problem blocks again (inverse of `defer`). |
-| `feature problem list [--open] [--blocking]` | List problem sub-issues with severity and disposition. |
+| `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. |
+| `feature problem block <number> --reason <why>` | Reopen a closed problem (a regression, or a `wontfix` overturned) so it blocks again. |
+| `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto]` | Show or override the review-round budget. |
 | `feature escalate --reason <t>` | Park at `needs-decision` with your recommendation for a human. |
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |
 | `feature gate [--branch <b>]` | Exit 0 = OPEN, 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION, 30 = MERGED (1 and 2 stay "the command failed"). |
-| `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks that the PR really merged and records what the gate still had outstanding; refuses while an open problem has no follow-up/wontfix decision). |
+| `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks that the PR really merged and records what the gate still had outstanding; refuses while any problem is open). |
 | `feature reconcile [--branch <b>] [--dry-run]` | Sweep the repo: close out every feature whose PR already merged, close as `abandoned` the ones whose PR was closed unmerged, and repair the issue link on still-open PRs. |
 | `feature migrate [--branch <b>]` | Upgrade a repo for this CLI version: (re-)create the workflow labels and the feature issue's state block. Run it once per repo after upgrading. |
 
@@ -148,7 +145,7 @@ tracking issues accumulated open for PRs merged weeks earlier.
 
 The keyword covers the common case but not all of it: GitHub only auto-closes on a merge into the
 **default branch** (never for a stacked feature merged into its parent), and it writes no record —
-the state block would stay at `in-review` and nothing would name the debt that shipped. So:
+the state block would stay at `in-review` and nothing would record what shipped. So:
 
 ```sh
 feature reconcile --dry-run   # what's orphaned: merged PRs, PRs closed unmerged, stale links

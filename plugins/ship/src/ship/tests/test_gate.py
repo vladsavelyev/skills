@@ -47,11 +47,11 @@ def test_low_severity_findings_do_not_hold_the_gate():
     assert d.verdict is Verdict.OPEN
 
 
-def test_deferring_the_findings_opens_the_gate_without_another_round():
-    """The escape hatch has to actually work: nothing is blocking, and no code changed.
+def test_closing_the_findings_as_wontfix_opens_the_gate_without_another_round():
+    """No problem is open, and no code changed, so the review that found them still covers HEAD.
 
     The gate used to read `last_review["new_blocking"] != 0`, a count that went stale the moment a
-    problem was disposed of — so "ship the rest as debt" left the gate shut with no way to reopen it.
+    problem was closed without a commit, which left the gate shut with no way to reopen it.
     """
     found_two = run(2, blocking=2)
     d = gate(blocking_open=0, last_review=found_two, history=[run(1, blocking=2), found_two], budget=2)
@@ -76,7 +76,7 @@ def test_covers_head_matches_short_against_long_shas():
 def test_review_again_while_budget_remains():
     d = gate(blocking_open=2, last_review=DIRTY, history=[DIRTY])
     assert d.verdict is Verdict.REVIEW_AGAIN
-    assert "2 blocking problem(s) open" in d.reasons
+    assert "2 problem(s) open, every one blocking" in d.reasons
     assert d.rounds_used == 1
 
 
@@ -207,7 +207,7 @@ def test_merged_outranks_a_spent_budget():
     history = [run(1, blocking=1), run(2, blocking=1)]
     d = gate(blocking_open=1, last_review=history[-1], history=history, budget=2, merged=True)
     assert d.verdict is Verdict.MERGED
-    assert d.reasons == ["1 blocking problem(s) open"]
+    assert d.reasons == ["1 problem(s) open, every one blocking"]
 
 
 def test_a_clean_merge_reports_nothing_outstanding():

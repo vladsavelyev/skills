@@ -77,12 +77,13 @@ def main() -> None:
     # Otherwise the gate line says what to do; make the stop condition explicit, because the failure
     # mode this replaced was an agent reviewing round after round chasing a clean sweep.
     print(
-        "Before the merge, the gate decides whether to review again: REVIEW_AGAIN means fix "
-        "the blocking problems and run ONE more review round; NEEDS_DECISION means STOP "
-        "reviewing, still fix the blocking problems (the budget limits reviews, not fixes), and "
-        "`feature escalate --reason '<recommendation>'` for a human. Only "
-        "high/med problems block — never downgrade a severity to open the gate, use "
-        "`feature problem defer <#> --reason '<why>'` so the decision is recorded."
+        "Before the merge, the gate decides whether to review again: REVIEW_AGAIN means close "
+        "the open problems and run ONE more review round; NEEDS_DECISION means STOP "
+        "reviewing, still close the open problems (the budget limits reviews, not fixes), and "
+        "`feature escalate --reason '<recommendation>'` for a human. Nothing ships as debt: "
+        "every open problem blocks, at every severity, until it is fixed (`feature problem "
+        "resolve <#> --commit <sha>`) or closed as not relevant (`feature problem wontfix <#> "
+        "--reason '<why>'`)."
     )
     print("</feature-context>")
 

@@ -2,25 +2,28 @@
 
 The gate has **three** outcomes, because a review loop has three real endings:
 
-  OPEN            — nothing blocking is left, and a review has covered the code that is on the
+  OPEN            — no problem is open, and a review has covered the code that is on the
                     branch right now. Ship it.
-  REVIEW_AGAIN    — blocking work is outstanding and there is review budget left to spend.
+  REVIEW_AGAIN    — open problems or unreviewed code are outstanding and there is review budget
+                    left to spend.
   NEEDS_DECISION  — the loop is not converging on its own: the budget is spent, or the trend
-                    says another round won't help. A human decides: ship with recorded
-                    deferrals, buy another round, split the PR, or redesign.
+                    says another round won't help. The open problems still get fixed; a human
+                    decides whether to buy another round, merge the fixes unreviewed, split the
+                    PR, or redesign.
 
 Once the PR has merged none of them applies, so a fourth verdict ends the loop for good:
 
   MERGED          — the PR is in. There is nothing left to review or fix in it; what remains is
                     closing the feature out. The reasons still say what was outstanding when it
-                    merged (an unreviewed tail, open blocking problems), because the close-out
-                    record must name them.
+                    merged (an unreviewed tail, open problems), because the close-out must deal
+                    with them.
 
 Why three. The old gate demanded a review run with *zero* findings. But the reviewer is built
 to report at every altitude — real defects, nits, pre-existing issues in touched files — so a
-zero-finding run is an event that never happens, and the loop had no other exit. Only *blocking*
-findings (see `problems.py`) hold the gate now, and when even those won't settle, the gate says
-so out loud instead of asking for one more expensive round forever.
+zero-finding run is an event that never happens, and the loop had no other exit. The gate asks
+instead whether every filed problem is closed (fixed, or `wontfix` as not relevant — see
+`problems.py`; nothing ships as debt) and whether a review covers HEAD, and when the loop won't
+settle it says so out loud instead of asking for one more expensive round forever.
 """
 
 from dataclasses import dataclass
@@ -31,15 +34,15 @@ _NEXT_OPEN = "Human merges the PR, then close it out with `Skill(ship:close)`."
 # A review after the merge can block nothing, and the old advice ("review again") sent agents to do
 # exactly that on a merged PR whose last commits were never reviewed.
 _NEXT_MERGED = "Don't review: the PR has merged. Close the feature out with `Skill(ship:close)`."
-# The budget limits review rounds, not fixes. The old wording listed only "ship the rest as debt",
-# "buy a round" or "split/redesign", so an agent at a spent budget deferred real blockers it could
-# have fixed in minutes and asked the human for permission to fix them.
+# The budget limits review rounds, not fixes. An older wording offered "ship the rest as debt", so
+# an agent at a spent budget left real problems open that it could have fixed in minutes. Nothing
+# ships as debt: every open problem is fixed, or closed as `wontfix` because it isn't relevant.
 _NEXT_DECISION = (
-    "STOP reviewing, but still fix the blocking problems: the budget limits review rounds, not "
-    "fixes. Then `feature escalate --reason '<what you recommend>'`, and a human decides whether to "
-    "review the fixes in another round (`feature budget --set <n>`), merge with them unreviewed, or "
-    "split/redesign the PR. Defer (`feature problem defer <#> --reason '<why>'`) only a blocker "
-    "this PR can't fix."
+    "STOP reviewing, but still close every open problem: fix it, or `feature problem wontfix <#> "
+    "--reason '<why>'` if it isn't relevant. The budget limits review rounds, not fixes, and nothing "
+    "ships as debt. Then `feature escalate --reason '<what you recommend>'`, and a human decides "
+    "whether to review the fixes in another round (`feature budget --set <n>`), merge with them "
+    "unreviewed, or split/redesign the PR."
 )
 
 
@@ -76,9 +79,9 @@ class GateDecision:
     def __str__(self) -> str:
         used = f"reviews {self.rounds_used}/{self.budget}"
         if self.open:
-            return f"OPEN: nothing blocking, last review clean ({used}). Safe to merge."
+            return f"OPEN: no open problems, last review covers HEAD ({used}). Safe to merge."
         if self.verdict is Verdict.MERGED:
-            shipped = "; ".join(self.reasons) if self.reasons else "nothing blocking, last review covered it"
+            shipped = "; ".join(self.reasons) if self.reasons else "no open problems, last review covered it"
             return f"MERGED: the PR is in, nothing left to review (merged with: {shipped}; {used})"
         return f"{self.verdict}: " + "; ".join([*self.reasons, used])
 
@@ -107,15 +110,15 @@ def churn_reason(rounds: list[dict]) -> str | None:
         reintroducing known bugs, which is a design smell, not a review-more smell;
       * blocking findings stopped decreasing round over round — the loop is treading water.
 
-    Both key off blocking counts only. A re-opened low-severity nit is not evidence that the design
-    is wrong, and escalating on it would contradict the rule that low severity never gates.
+    Both key off high/med counts only. Low-severity problems block the gate like any other, but a
+    re-opened or rising count of nits is not evidence that the design is wrong.
     """
     if not rounds or rounds[-1].get("placeholder"):
         return None
     last = rounds[-1]
     if last["regressions"]:
         return (
-            f"run {last['run']} re-opened {last['regressions']} previously-closed blocking "
+            f"run {last['run']} re-opened {last['regressions']} previously-closed high/med "
             f"problem(s) — the fixes are reintroducing known bugs"
         )
     # Placeholder rounds carry no counts (see `state.migrate`), so a trend through one is
@@ -127,10 +130,7 @@ def churn_reason(rounds: list[dict]) -> str | None:
         # unreachable — the advertised 2-4 budget was effectively always 2. A rising count is the
         # real "getting worse" signal; a plateau is left to the budget to bound.
         if current and previous and current > previous:
-            return (
-                f"blocking findings are rising ({previous} then {current}) — "
-                f"another round is unlikely to converge"
-            )
+            return f"high/med findings are rising ({previous} then {current}) — another round is unlikely to converge"
     return None
 
 
@@ -156,19 +156,18 @@ def evaluate(
     budget_is_explicit: bool = False,
     pr_merged: bool = False,
 ) -> GateDecision:
-    """Decide the gate from the open blocking problems and whether a review covers the current code.
+    """Decide the gate from the open problems and whether a review covers the current code.
 
-    `blocking_open` counts only problems that hold the merge (see `problems.is_blocking`):
-    low-severity findings and anything deferred with a recorded reason are excluded by design.
+    `blocking_open` counts every open problem of the feature, at every severity (see
+    `problems.is_blocking`): nothing ships as debt, so any open problem keeps the gate shut.
 
     Note what the second condition is NOT. It used to be "the last review reported zero new blocking
-    problems", which reads a *count* — and a count goes stale the moment a problem is disposed of:
-    after a human said "ship the rest as debt" and the agent deferred everything, the gate still saw
-    the old nonzero count and stayed shut with no way to reopen it. Coverage asks the question the
-    safety property actually cares about — *has this code been reviewed?* — and answers both cases
-    correctly: a fix commits, so HEAD moves and a fresh review is required; a deferral doesn't, so
-    the existing review still stands and the human's decision takes effect. Counts remain in
-    `review_history` for the convergence trend.
+    problems", which reads a *count* — and a count goes stale the moment a problem is closed without
+    a commit: once the agent closed the rest as not relevant, the gate still saw the old nonzero
+    count and stayed shut with no way to reopen it. Coverage asks the question the safety property
+    actually cares about — *has this code been reviewed?* — and answers both cases correctly: a fix
+    commits, so HEAD moves and a fresh review is required; a `wontfix` close doesn't, so the
+    existing review still stands. Counts remain in `review_history` for the convergence trend.
 
     `pr_merged` short-circuits to MERGED but keeps the reasons: the loop is over either way, and the
     close-out record names what was still outstanding when the PR went in.
@@ -178,7 +177,7 @@ def evaluate(
 
     reasons: list[str] = []
     if blocking_open > 0:
-        reasons.append(f"{blocking_open} blocking problem(s) open")
+        reasons.append(f"{blocking_open} problem(s) open, every one blocking")
     if last_review is None:
         reasons.append("no valid review run recorded")
     elif not covers_head(last_review, head_sha):
@@ -207,8 +206,8 @@ def evaluate(
             budget,
         )
     next_step = (
-        "Fix the blocking problems (or give one a recorded disposition), then re-review and "
-        "`feature review record`."
+        "Close every open problem: fix it, or `feature problem wontfix <#> --reason '<why>'` if it "
+        "isn't relevant. Then re-review and `feature review record`."
         if blocking_open > 0
         else "Review the PR and `feature review record` the run."
     )

@@ -11,6 +11,12 @@ You run in a forked subagent. Do the one job the caller asked for (a review roun
 or a resume), then end with the **report** below. The caller never sees this file, so the report
 must tell it everything it needs.
 
+**Never ship debt.** Every problem a review files, at every severity including `low`, is closed
+before the PR ships: fixed (`feature problem resolve <#> --commit <sha>`), or, if it isn't relevant,
+closed as `wontfix` with the reason (`feature problem wontfix <#> --reason "…"`). The gate stays
+shut while any problem is open. "Ships as debt", "non-blocking" and "follow up later" are not
+outcomes.
+
 A merged PR is not yours: reviewing it can block nothing, and closing it out is
 `Skill(ship:close)`. If the PR has merged, or the gate says `MERGED`, do nothing else and report
 that the caller must call `Skill(ship:close)`.
@@ -18,7 +24,7 @@ that the caller must call `Skill(ship:close)`.
 The `feature` CLI (`plugins/ship` in the `vladsavelyev/skills` repo, design in its
 `docs/design.md`) keeps all state in GitHub + git config. A tracked feature is a branch, its
 worktree under the main checkout's `.claude/worktrees/<name>/`, its PR, and a tracking issue.
-Review findings become sub-issues. The merge gate opens when nothing blocking is open and the last
+Review findings become sub-issues. The merge gate opens when no problem is open and the last
 review covers HEAD. Features begin untracked (`Skill(ship:start)`: branch, worktree, draft PR);
 this skill adopts them on the first ship.
 
@@ -41,7 +47,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
 | Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --complexity <c> --why "<sentence>"` |
-| Problems | `feature problem list --blocking\|--open`, `add`, `resolve <#> --commit <sha>`, `defer\|reject\|block <#> --reason "…"` |
+| Problems | `feature problem list [--open]`, `add`, `resolve <#> --commit <sha>`, `wontfix\|block <#> --reason "…"` |
 | Review budget | `feature budget [--set <n> \| --auto]` |
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
 | Sync with base | `feature sync [--stack]` |
@@ -156,22 +162,20 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Same meaning as an OPEN problem → skip.
    - Same as a CLOSED fixed problem → regression. `feature problem block <#> --reason
      "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, count it in `--regressions`).
-     Never `gh issue reopen`. `block` refuses a `low` problem, since low never blocks: file a low
-     regression fresh at low instead, naming the closed one in its body.
-   - Same as a REJECTED problem → skip, unless the new repro answers the rejection reason. Then
-     `block` it (a low one: file it fresh, as above). A problem disputed twice goes to the human:
-     escalate with both sides.
-   - Same as a WONTFIX problem (closed as not planned) → skip, unless the new repro makes it worse
-     than the reason allowed for. Then file it fresh at its real severity.
-   - Not caused by this PR → never blocking. File it `--sev low`, or defer it.
+     Never `gh issue reopen`.
+   - Same as a WONTFIX problem (closed as not relevant; older ones are labelled `rejected`) → skip,
+     unless the new repro answers the reason. Then `block` it. A problem disputed twice goes to the
+     human: escalate with both sides.
+   - Not caused by this PR → don't file it: it isn't this PR's to fix. If it's a real bug, name it
+     in the report's `Did` line so the user can track it elsewhere.
    - Re-judge severity yourself, whatever Sol said: `high` = data loss, security hole, crash, or
      silently wrong result on a realistic path; `med` = real bug on a narrower path; `low` =
-     everything else. Only `low` is non-blocking, and an unlabelled problem blocks, so always
-     pass `--sev`.
-   - Spec and design findings go through the same dedup, then `--sev low`, always: they are
-     tracked debt that never holds the gate. Their evidence is a citation, not a trace: drop a
-     spec gap whose quoted intent doesn't say what Sol claims, a rule breach the cited rule
-     doesn't cover, and a smell outside the PR's own code. Title them `Spec: …` or `Design: …`.
+     everything else. Always pass `--sev`. Severity orders the work and feeds the churn trend; it
+     doesn't decide what blocks. Every filed problem blocks until it's closed.
+   - Spec and design findings go through the same dedup, then `--sev low`, always. They block like
+     any other problem. Their evidence is a citation, not a trace: drop a spec gap whose quoted
+     intent doesn't say what Sol claims, a rule breach the cited rule doesn't cover, and a smell
+     outside the PR's own code. Title them `Spec: …` or `Design: …`.
 7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
    the repro, its evidence (traced or ran, with the script if ran; for a spec gap, the quoted
    intent; for a design finding, the rule or smell and the code), `file:line` and the suggested
@@ -190,24 +194,28 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 
 ## Gate verdict
 
-- `OPEN` (0): safe to merge. Name the debt that ships. If the PR is still a draft, mark it ready
+**No problem ships open, at any severity.** The gate is `OPEN` only when every problem is closed,
+fixed or `wontfix`. Never tell the caller that problems "ship as debt", are "non-blocking", or can
+be followed up later: an open problem means the PR isn't ready.
+
+- `OPEN` (0): safe to merge. Every problem is closed. If the PR is still a draft, mark it ready
   (`gh pr ready <PR#>`) only when the caller asked to ship; for a plain review, say in `Next`
   that it's still a draft. The human merges.
-- `REVIEW_AGAIN` (10): the caller fixes the blocking problems, then calls this skill again.
+- `REVIEW_AGAIN` (10): the caller closes every open problem (fixes it, or `wontfix` if it isn't
+  relevant), then calls this skill again.
 - `MERGED` (30): the PR is in. Don't review; the caller closes it out with `Skill(ship:close)`.
 - `NEEDS_DECISION` (20): no more review rounds without a human. The budget limits reviews, not
-  fixes: the blocking problems still get fixed, exactly as for `REVIEW_AGAIN`. `feature escalate`
+  fixes: every open problem still gets closed, exactly as for `REVIEW_AGAIN`. `feature escalate`
   with one recommendation for after the fixes: review them in one more round (`feature budget
   --set`), merge with them unreviewed (close-out records that), split the PR, or redesign it.
-  Recommend deferring a blocker only when this PR can't fix it, and say why. When the gate names
-  churn (fixes re-opening old bugs, findings rising), say so: splitting or redesigning may beat
-  another fix.
+  When the gate names churn (fixes re-opening old bugs, findings rising), say so: splitting or
+  redesigning may beat another fix.
 
 ## Rules
 
-- Never lower a severity, or Sol's risk or complexity grade, to open the gate or buy a cheaper
-  review.
-  Defer with a reason instead.
+- Never lower a severity, or Sol's risk or complexity grade, to buy a cheaper review.
+- Never ship debt. `wontfix` is only for a problem that isn't relevant (a false positive, by design,
+  outside this PR's scope), never for a real problem nobody has fixed yet.
 - Never close a feature out here, and never merge for the human.
 - Close fixed problems with `problem resolve`, not a `Closes #a, #b` PR line (GitHub links only the
   first number).
@@ -223,7 +231,7 @@ Feature: <name>  Branch: <branch>  PR: <url or none>  Worktree: <abs path>
 Did: <one line>
 Review: Sol <model> at <depth>; graded risk <…>, complexity <…>; next round at <depth>   (or not run)
 Gate: <verdict, or not run>
-Blocking: #<n> [sev] <title> — <file:line>, fix: <smallest fix>   (one per line, or none)
+Open: #<n> [sev] <title> — <file:line>, fix: <smallest fix>   (every open problem, low included, one per line; or none)
 Next:
 - <exact steps for the caller>
 ```
@@ -231,16 +239,17 @@ Next:
 Always include these caller rules in `Next` when they apply:
 - If the caller may not be in the worktree: "Call `EnterWorktree` with `path: <worktree>` (never
   `name:`) before editing. Editing from the main checkout edits the base branch."
-- With blocking problems: "Fix each with the smallest change; prefer deleting or narrowing over new
-  code, and don't grow the diff to appease the reviewer. Commit and push, then `feature problem
-  resolve <#> --commit <sha>`. If a finding is wrong, `feature problem reject <#> --reason
-  "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for the next round, without
-  asking the user."
-- With `OPEN`: "Tell the user it's safe to merge and what debt ships. After they merge, call
+- With open problems: "Every one must be closed before the PR ships, low included; none ships as
+  debt. Fix each with the smallest change; prefer deleting or narrowing over new code, and don't
+  grow the diff to appease the reviewer. Commit and push, then `feature problem resolve <#>
+  --commit <sha>`. If a finding isn't relevant (wrong, by design, out of scope), `feature problem
+  wontfix <#> --reason "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for
+  the next round, without asking the user."
+- With `OPEN`: "Tell the user it's safe to merge: every problem is closed. After they merge, call
   `Skill(ship:close)` to close out."
 - With `MERGED`: "Don't review. Call `Skill(ship:close)` to close the feature out."
-- With `NEEDS_DECISION`: "Fix the blocking problems as for `REVIEW_AGAIN` (commit, push,
-  `feature problem resolve`); the budget limits review rounds, not fixes, so don't defer a
-  blocker you can fix. Then stop and present the recommendation to the user: another review round
-  of the fixes (`feature budget --set <n>`, then `Skill(ship:ship)`), or merge with them
-  unreviewed."
+- With `NEEDS_DECISION`: "Close every open problem as for `REVIEW_AGAIN` (fix, commit, push,
+  `feature problem resolve`, or `wontfix` if it isn't relevant); the budget limits review rounds,
+  not fixes, and nothing ships as debt. Then stop and present the recommendation to the user:
+  another review round of the fixes (`feature budget --set <n>`, then `Skill(ship:ship)`), or
+  merge with them unreviewed."

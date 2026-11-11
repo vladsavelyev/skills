@@ -67,21 +67,10 @@ def test_record_outcome_leaves_state_unwritten_if_closing_fails(monkeypatch):
     assert state["status"] == "in-review"
 
 
-def test_reconcile_note_names_blocking_problems_that_shipped():
-    triaged = problems.triage([_problem(7, "sev:high"), _problem(8, "sev:low")])
-    note = cli._reconcile_note(123, triaged)
-    # Recorded after the fact means the gate never vetted this merge — say so, with the numbers.
-    assert "Blocking problems that shipped open: #7 [sev:high]" in note
-    assert "never opened or was bypassed" in note
-    assert "#8 [sev:low/open]" in note
-
-
-def test_reconcile_note_is_plain_when_nothing_was_blocking():
-    triaged = problems.triage([_problem(8, "sev:low")])
-    note = cli._reconcile_note(123, triaged)
-    assert "were still open" not in note
-    assert "⚠️" not in note
-    assert "#8 [sev:low/open]" in note
+def test_reconcile_note_records_a_merge_with_no_open_problems():
+    # Reconcile refuses while any problem is open, so the note it writes has none to name.
+    note = cli._reconcile_note(123)
+    assert "Merged in PR #123" in note and "No open problems" in note
 
 
 def test_state_block_of_a_fresh_feature_is_current_schema():
@@ -90,18 +79,10 @@ def test_state_block_of_a_fresh_feature_is_current_schema():
 
 
 def test_abandoned_note_never_claims_a_merge():
-    triaged = problems.triage([_problem(9, "sev:med")])
-    note = cli._abandoned_note(123, triaged)
+    note = cli._abandoned_note(123)
     # The work never landed: saying "merged" here would put a false claim in the permanent record.
     assert "Abandoned" in note
     assert "Merged" not in note
-    # By the time reconcile writes this, every open problem is a decided follow-up; it names them.
-    assert "follow-ups: #9 [sev:med]" in note
-
-
-def test_abandoned_note_is_short_when_there_is_nothing_left_open():
-    note = cli._abandoned_note(123, problems.triage([_problem(9, "sev:med", state="CLOSED")]))
-    assert "follow-ups" not in note
 
 
 def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str | None) -> dict:
@@ -151,34 +132,34 @@ def test_adopt_without_a_pr_or_parent_bases_on_main(monkeypatch):
     assert did["parent"] == ["main"]
 
 
-def test_triage_marks_open_problems_without_a_follow_up_label_undecided():
-    triaged = problems.triage(
+def test_merge_refuses_while_any_problem_is_open(monkeypatch):
+    """Nothing ships as debt: a low problem, or one labelled by the old `follow-up`/`deferred`
+    dispositions, holds the close-out until it is fixed or closed as wontfix."""
+    state = _merged_state()
+    blocking = problems.blocking(
         [
-            _problem(1, "sev:low"),
-            _problem(2, "sev:high", extra=(problems.DEFERRED,)),
-            _problem(3, "sev:low", extra=(problems.FOLLOW_UP,)),
-            _problem(4, "sev:med", state="CLOSED"),
+            _problem(5, "sev:low"),
+            _problem(6, "sev:low", extra=("follow-up",)),
+            _problem(7, "sev:high", extra=("deferred",)),
+            _problem(8, "sev:low", state="CLOSED", extra=(problems.WONTFIX,)),
         ]
     )
-    assert [s["number"] for s in triaged.undecided] == [1, 2]
-
-
-def test_merge_refuses_while_open_problems_are_undecided(monkeypatch):
-    state = _merged_state()
-    triaged = problems.triage([_problem(5, "sev:low"), _problem(6, "sev:low", extra=(problems.FOLLOW_UP,))])
-    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, state, triaged, _decision(cli.gate.Verdict.MERGED)))
+    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, state, blocking, _decision(cli.gate.Verdict.MERGED)))
     with pytest.raises(SystemExit) as exc:
         cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
-    assert "#5 [sev:low]" in str(exc.value) and "#6" not in str(exc.value)
+    refusal = str(exc.value)
+    assert "#5 [sev:low]" in refusal and "#6 [sev:low]" in refusal and "#7 [sev:high]" in refusal
+    assert "#8" not in refusal
+    assert "wontfix" in refusal and "follow-up" not in refusal
 
 
 def _decision(verdict, reasons: list[str] | None = None) -> "cli.gate.GateDecision":
     return cli.gate.GateDecision(verdict=verdict, reasons=reasons or [], next_step="", rounds_used=1, budget=2)
 
 
-def _stub_close_out(monkeypatch, decision, triaged) -> list[str]:
+def _stub_close_out(monkeypatch, decision, blocking: list[dict]) -> list[str]:
     notes: list[str] = []
-    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, _merged_state(), triaged, decision))
+    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, _merged_state(), blocking, decision))
     monkeypatch.setattr(github, "pr_state", lambda number: "OPEN")
     monkeypatch.setattr(github, "get_issue", lambda number: {"state": "OPEN"})
     monkeypatch.setattr(cli, "_record_outcome", lambda issue, state, note, **kw: notes.append(note))
@@ -189,22 +170,20 @@ def test_merge_closes_out_a_merged_pr_whose_last_commits_were_never_reviewed(mon
     """The gate's coverage rule held close-out hostage: the only ways past it were a review that
     could block nothing, or --force. A merged PR closes out, and the record names the unreviewed tail."""
     tail = "the last review looked at aaa111, but the branch is now at bbb222 — that code has never been reviewed"
-    triaged = problems.triage([_problem(5, "sev:low", extra=(problems.FOLLOW_UP,))])
-    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED, [tail]), triaged)
+    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED, [tail]), [])
     cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
-    assert len(notes) == 1 and tail in notes[0] and "#5" in notes[0]
+    assert len(notes) == 1 and tail in notes[0]
     assert not notes[0].startswith("✅")
 
 
-def test_merge_names_blocking_problems_that_shipped_open(monkeypatch):
-    triaged = problems.triage([_problem(8, "sev:high", extra=(problems.FOLLOW_UP,))])
-    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED, ["1 blocking problem(s) open"]), triaged)
+def test_merge_records_a_clean_merge(monkeypatch):
+    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED), [])
     cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
-    assert "Blocking problems that shipped open: #8" in notes[0]
+    assert notes == ["✅ Merged. No open problems, and the last review covered it."]
 
 
 def test_merge_still_refuses_a_pr_that_has_not_merged(monkeypatch):
-    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.OPEN), problems.triage([]))
+    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.OPEN), [])
     with pytest.raises(SystemExit, match="PR #123 is OPEN"):
         cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
     assert notes == []
@@ -215,7 +194,7 @@ def test_round_finds_counts_by_severity_label():
     subs.append({"number": 44, "title": "unlabelled", "state": "OPEN", "labels": []})
     found, blocking, low = cli._round_finds(7, subs, [43, 41, 40, 44, 41])
     assert found == {"high": [41], "med": [43], "low": [40], "?": [44]}
-    # An unlabelled problem blocks, like everywhere else.
+    # Every one of them blocks the gate; the split is high/med (and unlabelled) vs low, for the trend.
     assert (blocking, low) == (3, 1)
     assert cli._round_finds(7, subs, []) == ({}, 0, 0)
 
@@ -225,12 +204,14 @@ def test_round_finds_refuses_a_number_that_is_not_one_of_the_problems():
         cli._round_finds(7, [_problem(40, "sev:low")], [40, 99])
 
 
-def _stub_gate_inputs(monkeypatch, *, pr_state: str, reviewed: str, branch_tip: str, pr_head: str) -> None:
+def _stub_gate_inputs(
+    monkeypatch, *, pr_state: str, reviewed: str, branch_tip: str, pr_head: str, subs: list[dict] | None = None
+) -> None:
     state = _merged_state()
     state["last_review"] = {"run": 1, "sha": reviewed, "new_blocking": 0, "new_low": 0, "regressions": 0, "summary": ""}
     state["review_history"] = [state["last_review"]]
     monkeypatch.setattr(cli, "_load_state", lambda branch: (7, state, ""))
-    monkeypatch.setattr(cli, "_triage", lambda issue: problems.triage([]))
+    monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [])
     monkeypatch.setattr(cli, "_resolve_budget", lambda state: (2, False, []))
     monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
     monkeypatch.setattr(github, "pr_head_sha", lambda number: pr_head)
@@ -251,37 +232,63 @@ def test_an_open_pr_is_still_judged_by_the_branch_tip(monkeypatch):
     assert decision.verdict is cli.gate.Verdict.REVIEW_AGAIN
 
 
-def test_a_blocker_decided_wontfix_before_close_out_is_still_named_as_shipped_unfixed(monkeypatch):
-    """Deciding a shipped blocker won't-fix closes it, so it drops out of the gate; the record must keep it."""
-    triaged = problems.triage([_problem(8, "sev:high", state="CLOSED", extra=(problems.WONTFIX,))])
-    notes = _stub_close_out(monkeypatch, _decision(cli.gate.Verdict.MERGED), triaged)
-    cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
-    assert not notes[0].startswith("✅")
-    assert "shipped unfixed: #8 [sev:high]" in notes[0]
+def test_a_low_problem_left_open_keeps_the_gate_shut(monkeypatch):
+    """The navari #4617 case: a review covered HEAD, only low problems were open, and the gate said
+    OPEN with "four low problems ship as debt". Nothing ships as debt now."""
+    _stub_gate_inputs(
+        monkeypatch,
+        pr_state="OPEN",
+        reviewed="fff666",
+        branch_tip="fff666",
+        pr_head="fff666",
+        subs=[_problem(4623, "sev:low"), _problem(4624, "sev:low", state="CLOSED", extra=(problems.WONTFIX,))],
+    )
+    _, _, blocking, decision = cli._gate_for("add-oauth")
+    assert decision.verdict is not cli.gate.Verdict.OPEN
+    assert [s["number"] for s in blocking] == [4623]
+    assert "1 problem(s) open, every one blocking" in decision.reasons
 
 
-def test_a_low_problem_closed_as_wontfix_is_not_a_shipped_blocker():
-    assert problems.triage([_problem(9, "sev:low", state="CLOSED", extra=(problems.WONTFIX,))]).shipped_unfixed == []
-
-
-def test_reconcile_names_a_blocker_decided_wontfix():
-    triaged = problems.triage([_problem(8, "sev:med", state="CLOSED", extra=(problems.WONTFIX,))])
-    note = cli._reconcile_note(123, triaged)
-    assert "shipped unfixed: #8 [sev:med]" in note
-    # A won't-fix is a recorded decision, not a merge the gate never vetted.
-    assert "never opened or was bypassed" not in note
-
-
-def test_block_drops_a_wontfix_label_so_a_reopened_problem_is_not_recorded_as_shipped_unfixed(monkeypatch):
-    removed: list[str] = []
-    sub = _problem(8, "sev:high", state="CLOSED", extra=(problems.WONTFIX,))
+def _stub_problem_edits(monkeypatch, sub: dict) -> list[str]:
+    did: list[str] = []
     monkeypatch.setattr(cli, "_require_problem", lambda branch, number: sub)
-    monkeypatch.setattr(github, "remove_label", lambda number, label: removed.append(label))
-    monkeypatch.setattr(github, "comment", lambda number, body: None)
-    monkeypatch.setattr(github, "reopen_issue", lambda number, body: removed.append("reopened"))
+    monkeypatch.setattr(github, "init_labels", lambda: did.append("init_labels"))
+    monkeypatch.setattr(github, "add_label", lambda number, label: did.append(f"add {label}"))
+    monkeypatch.setattr(github, "remove_label", lambda number, label: did.append(f"remove {label}"))
+    monkeypatch.setattr(github, "comment", lambda number, body: did.append("comment"))
+    monkeypatch.setattr(github, "reopen_issue", lambda number, body: did.append("reopen"))
+    monkeypatch.setattr(
+        github, "close_issue", lambda number, body, not_planned=False: did.append(f"close not_planned={not_planned}")
+    )
+    return did
+
+
+def test_wontfix_creates_the_label_applies_it_and_closes_as_not_planned(monkeypatch):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
+    cli.cmd_problem_wontfix(cli.argparse.Namespace(branch="add-oauth", number=8, reason="by design"))
+    # Label before close: if the close fails the problem is still open, and still blocks.
+    assert did == ["init_labels", f"add {problems.WONTFIX}", "close not_planned=True"]
+
+
+def test_wontfix_refuses_a_closed_problem(monkeypatch):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low", state="CLOSED"))
+    with pytest.raises(SystemExit, match="already closed"):
+        cli.cmd_problem_wontfix(cli.argparse.Namespace(branch="add-oauth", number=8, reason="by design"))
+    assert did == []
+
+
+def test_block_reopens_a_wontfix_problem_and_drops_the_label(monkeypatch):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low", state="CLOSED", extra=(problems.WONTFIX,)))
     cli.cmd_problem_block(cli.argparse.Namespace(branch="add-oauth", number=8, reason="rediscovered"))
     # Reopened before the label goes, so a failure in between leaves it open and blocking.
-    assert removed == ["reopened", problems.WONTFIX]
+    assert did == ["reopen", f"remove {problems.WONTFIX}", "comment"]
+
+
+def test_block_refuses_an_open_problem_which_already_blocks(monkeypatch):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
+    with pytest.raises(SystemExit, match="already blocks"):
+        cli.cmd_problem_block(cli.argparse.Namespace(branch="add-oauth", number=8, reason="rediscovered"))
+    assert did == []
 
 
 def test_escalate_offers_what_the_gate_says_next(monkeypatch):
@@ -290,7 +297,7 @@ def test_escalate_offers_what_the_gate_says_next(monkeypatch):
     decision = cli.gate.GateDecision(
         verdict=cli.gate.Verdict.NEEDS_DECISION, reasons=[], next_step=cli.gate._NEXT_DECISION, rounds_used=2, budget=2
     )
-    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, _merged_state(), problems.triage([]), decision))
+    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, _merged_state(), [], decision))
     monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
     monkeypatch.setattr(github, "comment", lambda number, body: posted.append(body))

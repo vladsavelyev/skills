@@ -2,11 +2,11 @@
 
 A system for working on many features in parallel with Claude: each feature gets a
 branch, a matching PR, a matching worktree, and a GitHub tracking issue. Features can be
-**stacked** on each other. Review-found problems are tracked as sub-issues, and the *blocking*
-ones must be resolved (or explicitly disposed of) before the PR merges. Reviews are budgeted, so
+**stacked** on each other. Review-found problems are tracked as sub-issues, and every one must be
+closed (fixed, or `wontfix` as not relevant) before the PR merges: nothing ships as debt. Reviews are budgeted, so
 a loop that won't converge ends in a recorded human decision rather than another expensive round.
 A new Claude session on an existing branch reconstructs full context (base branch, last prompt,
-last review, blocking problems) from GitHub.
+last review, open problems) from GitHub.
 
 > Status: alpha. The CLI lives in the `ship` package. See "CLI reference" below.
 > For *why* it's designed this way (and what we tried and rejected), see
@@ -145,11 +145,11 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
                                               │
                           ┌───────────────────┤ review record  (files problems, bumps run)
                           ▼                    ▼
-                  problem add            problem resolve / defer / reject
+                  problem add            problem resolve / wontfix
                           │                    │
                           └────────┬───────────┘
                                    ▼
-                    gate: 0 blocking problems AND last_review.new_blocking == 0
+                    gate: 0 open problems AND last review covers HEAD
                        ├─ yes ──────────────▶ ready ──▶ (human merges) ──▶ merged
                        └─ no ──┬─ budget left, converging ──▶ REVIEW_AGAIN (loop)
                                └─ budget spent or churning ──▶ needs-decision (human)
@@ -159,35 +159,33 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
 
 | Verdict | Exit | When |
 | --- | --- | --- |
-| `OPEN` | 0 | Zero **blocking** problems open, and the last valid review covered the current branch head. |
-| `REVIEW_AGAIN` | 10 | Blocking work outstanding, review budget remains, and the trend is converging. |
-| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human, but the blocking problems still get fixed: the budget limits reviews, not fixes. |
+| `OPEN` | 0 | Zero problems open, at any severity, and the last valid review covered the current branch head. |
+| `REVIEW_AGAIN` | 10 | Open problems or unreviewed code outstanding, review budget remains, and the trend is converging. |
+| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human, but the open problems still get closed: the budget limits reviews, not fixes. |
 | `MERGED` | 30 | The PR has merged. Checked first, so it outranks the other three; its reasons still name what was outstanding when it went in. |
 
 The codes skip 1 and 2 deliberately: those already mean "the command failed" (`sys.exit(message)`
 and argparse both use them), so reusing them would make a lost git-config key or a `gh` 503 read as
 "spend another review round", and a mistyped flag read as "escalate to a human".
 
-**Only blocking problems hold the gate.** A problem blocks if it is open, is not explicitly
-`sev:low`, and is not `deferred`. Stated that way round on purpose: severity is the value the
-gate depends on, so an unlabelled problem — a human filing a sub-issue through the GitHub UI without
-picking a label — fails *safe* and holds the merge. `sev:low` is tracked debt that ships. The two dispositions —
-`deferred` (real, deliberately not fixed here) and `rejected` (not a real problem) — each require a
-reason that is posted on the sub-issue, so shipping known debt is an explicit, auditable act rather
-than a silent severity downgrade. Deferred problems stay **open** on purpose and are named in the
-merge comment: debt you can't see isn't tracked.
+**Every open problem holds the gate. Nothing ships as debt.** A problem blocks while it is open,
+at every severity, `low` included. It leaves the gate one of two ways: fixed (`feature problem
+resolve`, with the commit) or not relevant (`feature problem wontfix`: a false positive, by design,
+or outside this PR's scope), which labels it `wontfix`, posts the reason and closes it as not
+planned. There is no third way: no "open but non-blocking" state, and no follow-up kept open for
+later. Severity still matters (it orders the work, and the high/med counts drive the churn signal),
+but it doesn't decide what blocks.
 
-Open alone wasn't enough, though: once the PR merged, the feature issue closed and nothing ever
-visited its open problems again, so "tracked debt" became a graveyard of issues under closed parents.
-So close-out (`feature merge`, `feature reconcile`) refuses while any problem is still open without
-a decision. Each one becomes a `follow-up` (kept open as a backlog issue, on purpose) or `wontfix`
-(closed as not planned), both with a reason on the issue. The skill leaves that call to the human.
+This replaced a design where only high/med problems blocked, and `sev:low` problems, `deferred`
+ones (real, not fixed in this PR) and close-out `follow-up`s shipped open as "tracked debt". Once the
+PR merged nothing visited them again, and the gate's own report ("four low problems ship as debt")
+made shipping them the default instead of a decision. Close-out (`feature merge`, `feature
+reconcile`) keeps the same rule for a PR that merged past the gate: it refuses while any problem is
+open.
 
-Only `deferred` suppresses blocking. `rejected` expresses itself by *closing* the issue, so an OPEN
-issue still carrying the label means someone overturned the rejection — a later round rediscovering
-it with a real repro — and it blocks like anything else. `feature problem block` is the explicit way
-to revoke a deferral; without an inverse, a disposition would be permanent, and a rediscovered
-problem could never get back in front of the gate.
+A closed problem gets back in front of the gate through `feature problem block`, which reopens it
+(and drops `wontfix`): a later round rediscovering a fixed problem (a regression), or answering a
+`wontfix` reason with a repro that changes the call.
 
 **Why not "zero findings".** The original gate demanded a review run that found *nothing*. The
 reviewer is built to report at every altitude — real defects, nits, pre-existing issues in files the
@@ -196,14 +194,14 @@ had no other exit than `feature merge --force`, which recorded no rationale. The
 condition was actually protecting is narrower: *a fix must not introduce a new defect*.
 
 **Why coverage rather than a count.** The obvious repair — require the last review to report
-`new_blocking == 0` — reads a *count*, and a count goes stale the moment a problem is disposed of.
-Deferring the remaining findings (the sanctioned "ship it as debt" path) leaves the old nonzero count
-in place, so the gate stayed shut with no way to reopen it: the escape hatch didn't work, and neither
+`new_blocking == 0` — reads a *count*, and a count goes stale the moment a problem is closed without
+a commit. Closing the remaining findings as not relevant leaves the old nonzero count in place, so
+the gate stayed shut with no way to reopen it: the close didn't take effect, and neither
 did buying another round, because the churn signal was re-derived from the same unchanged history and
 checked first. The condition is therefore **coverage**: `last_review.sha` must match the branch head.
 That asks what the safety property actually cares about — *has this code been reviewed?* — and gets
-both cases right. A fix commits, so the head moves and a fresh review is required; a deferral doesn't
-commit, so the existing review still stands and the human's decision takes effect. It also closes a
+both cases right. A fix commits, so the head moves and a fresh review is required; a `wontfix` close
+doesn't commit, so the existing review still stands and the close takes effect. It also closes a
 hole the count rule never covered: commits landing *after* a clean review used to keep the gate open
 on code no review had seen. Counts stay in `review_history`, where the convergence trend reads them.
 
@@ -221,7 +219,9 @@ can infer.
 **Why churn detection.** Waiting for the budget to run out wastes rounds on a loop that is clearly
 stuck, so the gate escalates early on either of two signals: the last round re-opened
 previously-closed problems (the fixes are reintroducing known bugs — a design problem, not a
-review-more problem), or blocking findings stopped decreasing round over round.
+review-more problem), or high/med findings are rising round over round. Both read high/med counts
+only: low problems block like any other, but a rising count of nits is not evidence the design is
+wrong.
 
 `feature sync` upholds the coverage condition across base changes: the sync commit moves the head,
 which alone would already invalidate the review, and sync additionally clears `last_review` and
@@ -246,19 +246,19 @@ ship's tagged block of the PR body (see "The PR body"), apart from the PR's own 
 `Closes #<problem>` lines, which re-linking must not disturb, and
 merging closes the tracking issue with nobody in the loop. The original design chose a non-closing
 `Part of #<issue>` deliberately — the umbrella issue outlives the PR, and its problem sub-issues can
-still be open — but "closed with open children" is a state GitHub renders fine, and a closed issue
-whose debt is a sub-issue list beats an open issue nobody reads.
+still be open — but close-out now refuses while any problem is open, so a closed tracking issue has
+none.
 
 Two gaps remain, and `feature reconcile` covers both:
 
 - GitHub only honours the keyword on a merge into the **default branch**, so a stacked feature
   merged into its parent never auto-closes.
-- The auto-close writes no *record*: the state block stays at `in-review`, and nothing names the
-  debt that shipped.
+- The auto-close writes no *record*: the state block stays at `in-review`, and nothing records what
+  shipped.
 
 `reconcile` is a repo-wide sweep — one paginated query for every `feature`-labelled issue, one
-aliased GraphQL query for all their PRs' states — that closes out the merged ones (recording what
-shipped, blocking problems included, honestly) and repairs the reference on still-open PRs. It
+aliased GraphQL query for all their PRs' states — that closes out the merged ones (refusing, like
+`feature merge`, while one still has an open problem) and repairs the reference on still-open PRs. It
 touches **no git at all**, on purpose: the features that need it most are the oldest, whose branches
 and worktrees are long gone, and any git-dependent path (including `feature migrate`, which resolves
 its issue through `branch.<name>.feature-issue`) can no longer reach them. For the same reason it
@@ -297,8 +297,8 @@ context. Resolution is exact, not fuzzy:
 4. Fetch the issue, parse the state block, list open sub-issues.
 
 Result injected: *"On `feat-add-oauth`, based on `feat-user-model`, PR #123, status in-review.
-Last prompt: '…'. Last review (run 2): 0 new blocking. Reviews 2/3. Gate REVIEW_AGAIN. Blocking
-problems: 1 (#46 sev:high token refresh race)."*
+Last prompt: '…'. Last review (run 2): 0 new high/med. Reviews 2/3. Gate REVIEW_AGAIN. Open
+problems, every one blocking: 1 (#46 sev:high token refresh race)."*
 
 ## Prerequisites
 
@@ -321,17 +321,14 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
 | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
-| `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. `high`/`med` block the gate; `low` doesn't. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
+| `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
-| `feature problem defer <number> --reason <why>` | Real problem, deliberately not fixed in this PR: labels it `deferred`, posts the reason, keeps it **open** but out of the blocking set. |
-| `feature problem reject <number> --reason <why>` | Not a real problem (false positive / by design): labels it `rejected` and closes it with the reasoning. |
-| `feature problem follow-up <number> --reason <why>` | Close-out decision: keep an open problem as a backlog issue (label `follow-up`). |
-| `feature problem wontfix <number> --reason <why>` | Close-out decision: close an open problem as not planned (label `wontfix`). |
-| `feature problem block <number> --reason <why>` | Revoke a disposition — drops `deferred`, re-opens if closed — so the problem holds the merge again. The inverse of `defer`, needed because a later round can rediscover a deferred problem with a repro that changes the call. |
-| `feature problem list [--open] [--blocking]` | List problem sub-issues with severity and disposition. `--blocking` shows only what holds the gate. |
+| `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
+| `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. Refuses an open problem, which already blocks. |
+| `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
 | `feature escalate --reason <text> [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human. |
-| `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`deferred`/`rejected` are newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
+| `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`wontfix` is newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
 | `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION`, 30 = `MERGED` (1 and 2 stay "the command itself failed"). |
 | `feature merge [--branch <b>] [--force]` | Final transition: verify **that the PR actually merged**, record what the gate still had outstanding, set status `merged`, close the feature issue (or just comment, if the PR's `Closes` reference already closed it). Does not merge the PR itself; `--force` records a feature that shipped without its PR merging. |
 | `feature reconcile [--branch <b>] [--dry-run]` | Repo-wide sweep for features the close-out never reached: closes out every feature whose PR merged, closes as `abandoned` those whose PR was closed unmerged (unless the branch has a newer open PR, which it reports instead), and repairs the issue reference on still-open PRs. GitHub-only (no git), so it reaches features whose branch is long deleted. |
@@ -357,16 +354,15 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
          (Sol gets the recorded request as intent, never tracked state)
    5. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
-       ├─ caused by THIS PR? no ─▶ sev:low, or file + `problem defer` (never blocking)
+       ├─ caused by THIS PR? no ─▶ don't file it (named in the report instead)
        └─ duplicate of a tracked problem? (judged by MEANING)
               ├─ matches an OPEN issue      ─▶ skip (already tracked)
               ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
-              │                                (a low one: filed fresh, `block` refuses low)
-              ├─ matches a REJECTED one     ─▶ skip, unless the repro answers the rejection
+              ├─ matches a WONTFIX one      ─▶ skip, unless the repro answers its reason
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
                                                     (spec gaps and design smells: always low)
    6. `feature review record --found <problems filed & regressed>
-                             --regressions <blocking reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
+                             --regressions <high/med reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
    7. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
       (a merged PR stops at step 1: the caller hands it to Skill(ship:close))
@@ -460,19 +456,17 @@ search: wire formats, stored data another reader parses, flags, code a few hops 
 Both come from pstack's `blast-radius` skill (`cursor/plugins`).
 
 `feature review record --found <#>...` takes the problems the round filed or brought back as
-regressions, and counts them by their severity labels: the high/med ones are the round's new
-blocking count, the low ones its new low count. A clean pass is a bare `--found`, which (with zero
-open blocking sub-issues) opens the gate. Low finds don't gate anything; they keep the record honest
-about what a "clean" round actually found, and the round's line in the PR body lists every find by
-severity. `--regressions` counts re-opened *blocking* problems only, and feeds the churn
-signal: a re-opened low-severity nit is not evidence the design is wrong, and escalating on one would
-contradict the rule that low severity never gates.
+regressions, and counts them by their severity labels: the high/med ones are the round's
+`new_blocking` count (the stored key predates every-problem-blocks and keeps its name, since it is
+already written into feature issues), the low ones its `new_low` count. A clean pass is a bare
+`--found`, which (with zero open sub-issues) opens the gate. Every find blocks until it is closed;
+the round's line in the PR body lists them by severity. `--regressions` counts re-opened high/med
+problems only, and feeds the churn signal: a re-opened low-severity nit is not evidence the design
+is wrong.
 
-**Severity is now load-bearing, so it's auditable.** An agent could open the gate by calling
-everything `sev:low`, so the defenses are made of records, not restrictions: every disposition
-demands a reason posted on the issue, `feature status`/`gate`/`merge` always print the non-blocking
-debt that ships, and per-severity counts land in `review_history` for every round. A human reading
-the tracking issue can see a review that filed five lows and no highs.
+**Closing a problem without a fix is auditable.** An agent could open the gate by closing every
+problem as `wontfix`, so the defense is a record: `wontfix` demands a reason posted on the issue,
+and it is only for a problem that isn't relevant, never for a real one nobody has fixed yet.
 
 ## Open questions / follow-ups
 

@@ -26,6 +26,7 @@ class StaleSchema(ValueError):
     swallowing every other ValueError (a bad `gh` payload, a corrupt JSON block) behind advice
     that wouldn't fix it."""
 
+
 # Non-greedy match of everything between the markers, across newlines.
 _BLOCK_RE = re.compile(re.escape(BEGIN) + r"(.*?)" + re.escape(END), re.DOTALL)
 _JSON_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -110,7 +111,12 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
 
 
 def review_entry(*, run: int, sha: str, new_blocking: int, new_low: int, regressions: int, summary: str) -> dict:
-    """One review run's record, as stored in `review_history` and `last_review`."""
+    """One review run's record, as stored in `review_history` and `last_review`.
+
+    `new_blocking` is the round's high/med (and unlabelled) finds, `new_low` its low ones. Every
+    problem blocks the gate now; the key keeps its name ON PURPOSE, because it is already written
+    into the state blocks of feature issues in flight, and the split still drives the churn trend.
+    """
     return {
         "run": run,
         "sha": sha,
@@ -128,7 +134,7 @@ def record_review(state: dict, *, sha: str, new_blocking: int, new_low: int, reg
     fallible operation, so a failure anywhere leaves nothing recorded and a retry records exactly
     once. An earlier attempt to get it here — replace any entry with the same sha, on the theory
     that a repeated sha means "retry" — was worse than the problem it solved. Rounds at an unchanged
-    sha are legitimate (`problem defer` makes progress without committing), so it silently rewrote a
+    sha are legitimate (`problem wontfix` makes progress without committing), so it silently rewrote a
     real round's counts and never spent budget, which made the review loop unbounded again.
     """
     entry = review_entry(
