@@ -65,12 +65,21 @@ def test_a_body_edited_on_the_web_with_crlf_line_ends_keeps_its_block():
     assert prbody.with_block(body, QUOTE, 7) == f"Why.\r\n\r\n{_block()}\r\n\r\n{SIG}"
 
 
-def test_a_tag_without_its_pair_is_refused():
-    # Half a quoted example would make the block run from the stray tag, swallowing the text in
-    # between, so the write is refused instead.
-    for text in ("Why.\n\n<!-- ship -->\nhalf an example", f"<!-- ship -->\n\nWhy.\n\n{SIG}"):
-        with pytest.raises(ValueError, match="ship blocks"):
+def test_tags_that_dont_pair_up_are_refused():
+    # A stray opening tag above the block would pair with the block's closing tag, cutting the
+    # text in between, so the body is refused instead. In either direction, through either writer.
+    stray = f"Why.\n\n<!-- ship -->\nhalf an example\n\nMore.\n\n{_block('> old')}\n\n{SIG}"
+    for text in (stray, "Why.\n\n<!-- ship -->\nhalf an example", f"Why.\n\n<!-- /ship -->\n\n{_block()}"):
+        with pytest.raises(ValueError, match="don't pair up"):
             prbody.with_description(text, QUOTE)
+        with pytest.raises(ValueError, match="don't pair up"):
+            prbody.with_block(text, QUOTE, 7)
+
+
+def test_a_written_body_without_exactly_one_block_is_refused():
+    # Unreachable from a quote `assess.render` makes; a quote holding tag lines forces it.
+    with pytest.raises(ValueError, match="2 ship blocks"):
+        prbody.with_description("Why.", "> a\n<!-- /ship -->\n<!-- ship -->\n> b")
 
 
 def test_a_code_block_ending_in_a_robot_line_is_not_a_signature():

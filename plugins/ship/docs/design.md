@@ -133,9 +133,10 @@ back is doing the natural thing. Whatever blocks the input carries are dropped (
 always rendered from state, so nothing in them is the author's), and one fresh block is placed. A
 body that already has several (navari#4727 got two that way, before `describe` looked; or a hand
 edit) keeps the last one's place and loses the others on its next write, so `feature reconcile`
-heals such PRs. Before `gh pr edit`, the written body is checked to hold exactly the one block just
-rendered; anything else aborts the write. That catches a stray tag without its pair, which would
-make the block run from it and swallow the text in between.
+heals such PRs. A body whose tags don't pair up in order (a tag without its pair, as in half a
+quoted example) is refused, never guessed at: pairing the stray tag with the block's closing tag
+would cut the author's text in between. Before `gh pr edit`, the written body is also checked to
+hold exactly the one block just rendered; anything else aborts the write.
 
 A block is any pair of tags on lines of their own; ship doesn't parse Markdown code blocks. The
 accepted cost: a description quoting the tags verbatim, each on a line of its own (a PR about
