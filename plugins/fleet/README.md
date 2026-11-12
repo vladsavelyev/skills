@@ -18,7 +18,7 @@ hosts = ["ubuntu@my-vm.example.com"]
 machine_settings = ["env.DISPLAY", "hooks.Stop", "statusLine"]  # settings keys each machine keeps
 machine_skills = ["dev-browser"]                                # ~/.claude/skills entries that stay here
 helpers = ["git-pr-context"]                                    # commands the hooks and statusline call
-agents_md = ".claude/plugins/marketplaces/vlad-skills/agents/AGENTS.md"  # optional, see below
+agents_md = [".claude/plugins/marketplaces/vlad-skills/agents/AGENTS.md", "git/home/AGENTS.md"]  # optional
 ```
 
 What it covers:
@@ -35,16 +35,18 @@ What it covers:
   whole fleet and how each host is reached, and that its memory is its own (so an agent on a host
   knows it can't see what was remembered on the laptop, and makes shared changes there). Hand-written
   text after that section is left alone.
-- **`agents_md`** (optional): agent instructions that live in a repo instead of in `CLAUDE.md`. The
-  shared part of `~/.claude/CLAUDE.md` must import it (`@~/<agents_md>`), the file must exist on
-  every machine (a missing `@` import loads nothing, without a word), and each machine's clone of its
-  repo must be unmodified (local changes are a problem to move into the repo) and is fast-forwarded to
-  the default branch, so every machine reads the same rules. Codex has no imports, so
-  wherever it's installed `--apply` generates `~/.codex/AGENTS.md`: that machine's copy of the file
-  followed by its own part of `~/.claude/CLAUDE.md` (below the marker). It's a copy, so after the
-  rules change Codex has them from the next `--apply`, which reports the file out of date until then.
-  Pointing `agents_md` into a plugin marketplace clone means the marketplace update at session start
-  keeps Claude Code's import current between `fleet` runs.
+- **`agents_md`** (optional): agent instructions that live in repos instead of in `CLAUDE.md`, such
+  as public shared rules plus a private [home repo](https://www.aihero.dev/the-home-repo-pattern). The
+  shared part of `~/.claude/CLAUDE.md` must import each file (`@~/<path>`), and each must exist on
+  every machine (a missing `@` import loads nothing, without a word). A host without the file's repo
+  gets a clone, from the origin of this machine's clone, at the same path. Each clone must be
+  unmodified (local changes are a problem to move into the repo) and is fast-forwarded to the default
+  branch, so every machine reads the same rules. Codex has no imports, so wherever it's installed
+  `--apply` generates `~/.codex/AGENTS.md`: the machine's copies of the files in config order, followed
+  by its own part of `~/.claude/CLAUDE.md` (below the marker). It's a copy, so after the rules change
+  Codex has them from the next `--apply`, which reports the file out of date until then. A file in a
+  plugin marketplace clone stays current for Claude Code between `fleet` runs, through the marketplace
+  update at session start; a file in any other repo, until the next `--apply`.
 - **`~/.claude/settings*.json`**: every key is copied except `machine_settings`. Values go over stdin
   and only key names are printed, since `env` often carries secrets.
 - **Reported only**: missing `helpers` (a missing one fails silently, e.g. a statusline segment just
