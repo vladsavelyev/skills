@@ -129,6 +129,15 @@ def test_set_keeps_a_private_files_mode(fleet):
         assert (home / sync.SETTINGS_JSON).stat().st_mode & 0o777 == 0o600
 
 
+def test_write_replaces_a_read_only_file_and_keeps_it_read_only(fleet):
+    path = Path.home() / sync.SETTINGS_JSON
+    path.chmod(0o444)
+    sync.Machine(None).write(sync.SETTINGS_JSON, "{}\n")
+    assert path.read_text() == "{}\n"
+    assert path.stat().st_mode & 0o777 == 0o444
+    assert not list(path.parent.glob("*.fleet-new"))
+
+
 def test_set_keeps_a_hosts_unrelated_empty_objects(fleet):
     _settings(fleet[1].home, {"env": {"KEY": "old"}, "permissions": {}})
     assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 0
@@ -264,6 +273,11 @@ def test_mirror_with_value_keeps_a_literal_string_style_file_otherwise_intact():
     assert mirrors.with_value(text, "a.key", "old", "f") == text
 
 
+def test_mirror_with_value_writes_any_character_as_valid_toml():
+    value = 'k\U0001f600\x7f\u00e9"\\\n'
+    assert mirrors.value_in(mirrors.with_value('a = "old"\n', "a", value, "f"), "a") == value
+
+
 def test_mirror_with_value_refuses_a_value_written_twice():
     with pytest.raises(RuntimeError, match="written 2 times"):
         mirrors.with_value('a = "old"\nb = "old"\n', "a", "new", "f")
@@ -340,6 +354,15 @@ def test_gateway_validator_rejects_a_bad_key_without_showing_it(gateway):
     with pytest.raises(validators.Rejected, match="HTTP 401$") as exc:
         validators.bedrock_gateway("wrong-key", _gateway_settings(base + "/bedrock"))
     assert "wrong-key" not in str(exc.value)
+
+
+def test_gateway_validator_puts_an_arn_model_in_one_path_segment(gateway):
+    base, calls = gateway
+    settings = _gateway_settings(base + "/bedrock")
+    settings["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "arn:aws:bedrock:us-east-1:1:inference-profile/x[1m]"
+    validators.bedrock_gateway(SECRET, settings)
+    [(path, _, _)] = calls
+    assert path == "/bedrock/model/arn%3Aaws%3Abedrock%3Aus-east-1%3A1%3Ainference-profile%2Fx/invoke"
 
 
 def test_gateway_validator_does_not_follow_a_redirect(gateway):

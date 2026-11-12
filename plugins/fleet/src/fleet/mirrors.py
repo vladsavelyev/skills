@@ -42,6 +42,12 @@ def value_in(text: str, key: str) -> object | None:
     return node
 
 
+def basic_string(value: str) -> str:
+    """A TOML basic string. JSON's escapes are TOML's, but for characters outside the BMP (JSON's surrogate
+    pairs aren't valid TOML, so they stay as they are) and DEL (raw in JSON, an escape in TOML)."""
+    return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
 def with_value(text: str, key: str, value: str, where: str) -> str:
     """TOML text with the string at `key` replaced by `value`, everything else byte for byte as it was."""
     old = value_in(text, key)
@@ -56,13 +62,13 @@ def with_value(text: str, key: str, value: str, where: str) -> str:
             )
     if old == value:
         return text
-    literals = {f: text.count(f) for f in (json.dumps(old), f"'{old}'") if f in text}
+    literals = {f: text.count(f) for f in (basic_string(old), f"'{old}'") if f in text}
     if sum(literals.values()) != 1:
         raise RuntimeError(
             f"{where}: the current value of {key} is written {sum(literals.values())} times, not once: update it by hand"
         )
     [literal] = literals
-    new = text.replace(literal, json.dumps(value))
+    new = text.replace(literal, basic_string(value))
     expected = tomllib.loads(text)
     node = expected
     *parents, last = key.split(".")

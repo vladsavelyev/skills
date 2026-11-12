@@ -8,6 +8,7 @@ Its messages must never contain the value, so they don't quote what a server ans
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 
@@ -45,7 +46,8 @@ def bedrock_gateway(token: str, settings: dict) -> None:
     # Claude Code's model settings can carry a context-window tag, e.g. `...-sonnet-5-5[1m]`: not part of the id.
     model = re.sub(r"\[[^]]*\]$", "", env["ANTHROPIC_DEFAULT_HAIKU_MODEL"])
     body = {"anthropic_version": "bedrock-2023-05-31", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}
-    url = f"{base}/model/{model}/invoke"
+    # An inference-profile ARN has slashes: one path segment all the same.
+    url = f"{base}/model/{urllib.parse.quote(model, safe='')}/invoke"
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),

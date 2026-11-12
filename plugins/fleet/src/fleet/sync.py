@@ -122,9 +122,12 @@ class Machine:
         backup = f"{path}.bak-{datetime.now().astimezone():%Y%m%d%H%M%S}"
         script = (
             'set -e; if [ -f "$1" ] && [ ! -L "$1" ]; then cp -p "$1" "$2"; echo kept; fi; '
-            # The new file gets the old one's mode (settings files are often 0600), or the user's alone.
-            'if [ -f "$1" ]; then cp -p "$1" "$1.fleet-new"; else umask 077; fi; '
-            'cat > "$1.fleet-new"; mv "$1.fleet-new" "$1"'
+            # The new file gets the old one's mode (settings files are often 0600, some read-only), or the
+            # user's alone.
+            'rm -f "$1.fleet-new"; '
+            'if [ -f "$1" ]; then cp -p "$1" "$1.fleet-new"; chmod u+w "$1.fleet-new"; else umask 077; fi; '
+            'cat > "$1.fleet-new"; if [ -f "$1" ] && [ ! -w "$1" ]; then chmod u-w "$1.fleet-new"; fi; '
+            'mv -f "$1.fleet-new" "$1"'
         )
         proc = self.run(["sh", "-c", script, "sh", path, backup], input=text)
         return backup if proc.stdout.strip() == "kept" else None
