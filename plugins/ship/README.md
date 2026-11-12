@@ -117,7 +117,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <b>] [--title <t>]` | Branch (off the fetched remote base) + worktree + empty first commit, pushed, + draft PR. No tracking issue. |
 | `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking: tracking issue, linked PR. |
-| `feature describe --body-file <f\|-> [--title <t>]` | Replace the PR's description (and title), keeping the sections the CLI owns. |
+| `feature describe --body-file <f\|-> [--title <t>]` | Replace the PR's description (and title). Pass it with or without ship's block (e.g. the fetched body, edited); the PR keeps exactly one. |
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
@@ -134,7 +134,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |
 | `feature gate [--branch <b>]` | Exit 0 = OPEN, 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION, 30 = MERGED (1 and 2 stay "the command failed"). |
 | `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks that the PR really merged and records what the gate still had outstanding; refuses while an open problem hasn't been handed off). |
-| `feature reconcile [--branch <b>] [--dry-run]` | Sweep the repo: close out every feature whose PR already merged, close as `abandoned` the ones whose PR was closed unmerged, and repair the issue link on still-open PRs. |
+| `feature reconcile [--branch <b>] [--dry-run]` | Sweep the repo: close out every feature whose PR already merged, close as `abandoned` the ones whose PR was closed unmerged, and repair ship's block on still-open PRs (stale link, duplicate blocks). |
 | `feature migrate [--branch <b>]` | Upgrade a repo for this CLI version: (re-)create the workflow labels and the feature issue's state block. Run it once per repo after upgrading. |
 
 ## PR ↔ issue linkage

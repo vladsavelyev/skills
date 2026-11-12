@@ -859,23 +859,23 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
             pending.append((row, state))
 
     states = github.pr_states([state["pr"] for _, state in pending])
-    closed_out, abandoned, relinked, needs_human = 0, 0, 0, 0
+    closed_out, abandoned, repaired, needs_human = 0, 0, 0, 0
     for row, state in pending:
         issue, pr = row["number"], state["pr"]
         pr_state = states[pr]
         if pr_state == "OPEN":
-            # Still in flight. Upgrade its reference if it predates the closing link (or was never
-            # linked), so this one closes itself on merge. Its state block is left alone even if
-            # stale: a live feature is reachable from its own branch, where `feature migrate` can
-            # upgrade it loudly and the gate can be re-derived.
+            # Still in flight. Repair its PR body's block if it is stale (a reference from before the
+            # closing link, or none, so this one closes itself on merge) or written more than once.
+            # Its state block is left alone even if stale: a live feature is reachable from its own
+            # branch, where `feature migrate` can upgrade it loudly and the gate can be re-derived.
             stale = "" if state["schema"] == SCHEMA else f" (state is schema {state['schema']}; run `feature migrate`)"
             if args.dry_run:
                 # Whether the body actually needs an edit is only knowable by reading it, which is
                 # what the real run does — don't claim a count here that a dry run can't know.
-                print(f"#{issue} ({row['title']}): PR #{pr} open → reference repaired if stale{stale}")
+                print(f"#{issue} ({row['title']}): PR #{pr} open → block repaired if stale{stale}")
             elif _write_block(state, issue):
-                print(f"#{issue} ({row['title']}): re-linked — PR #{pr} now closes it on merge{stale}")
-                relinked += 1
+                print(f"#{issue} ({row['title']}): block repaired — PR #{pr} closes it on merge{stale}")
+                repaired += 1
             continue
         if pr_state == "CLOSED":
             # Closed unmerged: the work never landed, so this ends as `abandoned`, never `merged`.
@@ -939,7 +939,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
 
     scope = f"feature for branch '{args.branch}'" if args.branch else f"{len(rows)} feature issue(s)"
     did = "would close" if args.dry_run else "closed"
-    tail = "" if args.dry_run else f", re-linked {relinked}"
+    tail = "" if args.dry_run else f", repaired {repaired}"
     print(
         f"Scanned {scope}: {did} out {closed_out} merged, {did} {abandoned} abandoned"
         f"{tail}, {needs_human} needing a human decision."
@@ -1021,7 +1021,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_pr)
 
-    c = sub.add_parser("describe", help="Replace the PR description, keeping the sections the CLI owns")
+    c = sub.add_parser(
+        "describe", help="Replace the PR description (with or without ship's block); the PR keeps exactly one block"
+    )
     c.add_argument("--body-file", required=True, help="File with the new description, or '-' for stdin")
     c.add_argument("--title", help="New PR title")
     c.add_argument("--branch")
