@@ -148,7 +148,7 @@ def _home(tmp_path, monkeypatch, *, imports: bool = True, rules: bool = True):
 
 def _sync(apply: bool) -> fleet.Report:
     report = fleet.Report()
-    fleet.sync_agents_md([fleet.Machine(None)], fleet.Config(hosts=["u@h"], agents_md=AGENTS), apply, report)
+    fleet.sync_agents_md([fleet.Machine(None)], fleet.Config(hosts=["u@h"], agents_md=[AGENTS]), apply, report)
     return report
 
 
@@ -167,7 +167,7 @@ def test_agents_md_generates_codex_rules_with_the_machine_part(tmp_path, monkeyp
     (home / ".codex").mkdir()
     assert _sync(apply=False).unresolved == 1
     assert _sync(apply=True).unresolved == 0
-    assert _codex(home) == fleet.codex_agents_md(AGENTS, "rules\n", "mine\n")
+    assert _codex(home) == fleet.codex_agents_md([AGENTS], ["rules\n"], "mine\n")
     assert _codex(home).endswith("\n\nrules\n\nmine\n")
     assert not list((home / ".codex").glob("AGENTS.md.bak-*"))
     assert _sync(apply=False).unresolved == 0
@@ -266,3 +266,82 @@ def test_agents_md_outside_git_is_a_problem(tmp_path, monkeypatch):
     (home / AGENTS).parent.mkdir(parents=True)
     (home / AGENTS).write_text("rules\n")
     assert _sync(apply=True).unresolved == 1
+
+
+HOME_AGENTS = "git/home/AGENTS.md"
+
+
+class _Host(fleet.Machine):
+    """A host whose home directory is a local one, so a test reaches it without ssh."""
+
+    def __init__(self, home):
+        super().__init__("host")
+        self.home = home
+
+    def run(self, argv, input=None, check=True):
+        proc = fleet.run(argv, cwd=self.home, check=False, input=input or "")
+        if check and proc.returncode != 0:
+            raise RuntimeError(f"host: `{argv}` failed: {proc.stderr}")
+        return proc
+
+
+def _home_repo(tmp_path, home) -> None:
+    """A second rules repo, published and cloned to this machine at ~/git/home."""
+    origin = tmp_path / "home-origin"
+    origin.mkdir()
+    (origin / "AGENTS.md").write_text("pointers\n")
+    _git("init", "-q", "-b", "main", cwd=origin)
+    _git("add", "-A", cwd=origin)
+    _git("commit", "-qm", "pointers", cwd=origin)
+    _git("clone", "-q", str(origin), str(home / "git" / "home"), cwd=tmp_path)
+    (home / fleet.CLAUDE_MD).write_text(f"@~/{AGENTS}\n@~/{HOME_AGENTS}\n" + fleet.MARKER + "\nmine\n")
+
+
+def _sync_all(machines, apply: bool) -> fleet.Report:
+    report = fleet.Report()
+    config = fleet.Config(hosts=["u@h"], agents_md=[AGENTS, HOME_AGENTS])
+    fleet.sync_agents_md(machines, config, apply, report)
+    return report
+
+
+def test_agents_md_joins_every_file_in_order_for_codex(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    _home_repo(tmp_path, home)
+    (home / ".codex").mkdir()
+    assert _sync_all([fleet.Machine(None)], apply=True).unresolved == 0
+    assert _codex(home).endswith("\n\nrules\n\npointers\n\nmine\n")
+    assert f"~/{AGENTS}, ~/{HOME_AGENTS}" in _codex(home).splitlines()[0]
+
+
+def test_agents_md_clones_each_repo_on_a_host_that_lacks_it(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    _home_repo(tmp_path, home)
+    host_home = tmp_path / "host"
+    (host_home / ".codex").mkdir(parents=True)
+    (host_home / ".claude").mkdir()
+    (host_home / fleet.CLAUDE_MD).write_text(fleet.MARKER + "\nthe host's own\n")
+    host = _Host(host_home)
+    machines = [fleet.Machine(None), host]
+    assert _sync_all(machines, apply=False).unresolved == 2
+    assert not (host_home / "git").exists()
+    assert _sync_all(machines, apply=True).unresolved == 0
+    assert (host_home / HOME_AGENTS).read_text() == "pointers\n"
+    assert (host_home / AGENTS).read_text() == "rules\n"
+    assert (host_home / fleet.CODEX_AGENTS_MD).read_text().endswith("\n\nrules\n\npointers\n\nthe host's own\n")
+    assert _sync_all(machines, apply=False).unresolved == 0
+
+
+def test_agents_md_skips_codex_where_any_file_is_blocked(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    _home_repo(tmp_path, home)
+    (home / ".codex").mkdir()
+    (home / HOME_AGENTS).write_text("edited here\n")
+    assert _sync_all([fleet.Machine(None)], apply=True).unresolved == 1
+    assert not (home / fleet.CODEX_AGENTS_MD).exists()
+
+
+def test_load_config_refuses_a_single_agents_md_path(tmp_path):
+    fleet.CONFIG_PATH.parent.mkdir(parents=True)
+    fleet.CONFIG_PATH.write_text(f'hosts = ["u@h"]\nagents_md = "{AGENTS}"\n')
+    with pytest.raises(RuntimeError, match="must be a list"):
+        fleet.load_config()
