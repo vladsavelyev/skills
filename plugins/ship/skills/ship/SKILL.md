@@ -46,7 +46,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
-| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --complexity <c> --why "<sentence>"` |
+| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add`, `resolve <#> --commit <sha>`, `wontfix\|block <#> --reason "…"` |
 | Review budget | `feature budget [--set <n> \| --auto]` |
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
@@ -69,11 +69,22 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
 2. **Describe the PR.** A branch from `feature start` got its title and description before any
    code existed. When they no longer fit what the branch does (always on its first ship), rewrite
-   them from the original motivation in the PR body and the commit messages
-   (`git log --format='%s%n%b' origin/<base>..HEAD`); don't read the diff for this. The
-   description is the motivation in one to three informal sentences plus, if it isn't obvious,
-   what changed; no "Summary" header, no test plan. The title says what the PR does, in plain
-   words. End it with your signature line if your harness asks for one. `feature describe` takes the
+   them. The description has no headers (no "Summary", no "Evidence", no test plan) and runs in
+   this order:
+   - The motivation, in one to three informal sentences, from the original motivation in the PR
+     body and the commit messages (`git log --format='%s%n%b' origin/<base>..HEAD`), not from the
+     diff: Sol's spec check reads the PR's intent from these sentences.
+   - Beside it, the smallest sketch of what changed, drawn from the diff: a `diff` of a call tree,
+     file tree, component tree or state change, pseudocode, or a Mermaid diagram. Keep only the
+     calls, files and states the point needs. Leave it out when the change is a line or two the
+     motivation already names.
+   - The evidence that it works, carried over from the existing description or the commits: a
+     before and after, as a screencast or screenshots for a change users see, otherwise the test
+     or command that failed before and passes now, with its output. Only what was run. If the
+     branch has none, say so in `Next`.
+
+   The title says what the PR does, in plain words. End the description with your signature
+   line if your harness asks for one. `feature describe` takes the
    text with or without ship's block (editing the fetched body is fine) and writes exactly one,
    above that signature. Sol and step 6 read this
    description to know the PR's intent, so it comes first.
@@ -117,7 +128,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    Then, separately from the defects, two more checks, each under its own heading. Give each
    finding a title, file:line where there is one, and the smallest fix; no severity.
    - Spec: what the PR's intent asks for that the diff leaves missing or partial, and behaviour
-     the diff adds that nothing asked for. The intent is the PR description, the issues it or its
+     the diff adds that nothing asked for. The intent is the PR description's prose (its sketch
+     and evidence show what was built, not what was asked), the issues it or its
      commits reference, and the user's request: <recorded request, or "none recorded">. Don't
      open issues labelled `feature` or `problem`: they're this review's own bookkeeping. Quote the
      line of intent each finding rests on. Something asked for but built wrong is a defect: report
@@ -139,10 +151,10 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      - Refused Bequest: a subclass or implementer that ignores most of what it inherits.
      A documented rule wins over a smell. Skip what a linter or formatter enforces.
 
-   Then grade the PR as a whole, each with low/med/high, plus one or two sentences on what
-   drives both:
-   - risk, what a bug left in this change would cost: who it would reach and how hard it would
-     be to undo. Judge the stakes from the repo (its README, what it ships and to whom): the same
+   Then grade the PR as a whole: risk and complexity each low/med/high, the door and the blast
+   radius, plus one or two sentences on what drives the risk and complexity:
+   - risk, what a bug left in this change would cost: who it would reach (the blast radius) and
+     how hard it would be to undo (the door). Judge the stakes from the repo (its README, what it ships and to whom): the same
      bug costs far less in a personal tooling repo than in a service with users. high: lasting
      harm to others that is hard to undo, like data lost or corrupted beyond easy restore,
      security or auth, money, migrations of stored data, shared infra or deploys. med: wrong
@@ -151,6 +163,11 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      internal refactors with good coverage, and text written to GitHub (PR bodies, issues,
      comments), which keeps every edit. Risk is the cost of a bug, not how likely one is (that
      is complexity) or how serious the subject sounds.
+   - door, one-way or two-way: whether reverting the PR undoes what a bug in it did. one-way:
+     stored data rewritten or migrated, data or messages sent out, a deploy cutover or interface
+     others come to depend on. two-way: a revert puts everything back.
+   - blast radius, in a few words: who or what a bug would reach, e.g. "every vertical's page",
+     "refine and chat titles", "only this repo's own tooling".
    - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
      invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
@@ -186,10 +203,10 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
    sentence about what was reviewed and found, never a bare "clean pass"; name any spec and design
    findings in it. Pass the effort Sol ran
-   at as `--depth`, and Sol's grade as `--risk`, `--complexity` and `--why`, never lowered. Raise
-   complexity when the findings show the change was harder to get right than Sol graded. Raise
-   risk only when a finding shows a bug costs more than Sol graded: it reaches further or is
-   harder to undo. Many findings in a low-risk change still mean low risk. The CLI writes the
+   at as `--depth`, and Sol's grade as `--risk`, `--door`, `--blast-radius`, `--complexity` and
+   `--why`, never lowered. Raise complexity when the findings show the change was harder to get
+   right than Sol graded. Raise risk only when a finding shows a bug costs more than Sol graded: it
+   reaches further (widen the blast radius) or is harder to undo (the door turns one-way). Many findings in a low-risk change still mean low risk. The CLI writes the
    grade into the PR body and sizes the next round's depth from it: low risk always reviews at
    low.
 
@@ -230,7 +247,7 @@ End with only this, filled in:
 ```
 Feature: <name>  Branch: <branch>  PR: <url or none>  Worktree: <abs path>
 Did: <one line>
-Review: Sol <model> at <depth>; graded risk <…>, complexity <…>; next round at <depth>   (or not run)
+Review: Sol <model> at <depth>; graded risk <…> (<door> door, blast radius <…>), complexity <…>; next round at <depth>   (or not run)
 Gate: <verdict, or not run>
 Open: #<n> [sev] <title> — <file:line>, fix: <smallest fix>   (every open problem, low included, one per line; or none)
 Pre-existing: [sev] <title> — <file:line>, <failure scenario>, fix: <smallest fix>   (bugs this PR didn't cause, one per line; or none)

@@ -3,7 +3,8 @@
     <the author's description>
 
     <!-- ship -->
-    > **Risk: low**: …
+    > **Risk: low**, two-way door: …
+    > Blast radius: …
     > Complexity: low, size: S (2 files, 30 lines)
     > Feature tracking issue: closes #39
     > **Review round 1** (medium). Findings: none. A re-review after new commits would run at low.

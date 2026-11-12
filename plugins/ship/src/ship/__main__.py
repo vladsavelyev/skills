@@ -366,7 +366,13 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     run_num = entry["run"]
     entry["found"] = found
     entry["depth"] = args.depth
-    entry["grade"] = {"risk": args.risk, "complexity": args.complexity, "why": args.why}
+    entry["grade"] = {
+        "risk": args.risk,
+        "door": args.door,
+        "blast_radius": args.blast_radius,
+        "complexity": args.complexity,
+        "why": args.why,
+    }
 
     # ORDER IS THE RETRY STRATEGY: every fallible call happens BEFORE the single state write, so a
     # failure anywhere leaves the round unrecorded and re-running the command records it exactly
@@ -1058,6 +1064,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--summary", required=True)
     r.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="Effort Sol ran at")
     r.add_argument("--risk", required=True, choices=assess.LEVELS, help="The reviewer's grade of the PR's risk")
+    r.add_argument("--door", required=True, choices=assess.DOORS, help="Whether reverting the PR undoes a bug in it")
+    r.add_argument("--blast-radius", required=True, help="A few words: who or what a bug in the PR would reach")
     r.add_argument("--complexity", required=True, choices=assess.LEVELS, help="The reviewer's grade of its complexity")
     r.add_argument("--why", required=True, help="One or two sentences: what drives that risk and complexity")
     r.add_argument("--branch")

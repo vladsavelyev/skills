@@ -75,7 +75,13 @@ def _review(grade: dict, history: list[dict], **kw) -> assess.Review:
 
 
 def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
-    grade = {"risk": "high", "complexity": "med", "why": " whole-body rewrites can corrupt the ref "}
+    grade = {
+        "risk": "high",
+        "door": "one-way",
+        "blast_radius": " every open PR's body ",
+        "complexity": "med",
+        "why": " whole-body rewrites can corrupt the ref ",
+    }
     history = [
         {"run": 1, "depth": "high", "found": {"low": [40]}, "regressions": 0},
         {"event": "base-advanced"},
@@ -83,13 +89,23 @@ def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
         {"run": 3, "depth": "xhigh", "found": {}, "regressions": 0},
     ]
     assert assess.render(issue=39, review=_review(grade, history)) == (
-        "> **Risk: high**: whole-body rewrites can corrupt the ref\n"
+        "> **Risk: high**, one-way door: whole-body rewrites can corrupt the ref\n"
+        "> Blast radius: every open PR's body\n"
         "> Complexity: medium, size: M (8 files, 412 lines)\n"
         "> Feature tracking issue: closes #39\n"
         "> **Review round 1** (high). Findings: 1 low (#40).\n"
         "> **Review round 2** (xhigh). Findings: 1 high (#41), 2 med (#42, #44), 1 of them back after a fix.\n"
         "> **Review round 3** (xhigh). Findings: none. A re-review after new commits would run at max."
     )
+
+
+def test_render_keeps_a_grade_recorded_before_the_door_and_blast_radius():
+    grade = {"risk": "med", "complexity": "low", "why": "refine answers 429"}
+    out = assess.render(issue=39, review=_review(grade, [{"run": 1, "depth": "medium", "found": {}}]))
+    assert out.splitlines()[:2] == [
+        "> **Risk: medium**: refine answers 429",
+        "> Complexity: low, size: M (8 files, 412 lines)",
+    ]
 
 
 def test_render_before_any_review_is_the_reference_alone():

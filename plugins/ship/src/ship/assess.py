@@ -18,6 +18,9 @@ from fnmatch import fnmatch
 
 SIZES = ("S", "M", "L", "XL")
 LEVELS = ("low", "med", "high")
+# Whether reverting the PR undoes what a bug in it did: a two-way door can be walked back through,
+# a one-way door can't (stored data rewritten, data sent out, a cutover others now depend on).
+DOORS = ("one-way", "two-way")
 # Reviewer reasoning efforts, cheapest first. Sol also offers `ultra`; it's never picked
 # automatically, only when the user asks for it.
 DEPTHS = ("low", "medium", "high", "xhigh", "max")
@@ -139,6 +142,17 @@ def _next_round(last: dict, depth: str) -> str:
     return f" Next round would run at {depth}."
 
 
+def _risk_lines(grade: dict) -> list[str]:
+    """The grade's risk, read as its two halves: whether a revert undoes a bug (the door) and what
+    a bug would reach (the blast radius)."""
+    risk, why = _SPELLED[grade["risk"]], grade["why"].strip()
+    if "door" not in grade:
+        # Grades recorded before the door and blast radius existed carry neither. Kept ON PURPOSE:
+        # they are already written into feature issues of PRs in flight.
+        return [f"**Risk: {risk}**: {why}"]
+    return [f"**Risk: {risk}**, {grade['door']} door: {why}", f"Blast radius: {grade['blast_radius'].strip()}"]
+
+
 def render(*, issue: int, review: Review | None) -> str:
     """The quote in the PR body's ship block: Sol's latest grade, the closing reference to the
     feature issue, and one line per review round. A round's line lists what it found, which never
@@ -151,7 +165,7 @@ def render(*, issue: int, review: Review | None) -> str:
         rounds = [_round_line(e) for e in runs]
         rounds[-1] += _next_round(runs[-1], review.next_depth)
         lines = [
-            f"**Risk: {_SPELLED[grade['risk']]}**: {grade['why'].strip()}",
+            *_risk_lines(grade),
             f"Complexity: {_SPELLED[grade['complexity']]}, size: {review.size} "
             f"({review.changed_files} files, {review.changed_lines} lines)",
             *lines,

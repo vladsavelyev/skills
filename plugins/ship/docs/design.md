@@ -104,7 +104,8 @@ for GitHub to close the tracking issue:
 <the author's description>
 
 <!-- ship -->
-> **Risk: low**: only rewrites ship's own tagged block of the PR body
+> **Risk: low**, two-way door: a bad write is visible and fixed by hand
+> Blast radius: ship's own block in this repo's PR bodies
 > Complexity: low, size: M (8 files, 412 lines)
 > Feature tracking issue: closes #39
 > **Review round 1** (high). Findings: 1 low (#40).
@@ -116,15 +117,16 @@ for GitHub to close the tracking issue:
 ```
 
 Every command that writes the block (`feature pr`, `feature describe`, `feature review record`,
-`feature reconcile`) renders the whole quote from the feature's state (`assess.render`) and sets
-it between the tags (`prbody.py`), so the block always shows the current state. Before any review
-it is the reference line alone. A body without the block gets it above the author's signature (a
-trailing one-line paragraph starting with `🤖`, the attribution line an agent harness asks for),
-or at the end. The grade is Sol's latest; each round's line lists what it found by severity
-(recorded with the round from `--found`), which never changes after the round. The latest round's
-line ends with the depth Sol's grade buys the next round. After a clean round no round is due (the
-gate only reopens if new commits move the head), so it reads `A re-review after new commits would
-run at <depth>` instead of `Next round would run at <depth>`.
+`feature reconcile`) renders the whole quote from the feature's state (`assess.render`) and sets it
+between the tags (`prbody.py`), so the block always shows the current state. Before any review it
+is the reference line alone. A body without the block gets it above the author's signature (a
+trailing one-line paragraph starting with `🤖`, the attribution line an agent harness asks for), or
+at the end. The grade is Sol's latest, its risk read as its two halves: the door (whether a revert
+undoes what a bug did) and the blast radius (who or what a bug reaches). Each round's line lists
+what it found by severity (recorded with the round from `--found`), which never changes after the
+round. The latest round's line ends with the depth Sol's grade buys the next round. After a clean
+round no round is due (the gate only reopens if new commits move the head), so it reads `A
+re-review after new commits would run at <depth>` instead of `Next round would run at <depth>`.
 
 Every body ship writes has exactly one block. It is created once; every later write finds it and
 rewrites what is between its tags. `feature describe` accepts the new description with or without
@@ -340,7 +342,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
-| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
+| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
@@ -384,7 +386,7 @@ caller ─▶ Skill(ship:ship) ─▶ forked subagent, fresh context
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
                                                     (spec gaps and design smells: always low)
    6. `feature review record --found <problems filed & regressed>
-                             --regressions <high/med reopened> --depth --risk --complexity --why`   (refuses if no PR linked;
+                             --regressions <high/med reopened> --depth --risk --door --blast-radius --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
    7. report ─▶ caller: verdict OPEN (ship) / REVIEW_AGAIN (fix, call again) / NEEDS_DECISION (escalate)
       (a merged PR stops at step 1: the caller hands it to Skill(ship:close))
@@ -443,15 +445,16 @@ inputs always buy the same depth.
 
 **Why risk is about stakes, and caps the depth.** PR #38 changed only how ship formats its own
 block in PR bodies, in this personal repo, where a bad write is visible and fixed by hand. Sol
-still graded it high twice ("whole-body rewrites can corrupt persistent author content"), so
-its rounds ran at high, then xhigh, with max next. The rubric listed "data loss or corruption"
-and "stored formats" as high without asking who a bug reaches or whether it can be undone, so
-Sol matched the subject, not the stakes. Its reasoning also mixed in how hard the parser was to
-get right, which is complexity. Now risk is the cost of a missed bug, judged from the repo's
-stakes: reach and reversibility. Each risk level starts at the depth of the same name, and a
-low-risk PR reviews at low whatever its size or complexity: a big, intricate change still costs
-little to get wrong if nobody else is hit and it is easy to undo. For the same reason, many
-findings in a round raise complexity, not risk.
+still graded it high twice ("whole-body rewrites can corrupt persistent author content"), so its
+rounds ran at high, then xhigh, with max next. The rubric listed "data loss or corruption" and
+"stored formats" as high without asking who a bug reaches or whether it can be undone, so Sol
+matched the subject, not the stakes. Its reasoning also mixed in how hard the parser was to get
+right, which is complexity. Now risk is the cost of a missed bug, judged from the repo's stakes:
+reach and reversibility, which Sol names as the grade's blast radius and door (borrowed from
+mattpocock's `pr` skill), so a reader sees what the level rests on. Each risk level starts at the
+depth of the same name, and a low-risk PR reviews at low whatever its size or complexity: a big,
+intricate change still costs little to get wrong if nobody else is hit and it is easy to undo. For
+the same reason, many findings in a round raise complexity, not risk.
 
 **Why a subagent, not a headless `claude`.** An earlier design spawned `claude -p "/code-review"`
 as a *subprocess* and forced its findings into a JSON schema. That second, long-lived `claude`

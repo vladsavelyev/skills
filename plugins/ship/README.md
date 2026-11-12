@@ -97,7 +97,8 @@ feature depth                                  # effort for Sol: from stats + pa
 feature problem add --title "…" --sev high    # file each genuinely-new problem
 feature review record --sha $(git rev-parse HEAD) --found 46 47 48 49 50 \
     --summary "Token refresh race + unchecked PKCE verifier; 3 nits filed as low" \
-    --depth xhigh --risk high --complexity med --why "Token handling; refresh has ordering"
+    --depth xhigh --risk high --door one-way --blast-radius "every signed-in user" \
+    --complexity med --why "Token handling; refresh has ordering"
 feature problem list --open                    # every one holds the merge, low included
 # ... fix each, or close the ones that aren't relevant:
 feature problem resolve 46 --commit abc1234
@@ -105,7 +106,8 @@ feature problem wontfix 48 --reason "verifier is validated upstream in middlewar
 # re-review, then record it; the gate opens once nothing is open and the review covers HEAD:
 feature review record --sha $(git rev-parse HEAD) --found 51 \
     --summary "Re-reviewed oauth.py; #46 fixed; one naming nit filed" \
-    --depth max --risk high --complexity med --why "Token handling; refresh has ordering"
+    --depth max --risk high --door one-way --blast-radius "every signed-in user" \
+    --complexity med --why "Token handling; refresh has ordering"
 feature gate                                   # exit 0 = safe to merge, 20 = ask a human
 ```
 
@@ -121,7 +123,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
-| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
+| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
 | `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (it blocks the gate until closed, at any severity). |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue as fixed. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. |
