@@ -1,6 +1,6 @@
 ---
 name: fleet
-description: Keep the per-user Claude Code setup the same on every machine the user works from (the laptop and the remote T3 EC2) with `fleet` — Claude Code version, skill repos and links, plugins, `~/.claude/CLAUDE.md` and `~/.claude/settings*.json` — respecting what is each machine's own. TRIGGER when asked to "sync the fleet", sync or compare Claude Code setups across machines, carry a CLAUDE.md/settings/skill/plugin change over to the EC2 (or back), or when a remote T3 thread behaves as if it lacks a skill, plugin or instruction the laptop has.
+description: Keep the per-user Claude Code setup the same on every machine the user works from (the laptop and the remote T3 EC2) with `fleet` — Claude Code version, skill repos and links, plugins, `~/.claude/CLAUDE.md` and `~/.claude/settings*.json` — respecting what is each machine's own. TRIGGER when asked to "sync the fleet", sync or compare Claude Code setups across machines, carry a CLAUDE.md/settings/skill/plugin change over to the EC2 (or back), or rotate a secret in `~/.claude/settings.json` across the machines (`fleet set`), or when a remote T3 thread behaves as if it lacks a skill, plugin or instruction the laptop has.
 ---
 
 # Sync the fleet (`fleet`)
@@ -8,6 +8,7 @@ description: Keep the per-user Claude Code setup the same on every machine the u
 ```sh
 fleet            # report drift, change nothing; exit 1 if anything is out of sync
 fleet --apply    # fix it, then report what's left for a human
+fleet set KEY    # give one ~/.claude/settings.json key (e.g. env.MY_TOKEN) a new value everywhere
 ```
 
 Run it **on the laptop**: the machine it runs on is the source of truth, and the hosts in
@@ -31,6 +32,12 @@ version. A mismatch means the environment needs reconnecting in T3 Code.
 
 Each overwritten file keeps a `.bak-<timestamp>` copy next to it. Plugin updates take effect from
 the next Claude Code session.
+
+To rotate a secret, get it with T3's `request_secret` using `delivery: "file"`, then run
+`fleet set <key> < "$file"`, and never ask for it in chat. It validates the value where it can
+(`env.AWS_BEARER_TOKEN_BEDROCK` against the gateway), writes it on every machine along with its
+`mirrors` from the fleet config (e.g. Codex's copy of the gateway key in `~/.codex/config.toml`), and
+reports `ok` or `FAILED` per machine by hash, never the value.
 
 Something machine-specific showing up as drift is not a reason to sync it: add it to
 `machine_settings` / `machine_skills` in the config, or move CLAUDE.md text below the marker.

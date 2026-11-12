@@ -27,10 +27,12 @@ import re
 import shlex
 import subprocess
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from .mirrors import Mirror
 from .shell import out, run, try_out
 
 CONFIG_PATH = Path.home() / ".config" / "fleet" / "config.toml"
@@ -39,7 +41,8 @@ MARKER = "<!-- fleet: everything below is this machine's own and is not synced -
 SECTION_START = "<!-- fleet: generated machine section, rewritten by `fleet --apply` -->"
 SECTION_END = "<!-- fleet: end of generated machine section -->"
 CLAUDE_MD = ".claude/CLAUDE.md"
-SETTINGS_FILES = (".claude/settings.json", ".claude/settings.local.json")
+SETTINGS_JSON = ".claude/settings.json"
+SETTINGS_FILES = (SETTINGS_JSON, ".claude/settings.local.json")
 SKILLS_DIR = ".claude/skills"
 # One connection for the whole run: a check is dozens of commands per host.
 SSH_OPTS = ["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/fleet-%C", "-o", "ControlPersist=60"]
@@ -53,6 +56,8 @@ class Config:
     helpers: list[str] = field(default_factory=list)
     # Home-relative path of the agent instructions every machine's CLAUDE.md imports and Codex reads.
     agents_md: str | None = None
+    # Other files holding a copy of a settings value, which `fleet set` updates with it (mirrors.py).
+    mirrors: list[Mirror] = field(default_factory=list)
 
 
 def load_config() -> Config:
@@ -65,7 +70,8 @@ def load_config() -> Config:
             '  helpers = ["git-pr-context"]                       # commands the hooks/statusline call\n'
             '  agents_md = ".claude/plugins/marketplaces/<m>/agents/AGENTS.md"  # optional, see README'
         )
-    config = Config(**tomllib.loads(CONFIG_PATH.read_text()))
+    raw = tomllib.loads(CONFIG_PATH.read_text())
+    config = Config(**{**raw, "mirrors": [Mirror(**m) for m in raw.get("mirrors", [])]})
     if not config.hosts:
         raise RuntimeError(f"{CONFIG_PATH}: `hosts` is empty, so there is no fleet to sync")
     return config
@@ -116,7 +122,12 @@ class Machine:
         backup = f"{path}.bak-{datetime.now().astimezone():%Y%m%d%H%M%S}"
         script = (
             'set -e; if [ -f "$1" ] && [ ! -L "$1" ]; then cp -p "$1" "$2"; echo kept; fi; '
-            'cat > "$1.fleet-new"; mv "$1.fleet-new" "$1"'
+            # The new file gets the old one's mode (settings files are often 0600, some read-only), or the
+            # user's alone.
+            'rm -f "$1.fleet-new"; '
+            'if [ -f "$1" ]; then cp -p "$1" "$1.fleet-new"; chmod u+w "$1.fleet-new"; else umask 077; fi; '
+            'cat > "$1.fleet-new"; if [ -f "$1" ] && [ ! -w "$1" ]; then chmod u-w "$1.fleet-new"; fi; '
+            'mv -f "$1.fleet-new" "$1"'
         )
         proc = self.run(["sh", "-c", script, "sh", path, backup], input=text)
         return backup if proc.stdout.strip() == "kept" else None
@@ -148,6 +159,11 @@ class Report:
         """Drift --apply can't fix: a human has to."""
         self.unresolved += 1
         print(f"  PROBLEM {text}", flush=True)
+
+    def failed(self, text: str) -> None:
+        """Something that was meant to happen didn't."""
+        self.unresolved += 1
+        print(f"  FAILED  {text}", flush=True)
 
     def note(self, text: str) -> None:
         print(f"          {text}", flush=True)
@@ -596,11 +612,16 @@ def is_machine_key(key: str, machine_keys: list[str]) -> bool:
     return any(key == k or key.startswith(f"{k}.") for k in machine_keys)
 
 
-def merge_settings(source: dict, target: dict, machine_keys: list[str]) -> dict:
-    """`target` with every key copied from `source`, except the machine's own, which `target` keeps."""
+def shared_keys(machine_keys: list[str]) -> Callable[[str], bool]:
+    """What a full sync copies: every key but the machine's own."""
+    return lambda key: not is_machine_key(key, machine_keys)
+
+
+def merge_settings(source: dict, target: dict, synced: Callable[[str], bool]) -> dict:
+    """`target` with the `synced` keys (flattened names) copied from `source`; every other key `target` keeps."""
     src, dst = flatten(source), flatten(target)
-    keep = {k: v for k, v in dst.items() if is_machine_key(k, machine_keys)}
-    take = {k: v for k, v in src.items() if not is_machine_key(k, machine_keys)}
+    keep = {k: v for k, v in dst.items() if not synced(k)}
+    take = {k: v for k, v in src.items() if synced(k)}
     merged: dict = {}
     for key, value in {**take, **keep}.items():
         top, dot, sub = key.partition(".")
@@ -608,11 +629,45 @@ def merge_settings(source: dict, target: dict, machine_keys: list[str]) -> dict:
             merged.setdefault(top, {})[sub] = value
         else:
             merged[key] = value
-    # An object whose every member was dropped still exists on the source side: keep it, empty.
-    for top, value in source.items():
-        if isinstance(value, dict) and not is_machine_key(top, machine_keys):
-            merged.setdefault(top, {})
+    # Flattening loses empty objects: keep the source's synced ones and the target's own, empty.
+    for side, wanted in ((source, True), (target, False)):
+        for top, value in side.items():
+            if isinstance(value, dict) and synced(top) == wanted:
+                merged.setdefault(top, {})
     return merged
+
+
+def parse_settings(text: str, where: str) -> dict:
+    match json.loads(text):
+        case dict() as settings:
+            return settings
+        case _:
+            raise RuntimeError(f"{where} is not a JSON object")
+
+
+def settings_json(settings: dict) -> str:
+    return json.dumps(settings, indent=2, ensure_ascii=False) + "\n"
+
+
+def sync_settings_file(
+    host: Machine, path: str, source: dict, synced: Callable[[str], bool], what: str, apply: bool, report: Report
+) -> None:
+    """Bring the `synced` keys of a host's settings file in line with `source`. `what` names them in the report."""
+    theirs_text = host.read(path)
+    theirs = parse_settings(theirs_text, f"{host.name}: ~/{path}") if theirs_text is not None else {}
+    merged = merge_settings(source, theirs, synced)
+    before, after = flatten(theirs), flatten(merged)
+    changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+    if not changed:
+        report.ok(f"{host.name}: {what} identical")
+        return
+    # Key names only: values include secrets.
+    report.drift(f"{host.name}: {', '.join(changed)}", apply)
+    if apply:
+        if theirs_text is None:
+            host.run(["sh", "-c", 'mkdir -p "$(dirname "$1")"', "sh", path])
+        backup = host.write(path, settings_json(merged))
+        report.fixed(f"{host.name}: copied {len(changed)} key(s){kept(backup)}")
 
 
 def sync_settings(machines: list[Machine], config: Config, apply: bool, report: Report) -> None:
@@ -622,23 +677,9 @@ def sync_settings(machines: list[Machine], config: Config, apply: bool, report: 
         if text is None:
             report.note(f"none on {machines[0].name}")
             continue
-        source = json.loads(text)
+        source = parse_settings(text, f"{machines[0].name}: ~/{path}")
         for host in machines[1:]:
-            theirs_text = host.read(path)
-            theirs = json.loads(theirs_text) if theirs_text is not None else {}
-            merged = merge_settings(source, theirs, config.machine_settings)
-            before, after = flatten(theirs), flatten(merged)
-            changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
-            if not changed:
-                report.ok(f"{host.name}: shared keys identical")
-                continue
-            # Key names only: values include secrets.
-            report.drift(f"{host.name}: {', '.join(changed)}", apply)
-            if apply:
-                if theirs_text is None:
-                    host.run(["sh", "-c", 'mkdir -p "$(dirname "$1")" && touch "$1"', "sh", path])
-                backup = host.write(path, json.dumps(merged, indent=2) + "\n")
-                report.fixed(f"{host.name}: copied {len(changed)} key(s){kept(backup)}")
+            sync_settings_file(host, path, source, shared_keys(config.machine_settings), "shared keys", apply, report)
 
 
 # --- reported only ---
