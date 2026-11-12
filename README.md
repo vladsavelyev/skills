@@ -12,6 +12,7 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 | [fleet](plugins/fleet) | Keep the per-user Claude Code setup (version, skill repos, plugins, `~/.claude/CLAUDE.md`, settings) the same on every machine I work from. Moved from navari-stack's `nstack fleet`. |
 | [bro](plugins/bro) | `/bro`: restate the last message in plain human language, with no jargon. From [cursor/plugins](https://github.com/cursor/plugins)' pstack (MIT, © Lauren Tan). |
 | [cdt](plugins/cdt) | The `cdt` MCP (chrome-devtools-mcp) in every project, on the shared profile `nstack login` signs in. |
+| [unslop](plugins/unslop) | `/unslop`: cut AI tells (filler, AI vocabulary, em dashes, jargon, passive voice) from any writing. From pstack (MIT, © Lauren Tan). |
 
 ## Agent rules
 

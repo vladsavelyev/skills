@@ -41,6 +41,11 @@
       "name": "cdt",
       "description": "The cdt MCP (chrome-devtools-mcp) in every project: an agent's own Chrome with console, network and performance tools.",
       "source": "./plugins/cdt"
+    },
+    {
+      "name": "unslop",
+      "description": "/unslop: cut AI tells from any writing.",
+      "source": "./plugins/unslop"
     }
   ]
 }
