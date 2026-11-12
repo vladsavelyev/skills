@@ -46,6 +46,49 @@
       "name": "unslop",
       "description": "/unslop: cut AI tells from any writing.",
       "source": "./plugins/unslop"
+    },
+    {
+      "name": "mattpocock-skills",
+      "description": "Matt Pocock's skills (grilling, spec/ticket flows, TDD, domain modelling and more), from upstream, without code-review: ship's review already covers it.",
+      "author": {
+        "name": "Matt Pocock",
+        "url": "https://www.aihero.dev"
+      },
+      "homepage": "https://github.com/mattpocock/skills",
+      "license": "MIT",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/mattpocock/skills.git",
+        "path": "skills"
+      },
+      "skills": [
+        "./engineering/ask-matt",
+        "./engineering/diagnosing-bugs",
+        "./engineering/grill-with-docs",
+        "./engineering/triage",
+        "./engineering/improve-codebase-architecture",
+        "./engineering/setup-matt-pocock-skills",
+        "./engineering/tdd",
+        "./engineering/to-spec",
+        "./engineering/to-tickets",
+        "./engineering/wayfinder",
+        "./engineering/implement",
+        "./engineering/implement-spec",
+        "./engineering/prototype",
+        "./engineering/research",
+        "./engineering/domain-modeling",
+        "./engineering/codebase-design",
+        "./engineering/pr",
+        "./engineering/retro",
+        "./engineering/wizard",
+        "./productivity/grill-me",
+        "./productivity/grilling",
+        "./productivity/handoff",
+        "./productivity/teach",
+        "./productivity/to-questionnaire",
+        "./productivity/wait-what",
+        "./productivity/writing-for-agents"
+      ]
     }
   ]
 }

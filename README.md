@@ -13,6 +13,7 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 | [bro](plugins/bro) | `/bro`: restate the last message in plain human language, with no jargon. From [cursor/plugins](https://github.com/cursor/plugins)' pstack (MIT, © Lauren Tan). |
 | [cdt](plugins/cdt) | The `cdt` MCP (chrome-devtools-mcp) in every project, on the shared profile `nstack login` signs in. |
 | [unslop](plugins/unslop) | `unslop`: cut AI tells (filler, AI vocabulary, em dashes, jargon, passive voice) from any writing, typed as `/unslop` or picked up by the agent when it writes prose for people. Adapted from pstack (MIT, © Lauren Tan). |
+| [mattpocock-skills](https://github.com/mattpocock/skills) | Matt Pocock's skills (MIT, © Matt Pocock), loaded from his repo, minus `code-review`: ship's Sol review already carries its Spec and Design axes, and its description competes with ship and the built-in `/code-review` for "review this PR". A plugin's skills can't be switched off one by one, so the entry lists the rest itself. A skill he adds upstream shows up here only once it's added to the list. |
 
 ## Agent rules
 
@@ -51,3 +52,8 @@ plugin without a `version` is versioned by commit, so every push counts as an up
 To list a plugin that lives in another repo, use its HTTPS URL (`"source": "url"`), not the
 `github` shorthand: plugin updates clone the shorthand over SSH, which fails where there's no
 GitHub key.
+
+To list another repo's plugin with some of its skills left out, point `"source": "git-subdir"` at the
+directory holding its skills and list the ones to keep in the entry's `skills`, as
+`mattpocock-skills` does. The fetched directory then has no `plugin.json`, so the entry is the whole
+manifest; an entry's `skills` can only add to a `plugin.json`, never remove from it.
