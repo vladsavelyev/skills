@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet import setkey, shell, sync, validators
+from fleet import mirrors, setkey, shell, sync, validators
 
 SECRET = "s3cret-value-1234"
 
@@ -57,7 +57,7 @@ def _homes(machines) -> list:
 
 
 def test_set_writes_the_key_everywhere_and_only_that_key(fleet, capsys):
-    assert setkey.set_key(fleet, "env.KEY", SECRET) == 0
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 0
     here, a, b = (_settings(h) for h in _homes(fleet))
     assert here == {"env": {"KEY": SECRET, "OTHER": "laptop"}, "model": "opus", "statusLine": {"command": "x"}}
     assert a == b == {"env": {"KEY": SECRET, "OTHER": "host", "DISPLAY": ":99"}, "model": "sonnet"}
@@ -72,33 +72,33 @@ def test_set_writes_the_key_everywhere_and_only_that_key(fleet, capsys):
 
 
 def test_set_to_the_current_value_writes_nothing(fleet):
-    setkey.set_key(fleet, "env.KEY", SECRET)
+    setkey.set_key(fleet, "env.KEY", SECRET, [])
     for home in _homes(fleet):
         for backup in (home / ".claude").glob("settings.json.bak-*"):
             backup.unlink()
-    assert setkey.set_key(fleet, "env.KEY", SECRET) == 0
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 0
     for home in _homes(fleet):
         assert not list((home / ".claude").glob("settings.json.bak-*"))
 
 
 def test_set_a_new_top_level_key_creates_it(fleet):
-    assert setkey.set_key(fleet, "apiKeyHelper", SECRET) == 0
+    assert setkey.set_key(fleet, "apiKeyHelper", SECRET, []) == 0
     assert all(_settings(h)["apiKeyHelper"] == SECRET for h in _homes(fleet))
 
 
 def test_set_creates_a_missing_settings_file_on_a_host(fleet):
     (fleet[2].home / sync.SETTINGS_JSON).unlink()
-    assert setkey.set_key(fleet, "env.KEY", SECRET) == 0
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 0
     assert _settings(fleet[2].home) == {"env": {"KEY": SECRET}}
 
 
 def test_a_host_that_fails_is_reported_and_the_others_still_get_the_value(fleet, capsys):
     (fleet[1].home / sync.SETTINGS_JSON).write_text("{ not json")
-    assert setkey.set_key(fleet, "env.KEY", SECRET) == 1
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 1
     assert _settings(fleet[2].home)["env"]["KEY"] == SECRET
     out = capsys.readouterr().out
     assert "FAILED  u@a: " in out
-    assert "  ok      u@b\n" in out
+    assert "  ok      u@b: env.KEY\n" in out
     assert "Failed on u@a:" in out
     assert SECRET not in out
 
@@ -109,7 +109,7 @@ def test_a_rejected_value_is_written_nowhere(fleet, monkeypatch, capsys):
 
     monkeypatch.setitem(validators.VALIDATORS, "env.KEY", reject)
     with pytest.raises(validators.Rejected, match="401"):
-        setkey.set_key(fleet, "env.KEY", SECRET)
+        setkey.set_key(fleet, "env.KEY", SECRET, [])
     for home in _homes(fleet):
         assert _settings(home)["env"]["KEY"] == "old"
         assert not list((home / ".claude").glob("settings.json.bak-*"))
@@ -119,7 +119,7 @@ def test_a_rejected_value_is_written_nowhere(fleet, monkeypatch, capsys):
 def test_a_validator_gets_the_value_and_this_machines_settings(fleet, monkeypatch, capsys):
     seen = []
     monkeypatch.setitem(validators.VALIDATORS, "env.KEY", lambda value, settings: seen.append((value, settings)))
-    assert setkey.set_key(fleet, "env.KEY", SECRET) == 0
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 0
     assert seen == [
         (SECRET, {"env": {"KEY": "old", "OTHER": "laptop"}, "model": "opus", "statusLine": {"command": "x"}})
     ]
@@ -128,11 +128,11 @@ def test_a_validator_gets_the_value_and_this_machines_settings(fleet, monkeypatc
 
 @pytest.mark.parametrize(
     ("key", "error"),
-    [("statusLine", "is a dict, not a string"), ("model.x", "`model` in .* is not an object")],
+    [("statusLine", "is of type dict, not a string"), ("model.x", "`model` in .* is not an object")],
 )
 def test_set_refuses_to_replace_what_is_not_a_string(fleet, key, error):
     with pytest.raises(RuntimeError, match=error):
-        setkey.set_key(fleet, key, SECRET)
+        setkey.set_key(fleet, key, SECRET, [])
 
 
 def test_check_key_refuses_a_machine_key_and_a_malformed_path():
@@ -166,6 +166,89 @@ def test_read_value_from_a_terminal_prompts_without_echo(monkeypatch):
     monkeypatch.setattr("sys.stdin", Terminal())
     monkeypatch.setattr("getpass.getpass", lambda prompt: SECRET)
     assert setkey.read_value("env.KEY") == SECRET
+
+
+# --- mirrors: copies of the value in other files ---
+
+CODEX = """model = "gpt"
+
+[model_providers.azure]
+base_url = "https://gateway.example/openai"
+http_headers = { "api-key" = "old" }  # the gateway key
+query_params = { api-version = "2025" }
+"""
+MIRROR = mirrors.Mirror("env.KEY", ".codex/config.toml", "model_providers.azure.http_headers.api-key")
+
+
+def _codex(home, text: str | None = CODEX):
+    path = home / MIRROR.file
+    if text is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return path
+
+
+def test_set_updates_the_mirrors_on_every_machine_and_nothing_else_in_them(fleet, capsys):
+    for home in _homes(fleet):
+        _codex(home)
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [MIRROR]) == 0
+    for home in _homes(fleet):
+        assert _codex(home, None).read_text() == CODEX.replace('"old"', f'"{SECRET}"')
+        [backup] = (home / ".codex").glob("config.toml.bak-*")
+        assert backup.read_text() == CODEX
+    out = capsys.readouterr().out
+    assert SECRET not in out
+    assert out.count(f"  ok      u@a: {MIRROR}\n") == 1
+    assert out.count(f"  ok      this machine: {MIRROR}\n") == 1
+
+
+def test_a_machine_without_the_mirror_file_is_skipped(fleet, capsys):
+    _codex(Path.home())
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [MIRROR]) == 0
+    assert "u@a: no ~/.codex/config.toml" in capsys.readouterr().out
+    assert not (fleet[1].home / MIRROR.file).exists()
+
+
+def test_a_mirror_file_without_the_key_fails_that_machine_only(fleet, capsys):
+    for home in _homes(fleet):
+        _codex(home)
+    _codex(fleet[1].home, 'model = "gpt"\n')
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [MIRROR]) == 1
+    assert _settings(fleet[1].home)["env"]["KEY"] == SECRET
+    assert SECRET in _codex(fleet[2].home, None).read_text()
+    out = capsys.readouterr().out
+    assert "FAILED  u@a: ~/.codex/config.toml: model_providers.azure.http_headers.api-key is not there" in out
+    assert "Failed on u@a:" in out
+
+
+def test_mirror_with_value_keeps_a_literal_string_style_file_otherwise_intact():
+    text = "[a]\n# note\nkey = 'old'\nother = 'old-ish'\n"
+    assert mirrors.with_value(text, "a.key", "new", "f") == "[a]\n# note\nkey = \"new\"\nother = 'old-ish'\n"
+    assert mirrors.with_value(text, "a.key", "old", "f") == text
+
+
+def test_mirror_with_value_refuses_a_value_written_twice():
+    with pytest.raises(RuntimeError, match="written 2 times"):
+        mirrors.with_value('a = "old"\nb = "old"\n', "a", "new", "f")
+
+
+def test_mirror_with_value_refuses_what_is_not_a_string():
+    with pytest.raises(RuntimeError, match="is of type int, not a string"):
+        mirrors.with_value("a = 1\n", "a", "new", "f")
+
+
+def test_load_config_reads_mirrors():
+    sync.CONFIG_PATH.parent.mkdir(parents=True)
+    sync.CONFIG_PATH.write_text(
+        'hosts = ["u@h"]\n[[mirrors]]\nsetting = "env.KEY"\nfile = ".codex/config.toml"\n'
+        'key = "model_providers.azure.http_headers.api-key"\n'
+    )
+    assert sync.load_config().mirrors == [MIRROR]
+
+
+def test_a_mirror_must_be_toml():
+    with pytest.raises(RuntimeError, match="only TOML"):
+        mirrors.Mirror("env.KEY", ".config/x.json", "a")
 
 
 # --- the gateway validator, against a local stand-in for the gateway ---

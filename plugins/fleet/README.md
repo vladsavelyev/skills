@@ -20,6 +20,11 @@ machine_settings = ["env.DISPLAY", "hooks.Stop", "statusLine"]  # settings keys 
 machine_skills = ["dev-browser"]                                # ~/.claude/skills entries that stay here
 helpers = ["git-pr-context"]                                    # commands the hooks and statusline call
 agents_md = ".claude/plugins/marketplaces/vlad-skills/agents/AGENTS.md"  # optional, see below
+
+[[mirrors]]  # optional: another file holding a copy of a settings value, see `fleet set`
+setting = "env.AWS_BEARER_TOKEN_BEDROCK"
+file = ".codex/config.toml"
+key = "model_providers.azure.http_headers.api-key"
 ```
 
 What it covers:
@@ -73,9 +78,13 @@ and from a no-echo prompt otherwise, and never prints it. Then:
    output says so.
 2. **Writes** it to this machine's `~/.claude/settings.json` (with a `.bak-<timestamp>` copy), then
    pushes that key, and no other, to every host through the same settings sync `fleet --apply` uses.
-3. **Verifies** by reading the key back on every machine and comparing sha256 prefixes: `ok` or
-   `FAILED` per machine, exit 1 if any failed. Running it again with the same value only pushes
-   to the hosts that lack it.
+   It also updates the key's `mirrors`: copies of the same value in other files, like the AI Gateway
+   key Codex sends from `~/.codex/config.toml`. A mirror is a TOML file and a dotted key in it that
+   already holds a string. Only that string literal is replaced (the stdlib can't write TOML), and the
+   file is parsed back to check nothing else changed. A machine without the file is skipped.
+3. **Verifies** by reading the key and its mirrors back on every machine and comparing sha256
+   prefixes: `ok` or `FAILED` for each, exit 1 if any failed. Running it again with the same value
+   only writes where it's missing.
 
 Not covered, by hand:
 

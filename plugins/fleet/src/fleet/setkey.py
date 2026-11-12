@@ -3,15 +3,20 @@
 The value comes from stdin, or a prompt that doesn't echo it, and is never printed: the report shows
 key names and a sha256 prefix only. It's validated first when the key has a validator (VALIDATORS),
 written here with a `.bak-<timestamp>` copy of the old file, pushed to the hosts through the
-settings sync with only that key selected, and read back from every machine to compare hashes.
+settings sync with only that key selected, and read back from every machine to compare hashes. The
+key's mirrors (copies in other files, e.g. Codex's config: mirrors.py) get the value on every machine
+too, and are checked the same way.
 """
 
 import getpass
 import hashlib
 import json
 import sys
+from collections.abc import Callable
+from functools import partial
 
-from . import validators
+from . import mirrors, validators
+from .mirrors import Mirror
 from .sync import (
     SETTINGS_JSON,
     Config,
@@ -31,7 +36,8 @@ def run(key: str) -> int:
     config = load_config()
     check_key(key, config)
     value = read_value(key)
-    return set_key([Machine(None), *(Machine(h) for h in config.hosts)], key, value)
+    machines = [Machine(None), *(Machine(h) for h in config.hosts)]
+    return set_key(machines, key, value, [m for m in config.mirrors if m.setting == key])
 
 
 def check_key(key: str, config: Config) -> None:
@@ -67,7 +73,7 @@ def with_value(settings: dict, key: str, value: str) -> dict:
         case dict() as parent:
             what = type(parent[name]).__name__
             raise RuntimeError(
-                f"`{key}` in ~/{SETTINGS_JSON} is a {what}, not a string: `fleet set` only replaces strings"
+                f"`{key}` in ~/{SETTINGS_JSON} is of type {what}, not a string: `fleet set` only replaces strings"
             )
         case _:
             raise RuntimeError(f"`{top}` in ~/{SETTINGS_JSON} is not an object, so it has no `{sub}`")
@@ -84,17 +90,64 @@ def read_settings(machine: Machine) -> dict:
     return json.loads(text)
 
 
-def set_key(machines: list[Machine], key: str, value: str) -> int:
-    """`machines[0]` is this machine, the source; the rest are the hosts."""
-    here = machines[0]
-    report = Report()
-    failed: set[str] = set()
+def set_mirror(machine: Machine, mirror: Mirror, value: str, report: Report) -> None:
+    text = machine.read(mirror.file)
+    if text is None:
+        report.note(f"{machine.name}: no ~/{mirror.file}, so no {mirror.key} to update")
+        return
+    new = mirrors.with_value(text, mirror.key, value, f"{machine.name}: ~/{mirror.file}")
+    if new == text:
+        report.ok(f"{machine.name}: {mirror} identical")
+        return
+    backup = machine.write(mirror.file, new)
+    report.fixed(f"{machine.name}: set {mirror}{kept(backup)}")
 
-    def fail(machine: Machine, text: str) -> None:
-        failed.add(machine.name)
+
+class Rollout:
+    """One value going to every machine: what failed where, and the hash it's checked by."""
+
+    def __init__(self, value: str):
+        self.value = value
+        self.want = fingerprint(value)
+        self.report = Report()
+        self.failed: set[str] = set()
+
+    def fail(self, machine: Machine, text: str) -> None:
+        self.failed.add(machine.name)
         # A Machine's own errors already start with its name.
-        report.failed(f"{machine.name}: {text.removeprefix(f'{machine.name}: ')}")
+        self.report.failed(f"{machine.name}: {text.removeprefix(f'{machine.name}: ')}")
 
+    def attempt(self, machine: Machine, step: Callable[[], None]) -> None:
+        """Run one machine's step; a failure is that machine's, and the others still get theirs."""
+        try:
+            step()
+        except (RuntimeError, ValueError) as exc:
+            self.fail(machine, str(exc))
+
+    def check(self, machine: Machine, label: str, there: object) -> None:
+        if there == self.value:
+            self.report.ok(f"{machine.name}: {label}")
+        elif there is None:
+            self.fail(machine, f"has no {label}")
+        else:
+            got = fingerprint(there) if isinstance(there, str) else type(there).__name__
+            self.fail(machine, f"{label} has sha256 {got}…, not {self.want}…")
+
+    def verify(self, machine: Machine, key: str, copies: list[Mirror]) -> None:
+        self.check(machine, key, flatten(read_settings(machine)).get(key))
+        for mirror in copies:
+            text = machine.read(mirror.file)
+            if text is None:
+                self.report.note(f"{machine.name}: no ~/{mirror.file}")
+            else:
+                self.check(machine, str(mirror), mirrors.value_in(text, mirror.key))
+
+
+def set_key(machines: list[Machine], key: str, value: str, copies: list[Mirror]) -> int:
+    """`machines[0]` is this machine, the source; the rest are the hosts. `copies` are the key's mirrors."""
+    here = machines[0]
+    rollout = Rollout(value)
+    report = rollout.report
     settings = read_settings(here)
     updated = with_value(settings, key, value)
 
@@ -106,37 +159,28 @@ def set_key(machines: list[Machine], key: str, value: str) -> int:
         validator(value, settings)
         report.ok(f"{key}: accepted by {validator.__name__}")
 
-    report.section(f"Write {key} to ~/{SETTINGS_JSON}")
+    report.section(f"Write {key}" + "".join(f", {m}" for m in copies))
     if updated == settings:
-        report.ok(f"{here.name}: already set to this value")
+        report.ok(f"{here.name}: {key} already set to this value")
     else:
         backup = here.write(SETTINGS_JSON, settings_json(updated))
         report.fixed(f"{here.name}: set {key}{kept(backup)}")
-    for host in machines[1:]:
-        try:
-            sync_settings_file(host, SETTINGS_JSON, updated, lambda k: k == key, key, True, report)
-        except (RuntimeError, ValueError) as exc:
-            fail(host, str(exc))
-
-    want = fingerprint(value)
-    report.section(f"Verify: {key} has sha256 {want}… on every machine")
     for machine in machines:
-        try:
-            there = flatten(read_settings(machine)).get(key)
-        except (RuntimeError, ValueError) as exc:
-            fail(machine, str(exc))
-            continue
-        if there == value:
-            report.ok(machine.name)
-        elif there is None:
-            fail(machine, f"has no {key}")
-        else:
-            got = fingerprint(there) if isinstance(there, str) else type(there).__name__
-            fail(machine, f"{key} has sha256 {got}…, not {want}…")
+        if machine is not here:
+            rollout.attempt(
+                machine,
+                partial(sync_settings_file, machine, SETTINGS_JSON, updated, lambda k: k == key, key, True, report),
+            )
+        for mirror in copies:
+            rollout.attempt(machine, partial(set_mirror, machine, mirror, value, report))
+
+    report.section(f"Verify: sha256 {rollout.want}… on every machine")
+    for machine in machines:
+        rollout.attempt(machine, partial(rollout.verify, machine, key, copies))
 
     print()
-    if failed:
-        print(f"Failed on {', '.join(sorted(failed))}: run `fleet set {key}` again once fixed")
+    if rollout.failed:
+        print(f"Failed on {', '.join(sorted(rollout.failed))}: run `fleet set {key}` again once fixed")
         return 1
     print(f"{key} is set on every machine.")
     return 0

@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from .mirrors import Mirror
 from .shell import out, run, try_out
 
 CONFIG_PATH = Path.home() / ".config" / "fleet" / "config.toml"
@@ -55,6 +56,8 @@ class Config:
     helpers: list[str] = field(default_factory=list)
     # Home-relative path of the agent instructions every machine's CLAUDE.md imports and Codex reads.
     agents_md: str | None = None
+    # Other files holding a copy of a settings value, which `fleet set` updates with it (mirrors.py).
+    mirrors: list[Mirror] = field(default_factory=list)
 
 
 def load_config() -> Config:
@@ -67,7 +70,8 @@ def load_config() -> Config:
             '  helpers = ["git-pr-context"]                       # commands the hooks/statusline call\n'
             '  agents_md = ".claude/plugins/marketplaces/<m>/agents/AGENTS.md"  # optional, see README'
         )
-    config = Config(**tomllib.loads(CONFIG_PATH.read_text()))
+    raw = tomllib.loads(CONFIG_PATH.read_text())
+    config = Config(**{**raw, "mirrors": [Mirror(**m) for m in raw.get("mirrors", [])]})
     if not config.hosts:
         raise RuntimeError(f"{CONFIG_PATH}: `hosts` is empty, so there is no fleet to sync")
     return config
