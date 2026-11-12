@@ -103,6 +103,38 @@ def test_a_host_that_fails_is_reported_and_the_others_still_get_the_value(fleet,
     assert SECRET not in out
 
 
+def test_a_host_whose_settings_are_not_an_object_fails_alone(fleet, capsys):
+    (fleet[1].home / sync.SETTINGS_JSON).write_text("[]")
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 1
+    assert _settings(fleet[2].home)["env"]["KEY"] == SECRET
+    assert "FAILED  u@a: ~/.claude/settings.json is not a JSON object" in capsys.readouterr().out
+
+
+def test_an_edit_made_while_validating_is_kept(fleet, monkeypatch):
+    def edit_meanwhile(value, settings):
+        _settings(Path.home(), {**settings, "theme": "dark"})
+
+    monkeypatch.setitem(validators.VALIDATORS, "env.KEY", edit_meanwhile)
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 0
+    assert _settings(Path.home())["theme"] == "dark"
+    assert _settings(Path.home())["env"]["KEY"] == SECRET
+
+
+def test_set_keeps_a_private_files_mode(fleet):
+    for home in _homes(fleet):
+        (home / sync.SETTINGS_JSON).chmod(0o600)
+    (fleet[2].home / sync.SETTINGS_JSON).unlink()
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 0
+    for home in _homes(fleet):
+        assert (home / sync.SETTINGS_JSON).stat().st_mode & 0o777 == 0o600
+
+
+def test_set_keeps_a_hosts_unrelated_empty_objects(fleet):
+    _settings(fleet[1].home, {"env": {"KEY": "old"}, "permissions": {}})
+    assert setkey.set_key(fleet, "env.KEY", SECRET, []) == 0
+    assert _settings(fleet[1].home) == {"env": {"KEY": SECRET}, "permissions": {}}
+
+
 def test_a_rejected_value_is_written_nowhere(fleet, monkeypatch, capsys):
     def reject(value, settings):
         raise validators.Rejected("HTTP 401: bad key")
@@ -151,11 +183,16 @@ def test_read_value_from_stdin_drops_the_final_newline(monkeypatch):
     assert setkey.read_value("env.KEY") == SECRET
 
 
-@pytest.mark.parametrize(("given", "error"), [("", "no value"), ("\n", "no value"), ("a\nb\n", "several lines")])
-def test_read_value_refuses_an_empty_or_multi_line_value(monkeypatch, given, error):
+@pytest.mark.parametrize("given", ["", "\n"])
+def test_read_value_refuses_an_empty_value(monkeypatch, given):
     monkeypatch.setattr("sys.stdin", io.StringIO(given))
-    with pytest.raises(RuntimeError, match=error):
+    with pytest.raises(RuntimeError, match="no value"):
         setkey.read_value("env.KEY")
+
+
+def test_read_value_keeps_a_multi_line_value(monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO("a\nb\n"))
+    assert setkey.read_value("env.KEY") == "a\nb"
 
 
 def test_read_value_from_a_terminal_prompts_without_echo(monkeypatch):
@@ -262,7 +299,14 @@ def gateway():
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             calls.append((self.path, self.headers["Authorization"], body))
-            ok = self.headers["Authorization"] == f"Bearer {SECRET}"
+            if self.path.startswith("/moved/"):
+                # A redirect to somewhere that answers 200 whatever the key.
+                self.send_response(307)
+                self.send_header("Location", self.path.replace("/moved/", "/open/", 1))
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            ok = self.path.startswith("/open/") or self.headers["Authorization"] == f"Bearer {SECRET}"
             answer = b'{"content": []}' if ok else f'{{"message": "bad key {self.headers["Authorization"]}"}}'.encode()
             self.send_response(200 if ok else 401)
             self.send_header("Content-Length", str(len(answer)))
@@ -274,7 +318,7 @@ def gateway():
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}/bedrock", calls
+    yield f"http://127.0.0.1:{server.server_port}", calls
     server.shutdown()
 
 
@@ -284,7 +328,7 @@ def _gateway_settings(base: str) -> dict:
 
 def test_gateway_validator_makes_one_tiny_call_with_the_new_key(gateway):
     base, calls = gateway
-    validators.bedrock_gateway(SECRET, _gateway_settings(base))
+    validators.bedrock_gateway(SECRET, _gateway_settings(base + "/bedrock"))
     [(path, auth, body)] = calls
     assert path == "/bedrock/model/us.anthropic.claude-x/invoke"
     assert auth == f"Bearer {SECRET}"
@@ -293,10 +337,21 @@ def test_gateway_validator_makes_one_tiny_call_with_the_new_key(gateway):
 
 def test_gateway_validator_rejects_a_bad_key_without_showing_it(gateway):
     base, _ = gateway
-    with pytest.raises(validators.Rejected, match="HTTP 401") as exc:
-        validators.bedrock_gateway("wrong-key", _gateway_settings(base))
+    with pytest.raises(validators.Rejected, match="HTTP 401$") as exc:
+        validators.bedrock_gateway("wrong-key", _gateway_settings(base + "/bedrock"))
     assert "wrong-key" not in str(exc.value)
-    assert "<new value>" in str(exc.value)
+
+
+def test_gateway_validator_does_not_follow_a_redirect(gateway):
+    base, calls = gateway
+    with pytest.raises(validators.Rejected, match="HTTP 307"):
+        validators.bedrock_gateway("wrong-key", _gateway_settings(base + "/moved"))
+    assert [path for path, _, _ in calls] == ["/moved/model/us.anthropic.claude-x/invoke"]
+
+
+def test_gateway_validator_rejects_a_multi_line_key_before_calling():
+    with pytest.raises(validators.Rejected, match="several lines"):
+        validators.bedrock_gateway("a\nb", {})
 
 
 def test_gateway_validator_without_the_gateway_settings_refuses():

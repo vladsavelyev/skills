@@ -122,6 +122,8 @@ class Machine:
         backup = f"{path}.bak-{datetime.now().astimezone():%Y%m%d%H%M%S}"
         script = (
             'set -e; if [ -f "$1" ] && [ ! -L "$1" ]; then cp -p "$1" "$2"; echo kept; fi; '
+            # The new file gets the old one's mode (settings files are often 0600), or the user's alone.
+            'if [ -f "$1" ]; then cp -p "$1" "$1.fleet-new"; else umask 077; fi; '
             'cat > "$1.fleet-new"; mv "$1.fleet-new" "$1"'
         )
         proc = self.run(["sh", "-c", script, "sh", path, backup], input=text)
@@ -624,11 +626,20 @@ def merge_settings(source: dict, target: dict, synced: Callable[[str], bool]) ->
             merged.setdefault(top, {})[sub] = value
         else:
             merged[key] = value
-    # An object whose every member was dropped still exists on the source side: keep it, empty.
-    for top, value in source.items():
-        if isinstance(value, dict) and synced(top):
-            merged.setdefault(top, {})
+    # Flattening loses empty objects: keep the source's synced ones and the target's own, empty.
+    for side, wanted in ((source, True), (target, False)):
+        for top, value in side.items():
+            if isinstance(value, dict) and synced(top) == wanted:
+                merged.setdefault(top, {})
     return merged
+
+
+def parse_settings(text: str, where: str) -> dict:
+    match json.loads(text):
+        case dict() as settings:
+            return settings
+        case _:
+            raise RuntimeError(f"{where} is not a JSON object")
 
 
 def settings_json(settings: dict) -> str:
@@ -640,7 +651,7 @@ def sync_settings_file(
 ) -> None:
     """Bring the `synced` keys of a host's settings file in line with `source`. `what` names them in the report."""
     theirs_text = host.read(path)
-    theirs = json.loads(theirs_text) if theirs_text is not None else {}
+    theirs = parse_settings(theirs_text, f"{host.name}: ~/{path}") if theirs_text is not None else {}
     merged = merge_settings(source, theirs, synced)
     before, after = flatten(theirs), flatten(merged)
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
@@ -651,7 +662,7 @@ def sync_settings_file(
     report.drift(f"{host.name}: {', '.join(changed)}", apply)
     if apply:
         if theirs_text is None:
-            host.run(["sh", "-c", 'mkdir -p "$(dirname "$1")" && touch "$1"', "sh", path])
+            host.run(["sh", "-c", 'mkdir -p "$(dirname "$1")"', "sh", path])
         backup = host.write(path, settings_json(merged))
         report.fixed(f"{host.name}: copied {len(changed)} key(s){kept(backup)}")
 
@@ -663,7 +674,7 @@ def sync_settings(machines: list[Machine], config: Config, apply: bool, report: 
         if text is None:
             report.note(f"none on {machines[0].name}")
             continue
-        source = json.loads(text)
+        source = parse_settings(text, f"{machines[0].name}: ~/{path}")
         for host in machines[1:]:
             sync_settings_file(host, path, source, shared_keys(config.machine_settings), "shared keys", apply, report)
 

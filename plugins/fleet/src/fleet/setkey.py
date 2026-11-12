@@ -26,6 +26,7 @@ from .sync import (
     is_machine_key,
     kept,
     load_config,
+    parse_settings,
     settings_json,
     sync_settings_file,
 )
@@ -56,8 +57,6 @@ def read_value(key: str) -> str:
         value = sys.stdin.read().removesuffix("\n").removesuffix("\r")
     if not value:
         raise RuntimeError(f"no value given for {key}")
-    if "\n" in value or "\r" in value:
-        raise RuntimeError(f"the value given for {key} spans several lines: give it on one")
     return value
 
 
@@ -87,7 +86,7 @@ def read_settings(machine: Machine) -> dict:
     text = machine.read(SETTINGS_JSON)
     if text is None:
         raise RuntimeError(f"{machine.name} has no ~/{SETTINGS_JSON}")
-    return json.loads(text)
+    return parse_settings(text, f"{machine.name}: ~/{SETTINGS_JSON}")
 
 
 def set_mirror(machine: Machine, mirror: Mirror, value: str, report: Report) -> None:
@@ -158,6 +157,9 @@ def set_key(machines: list[Machine], key: str, value: str, copies: list[Mirror])
     else:
         validator(value, settings)
         report.ok(f"{key}: accepted by {validator.__name__}")
+        # Validating takes a while: build on the file as it is now, not as it was before.
+        settings = read_settings(here)
+        updated = with_value(settings, key, value)
 
     report.section(f"Write {key}" + "".join(f", {m}" for m in copies))
     if updated == settings:
