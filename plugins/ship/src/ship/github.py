@@ -171,7 +171,8 @@ def set_pr_block(pr: int, quote: str, issue: int) -> bool:
 
 def set_pr_description(pr: int, text: str, title: str | None, quote: str) -> None:
     """Replace the PR's description with `text` (and its title with `title`), with ship's block
-    set to `quote` below it."""
+    set to `quote` below it. `text` may carry the block already (the body fetched and edited): the
+    PR still ends up with exactly one (`prbody.with_description`)."""
     cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
     if title:
         cmd += ["--title", title]

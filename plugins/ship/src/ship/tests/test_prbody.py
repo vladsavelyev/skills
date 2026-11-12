@@ -1,5 +1,7 @@
 """Ship's block in a PR body: only what is between its tags is ever rewritten."""
 
+import pytest
+
 from ship import prbody
 
 SIG = "🤖 Claude Opus 5.5 in Claude Code (T3 Code)"
@@ -29,14 +31,55 @@ def test_writing_the_same_block_changes_nothing():
     assert prbody.with_block(body, QUOTE, 7) == body
 
 
-def test_description_is_taken_as_written_with_the_block_below():
+def test_description_gets_the_block_below_it():
     assert prbody.with_description(f"New.\n\n{SIG}", QUOTE) == f"New.\n\n{_block()}\n\n{SIG}\n"
-    # Even when it quotes ship's tags or its old reference line (a PR about ship).
-    quoted = "Looks like:\n\n```\n<!-- ship -->\nexample\n<!-- /ship -->\nCloses #42 <!-- ship -->\n```"
-    body = prbody.with_description(quoted, QUOTE)
-    assert body == f"{quoted}\n\n{_block()}\n"
-    # Later writes change ship's block, the last one, never the example above it.
-    assert prbody.with_block(body, "> new", 7) == f"{quoted}\n\n{_block('> new')}\n"
+    assert prbody.with_description("New.", QUOTE) == f"New.\n\n{_block()}\n"
+
+
+def test_a_description_passed_back_with_its_block_keeps_one():
+    # The round-trip that produced two blocks on navari#4727: fetch the body, add a paragraph, pass
+    # the whole body back. The old block is dropped and the fresh one placed above the signature.
+    fetched = f"Why.\n\n{_block('> old')}\n\n{SIG}\n"
+    edited = fetched.replace("Why.", "Why.\n\nA paragraph added later.")
+    assert prbody.with_description(edited, QUOTE) == f"Why.\n\nA paragraph added later.\n\n{_block()}\n\n{SIG}\n"
+    # Without a signature, and with the block in a different place, or twice.
+    assert prbody.with_description(f"Why.\n\n{_block('> old')}\n\nMore.", QUOTE) == f"Why.\n\nMore.\n\n{_block()}\n"
+    twice = f"{_block('> a')}\n\nWhy.\n\n{_block('> b')}\n\n{SIG}"
+    assert prbody.with_description(twice, QUOTE) == f"Why.\n\n{_block()}\n\n{SIG}\n"
+    # Under the legacy name too.
+    legacy = "Why.\n\n<!-- ship:assessment -->\n> old\n<!-- /ship:assessment -->\n"
+    assert prbody.with_description(legacy, QUOTE) == f"Why.\n\n{_block()}\n"
+
+
+def test_several_blocks_merge_into_one_at_the_last_ones_place():
+    body = f"{_block('> a')}\n\nWhy.\n\n{_block('> b')}\n\nMore.\n\n{_block('> c')}\n\nNote.\n\n{SIG}\n"
+    assert prbody.with_block(body, QUOTE, 7) == f"Why.\n\nMore.\n\n{_block()}\n\nNote.\n\n{SIG}\n"
+    # Merging changes the body even when the last block already holds `quote`, so
+    # `set_pr_block` writes it (`feature reconcile` heals such PRs).
+    dup = f"Why.\n\n{_block()}\n\n{_block()}\n\n{SIG}\n"
+    assert prbody.with_block(dup, QUOTE, 7) == f"Why.\n\n{_block()}\n\n{SIG}\n"
+
+
+def test_a_body_edited_on_the_web_with_crlf_line_ends_keeps_its_block():
+    body = f"Why.\r\n\r\n<!-- ship -->\r\n> old\r\n<!-- /ship -->\r\n\r\n{SIG}"
+    assert prbody.with_block(body, QUOTE, 7) == f"Why.\r\n\r\n{_block()}\r\n\r\n{SIG}"
+
+
+def test_tags_that_dont_pair_up_are_refused():
+    # A stray opening tag above the block would pair with the block's closing tag, cutting the
+    # text in between, so the body is refused instead. In either direction, through either writer.
+    stray = f"Why.\n\n<!-- ship -->\nhalf an example\n\nMore.\n\n{_block('> old')}\n\n{SIG}"
+    for text in (stray, "Why.\n\n<!-- ship -->\nhalf an example", f"Why.\n\n<!-- /ship -->\n\n{_block()}"):
+        with pytest.raises(ValueError, match="don't pair up"):
+            prbody.with_description(text, QUOTE)
+        with pytest.raises(ValueError, match="don't pair up"):
+            prbody.with_block(text, QUOTE, 7)
+
+
+def test_a_written_body_without_exactly_one_block_is_refused():
+    # Unreachable from a quote `assess.render` makes; a quote holding tag lines forces it.
+    with pytest.raises(ValueError, match="2 ship blocks"):
+        prbody.with_description("Why.", "> a\n<!-- /ship -->\n<!-- ship -->\n> b")
 
 
 def test_a_code_block_ending_in_a_robot_line_is_not_a_signature():

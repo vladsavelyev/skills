@@ -49,6 +49,14 @@ def test_set_pr_block_skips_the_edit_when_nothing_changes(monkeypatch):
     assert "body" not in captured
 
 
+def test_set_pr_block_merges_duplicate_blocks(monkeypatch):
+    # A body with two blocks (navari#4727) is rewritten even though the last one is current, so
+    # `feature reconcile` heals it.
+    captured = _fake_pr_body_editor(monkeypatch, f"Desc.\n\n{BLOCK}\n\nMore.\n\n{BLOCK}\n")
+    assert github.set_pr_block(1910, QUOTE, 1964) is True
+    assert captured["body"] == f"Desc.\n\nMore.\n\n{BLOCK}\n"
+
+
 def test_set_pr_block_replaces_only_the_block(monkeypatch):
     # The PR body's own `Closes #<problem>` lines must survive, or re-running `feature pr` would
     # silently stop those problem sub-issues from auto-closing.

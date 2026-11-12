@@ -96,7 +96,9 @@ than read with guessed-at defaults.
 
 ### The PR body
 
-Ship owns one tagged block in the PR body, and it is the only part of the body the CLI edits:
+Ship owns one tagged block in the PR body, and it is the only part of the body the CLI edits.
+The block lives in the body, not a comment, because the `closes #<issue>` keyword has to be there
+for GitHub to close the tracking issue:
 
 ```
 <the author's description>
@@ -118,12 +120,28 @@ Every command that writes the block (`feature pr`, `feature describe`, `feature 
 it between the tags (`prbody.py`), so the block always shows the current state. Before any review
 it is the reference line alone. A body without the block gets it above the author's signature (a
 trailing one-line paragraph starting with `🤖`, the attribution line an agent harness asks for),
-or at the end. `feature describe` takes its input as the new description, as written, with the
-block below it. The grade is Sol's latest; each round's line lists what it found by severity
+or at the end. The grade is Sol's latest; each round's line lists what it found by severity
 (recorded with the round from `--found`), which never changes after the round. The latest round's
 line ends with the depth Sol's grade buys the next round. After a clean round no round is due (the
 gate only reopens if new commits move the head), so it reads `A re-review after new commits would
 run at <depth>` instead of `Next round would run at <depth>`.
+
+Every body ship writes has exactly one block. It is created once; every later write finds it and
+rewrites what is between its tags. `feature describe` accepts the new description with or without
+the block: an agent that fetches the body (`gh pr view --json body`), edits it and passes it all
+back is doing the natural thing. Whatever blocks the input carries are dropped (their content is
+always rendered from state, so nothing in them is the author's), and one fresh block is placed. A
+body that already has several (navari#4727 got two that way, before `describe` looked; or a hand
+edit) keeps the last one's place and loses the others on its next write, so `feature reconcile`
+heals such PRs. A body whose tags don't pair up in order (a tag without its pair, as in half a
+quoted example) is refused, never guessed at: pairing the stray tag with the block's closing tag
+would cut the author's text in between. Before `gh pr edit`, the written body is also checked to
+hold exactly the one block just rendered; anything else aborts the write.
+
+A block is any pair of tags on lines of their own; ship doesn't parse Markdown code blocks. The
+accepted cost: a description quoting the tags verbatim, each on a line of its own (a PR about
+ship), has that example taken for ship's block and replaced. Quoted inline, indented or in a
+blockquote, the tags are the author's text.
 
 The reference keeps the `closes` keyword: GitHub closes the issue on merge only when the keyword
 comes right before the number (checked on PR #38's `closingIssuesReferences`: a quoted
@@ -316,7 +334,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | Command | Does |
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>` (the base must be on origin), a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
-| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description (and optionally the title), keeping ship's block (see "The PR body"). `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
+| `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description (and optionally the title). The input may carry ship's block or not; the body gets exactly one, rendered fresh (see "The PR body"). `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
 | `feature depth [--branch <b>]` | Print the reasoning effort for the next review round (`assess.py`): size from the diff stats; risk from the paths touched (sensitive → high, docs/tests only → low) until a review has graded the PR, then the last grade's risk and complexity. |
 | `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `ship` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
@@ -334,7 +352,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`wontfix` is newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
 | `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION`, 30 = `MERGED` (1 and 2 stay "the command itself failed"). |
 | `feature merge [--branch <b>] [--force]` | Final transition: verify **that the PR actually merged**, record what the gate still had outstanding, set status `merged`, close the feature issue (or just comment, if the PR's `Closes` reference already closed it). Does not merge the PR itself; `--force` records a feature that shipped without its PR merging. |
-| `feature reconcile [--branch <b>] [--dry-run]` | Repo-wide sweep for features the close-out never reached: closes out every feature whose PR merged, closes as `abandoned` those whose PR was closed unmerged (unless the branch has a newer open PR, which it reports instead), and repairs the issue reference on still-open PRs. GitHub-only (no git), so it reaches features whose branch is long deleted. |
+| `feature reconcile [--branch <b>] [--dry-run]` | Repo-wide sweep for features the close-out never reached: closes out every feature whose PR merged, closes as `abandoned` those whose PR was closed unmerged (unless the branch has a newer open PR, which it reports instead), and repairs ship's block on still-open PRs (a stale reference, or duplicate blocks merged into one). GitHub-only (no git), so it reaches features whose branch is long deleted. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If the base advanced, invalidates the last review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
 
 ## The in-session review
