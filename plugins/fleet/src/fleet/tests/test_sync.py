@@ -34,7 +34,7 @@ def test_merge_settings_copies_shared_keys_and_keeps_machine_ones():
         "statusLine": {"type": "command", "command": "posix"},
         "theme": "dark",
     }
-    merged = fleet.merge_settings(source, target, ["env.DISPLAY", "hooks.Stop", "statusLine"])
+    merged = fleet.merge_settings(source, target, fleet.shared_keys(["env.DISPLAY", "hooks.Stop", "statusLine"]))
     assert merged == {
         "model": "opus",
         "env": {"KEY": "new", "ONLY_HERE": "x", "DISPLAY": ":99"},
@@ -45,11 +45,11 @@ def test_merge_settings_copies_shared_keys_and_keeps_machine_ones():
 
 def test_merge_settings_of_identical_files_is_a_no_op():
     settings = {"a": 1, "env": {"X": "1"}, "permissions": {"deny": ["rm"]}}
-    assert fleet.flatten(fleet.merge_settings(settings, settings, [])) == fleet.flatten(settings)
+    assert fleet.flatten(fleet.merge_settings(settings, settings, fleet.shared_keys([]))) == fleet.flatten(settings)
 
 
 def test_merge_settings_keeps_an_empty_object_from_the_source():
-    assert fleet.merge_settings({"env": {}}, {"env": {"X": "1"}}, []) == {"env": {}}
+    assert fleet.merge_settings({"env": {}}, {"env": {"X": "1"}}, fleet.shared_keys([])) == {"env": {}}
 
 
 def test_load_config_without_a_file_says_what_to_create():

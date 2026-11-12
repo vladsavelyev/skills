@@ -9,7 +9,7 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 | [sync](plugins/sync) | Keeps this marketplace and its installed plugins updated at every session start, and refuses edits to their installed copies (and to `~/.codex/AGENTS.md`), saying where to make the change instead. |
 | [pr-comments](plugins/pr-comments) | Attribution, tone and safety checks for comments an agent posts on GitHub for me. Adapted from [t3dotgg/tstack](https://github.com/t3dotgg/tstack)'s `leaving-pr-comments`. |
 | [babysit-pr](plugins/babysit-pr) | Watch a PR through CI and bot reviews in T3 Code, fix or dismiss findings, and keep it current with its (possibly stacked) base branch. Adapted from tstack's `babysit-pr`. |
-| [fleet](plugins/fleet) | Keep the per-user Claude Code setup (version, skill repos, plugins, `~/.claude/CLAUDE.md`, settings) the same on every machine I work from. Moved from navari-stack's `nstack fleet`. |
+| [fleet](plugins/fleet) | Keep the per-user Claude Code setup (version, skill repos, plugins, `~/.claude/CLAUDE.md`, settings) the same on every machine I work from, and rotate a settings secret on all of them with `fleet set`. Moved from navari-stack's `nstack fleet`. |
 | [bro](plugins/bro) | `/bro`: restate the last message in plain human language, with no jargon. From [cursor/plugins](https://github.com/cursor/plugins)' pstack (MIT, © Lauren Tan). |
 | [cdt](plugins/cdt) | The `cdt` MCP (chrome-devtools-mcp) in every project, on the shared profile `nstack login` signs in. |
 | [unslop](plugins/unslop) | `unslop`: cut AI tells (filler, AI vocabulary, em dashes, jargon, passive voice) from any writing, typed as `/unslop` or picked up by the agent when it writes prose for people. Adapted from pstack (MIT, © Lauren Tan). |

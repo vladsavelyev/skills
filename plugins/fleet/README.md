@@ -8,6 +8,7 @@ on the laptop has to be carried over, or remote sessions quietly work without it
 ```sh
 fleet            # report drift, change nothing; exit 1 if anything is out of sync
 fleet --apply    # fix it, then report what's left for a human
+fleet set KEY    # give one ~/.claude/settings.json key a new value everywhere (see below)
 ```
 
 The machine it runs on is the source of truth. The hosts it syncs, and what stays per machine, come
@@ -53,6 +54,28 @@ What it covers:
 
 Every overwritten file keeps a `.bak-<timestamp>` copy next to it. Plugin updates apply from the next
 Claude Code session.
+
+## Rotating a secret: `fleet set`
+
+```sh
+fleet set env.AWS_BEARER_TOKEN_BEDROCK < "$file"   # from a file, e.g. one an agent was given
+fleet set env.NEW_RELIC_USER_API_KEY               # from a prompt that doesn't echo
+```
+
+`fleet set <key>` takes any key `fleet` syncs (`name` or `object.name`) whose value is a string or
+not set yet, and refuses `machine_settings`. It reads the value from stdin when stdin isn't a terminal
+and from a no-echo prompt otherwise, and never prints it. Then:
+
+1. **Validates** it, if the key has a validator (`VALIDATORS` in `src/fleet/validators.py`), before
+   writing anything, so a bad paste can't break every machine. `env.AWS_BEARER_TOKEN_BEDROCK` gets
+   one `max_tokens: 1` call to the gateway at `env.ANTHROPIC_BEDROCK_BASE_URL`, with the model in
+   `env.ANTHROPIC_DEFAULT_HAIKU_MODEL`. Keys without a validator are written unvalidated, and the
+   output says so.
+2. **Writes** it to this machine's `~/.claude/settings.json` (with a `.bak-<timestamp>` copy), then
+   pushes that key, and no other, to every host through the same settings sync `fleet --apply` uses.
+3. **Verifies** by reading the key back on every machine and comparing sha256 prefixes: `ok` or
+   `FAILED` per machine, exit 1 if any failed. Running it again with the same value only pushes
+   to the hosts that lack it.
 
 Not covered, by hand:
 
