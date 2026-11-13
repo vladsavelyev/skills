@@ -1,0 +1,7 @@
+{
+  "name": "pstack",
+  "description": "/how, /why, /arena, /blast-radius from pstack: explain a subsystem, trace why code is shaped the way it is, race parallel candidates and graft the best, prove what a change could break.",
+  "author": {
+    "name": "Vlad Savelyev"
+  }
+}
