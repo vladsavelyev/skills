@@ -82,4 +82,33 @@ case $out in
   *) echo "FAIL sync.sh with a modified clone: $out"; failures=$((failures + 1)) ;;
 esac
 
+# On a clean clone, sync.sh updates the listed plugins it has, installs the listed ones it lacks,
+# and uninstalls only its own user-scope plugins the marketplace no longer lists.
+git -C "$clone" checkout -q -- agents/AGENTS.md
+cat > "$home/bin/claude" <<SH
+#!/bin/sh
+echo "\$*" >> "$home/claude-calls"
+case "\$*" in
+  "plugin list --json") cat <<'JSON'
+[{"id": "ship@vlad-skills", "scope": "user"}, {"id": "gone@vlad-skills", "scope": "user"},
+ {"id": "kept@vlad-skills", "scope": "project"}, {"id": "gone@other", "scope": "user"}]
+JSON
+  ;;
+esac
+SH
+PATH="$home/bin:$PATH" "$scripts/sync.sh" "$home/data" > /dev/null
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ -e "$home/data/sync.log" ] && grep -q uninstall "$home/claude-calls" 2>/dev/null && break
+  sleep 1
+done
+sleep 1
+expected="plugin marketplace update vlad-skills
+plugin list --json
+plugin update ship@vlad-skills
+plugin install ext@vlad-skills
+plugin uninstall gone@vlad-skills"
+calls=$(cat "$home/claude-calls" 2>/dev/null || true)
+[ "$calls" = "$expected" ] || { printf 'FAIL sync.sh on a clean clone called:\n%s\n' "$calls"; failures=$((failures + 1)); }
+[ ! -e "$home/data/sync-failed.log" ] || { echo "FAIL sync.sh on a clean clone left sync-failed.log"; failures=$((failures + 1)); }
+
 [ "$failures" = 0 ] && echo "all passed" || { echo "$failures failed"; exit 1; }
