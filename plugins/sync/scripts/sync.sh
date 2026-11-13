@@ -26,7 +26,10 @@ if [ -n "$changes" ]; then
   exit 0
 fi
 
-# Update every plugin the marketplace lists, installing the ones this environment doesn't have yet.
+# Update every plugin the marketplace lists, installing the ones this environment doesn't have yet,
+# and uninstall the ones it installed that the marketplace no longer lists (moved into another plugin
+# or dropped), so a stale copy doesn't stay frozen next to its replacement. Only user scope, where
+# this installs; a project-scope install is the project's own choice.
 # `set -e` is off inside the `if` below, so every step returns its own failure.
 update_all() {
   claude plugin marketplace update "$MARKETPLACE" || return
@@ -38,6 +41,13 @@ update_all() {
       claude plugin update "$name@$MARKETPLACE" || return
     else
       claude plugin install "$name@$MARKETPLACE" || return
+    fi
+  done
+  user_ids=$(printf '%s' "$installed" | jq -r --arg m "@$MARKETPLACE" \
+    '.[] | select(.scope == "user" and (.id | endswith($m))) | .id') || return
+  for id in $user_ids; do
+    if ! printf '%s\n' "$listed" | grep -qxF "${id%@"$MARKETPLACE"}"; then
+      claude plugin uninstall "$id" || return
     fi
   done
 }
