@@ -65,3 +65,14 @@ Claude Code has no Cursor Automations, Bugbot, Cursor cloud agents, or built-in 
 | Bugbot | Bugbot comments on a GitHub PR are ordinary review threads, so triage them with the forge command that the step gives. Skip a step that starts, waits for, or configures Bugbot when the PR has no Bugbot check or comment. |
 | Cursor cloud agents | `environment: "cloud"` maps to a worktree, as in Subagent fields. Skip a step that needs the cloud agent itself, such as its dashboard status or its own machine. |
 | A built-in PR tool | Use the forge command that the step gives, such as `gh pr create`. That is not a skip, so write no line. |
+
+## This subset
+
+This copy is the `pstack` plugin of the `vlad-skills` marketplace, not the whole of pstack. It ships `how`, `why`, `arena`, `blast-radius` and the principle skills they cite. Everything above this section is pstack's own adapter, unchanged. This section maps what the subset leaves out.
+
+| A step names | In this subset |
+| --- | --- |
+| `unslop` | The `unslop` plugin of the same marketplace: `Skill(unslop:unslop)`. |
+| The Subagents section of `poteto-mode`, for a subagent's reasoning level and speed | Start each role at its line's effort, or `xhigh` when it has none. Raise it one step, up to `max`, for the hardest or subtlest work. Lower it one step for judgment and two for routine work. Keep the role's model family. Claude Code has no fast mode, so drop `-fast`. |
+| Any other pstack skill (`poteto-mode`, `show-me-your-work`, `swarm`, ...) | Not installed. Put one line in your reply, `Skipped: <skill> is not in this pstack subset.`, and go on. |
+| A non-Claude seat whose point is a second model family: an `arena` runner or the `arena` cross-judge | When the session has T3 Code's `delegate_task`, run that seat there on its Codex provider (call `orchestrator_capabilities` first), with the seat's brief, its own output path, and `isolation: "worktree"` for a runner. Without `delegate_task`, follow the Models table above and say the panel is one family. |
