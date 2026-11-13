@@ -10,10 +10,8 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 | [pr-comments](plugins/pr-comments) | Attribution, tone and safety checks for comments an agent posts on GitHub for me. Adapted from [t3dotgg/tstack](https://github.com/t3dotgg/tstack)'s `leaving-pr-comments`. |
 | [babysit-pr](plugins/babysit-pr) | Watch a PR through CI and bot reviews in T3 Code, fix or dismiss findings, and keep it current with its (possibly stacked) base branch. Adapted from tstack's `babysit-pr`. |
 | [fleet](plugins/fleet) | Keep the per-user Claude Code setup (version, skill repos, plugins, `~/.claude/CLAUDE.md`, settings) the same on every machine I work from, and rotate a settings secret on all of them with `fleet set`. Moved from navari-stack's `nstack fleet`. |
-| [bro](plugins/bro) | `/bro`: restate the last message in plain human language, with no jargon. From [cursor/plugins](https://github.com/cursor/plugins)' pstack (MIT, © Lauren Tan). |
-| [pstack](plugins/pstack) | `/pstack:how` explains a subsystem, `/pstack:why` traces why code is shaped the way it is, `/pstack:arena` races parallel candidates and grafts the best into one, `/pstack:blast-radius` proves what a change could break. A subset of [cursor/plugins](https://github.com/cursor/plugins)' pstack (MIT, © Lauren Tan), with the principle skills they cite. |
+| [pstack](plugins/pstack) | Skills from [cursor/plugins](https://github.com/cursor/plugins)' pstack (MIT, © Lauren Tan), typed as `/pstack:<name>`. `how` explains a subsystem, `why` traces why code is shaped the way it is, `arena` races parallel candidates and grafts the best into one, `blast-radius` proves what a change could break, `bro` restates the last message in plain human language. `unslop` cuts AI tells (filler, AI vocabulary, em dashes, jargon, passive voice) from any writing, and is the one the agent also picks up on its own when it writes prose for people. The principle skills they cite come along. |
 | [cdt](plugins/cdt) | The `cdt` MCP (chrome-devtools-mcp) in every project, on the shared profile `nstack login` signs in. |
-| [unslop](plugins/unslop) | `unslop`: cut AI tells (filler, AI vocabulary, em dashes, jargon, passive voice) from any writing, typed as `/unslop` or picked up by the agent when it writes prose for people. Adapted from pstack (MIT, © Lauren Tan). |
 
 ## Agent rules
 

@@ -33,23 +33,13 @@
       "source": "./plugins/fleet"
     },
     {
-      "name": "bro",
-      "description": "/bro: restate the last message in plain human language, with no jargon.",
-      "source": "./plugins/bro"
-    },
-    {
       "name": "cdt",
       "description": "The cdt MCP (chrome-devtools-mcp) in every project: an agent's own Chrome with console, network and performance tools.",
       "source": "./plugins/cdt"
     },
     {
-      "name": "unslop",
-      "description": "/unslop: cut AI tells from any writing.",
-      "source": "./plugins/unslop"
-    },
-    {
       "name": "pstack",
-      "description": "/how, /why, /arena, /blast-radius from pstack: explain a subsystem, trace why code is shaped the way it is, race parallel candidates and graft the best, prove what a change could break.",
+      "description": "Skills from pstack: /how explains a subsystem, /why traces why code is shaped the way it is, /arena races parallel candidates and grafts the best, /blast-radius proves what a change could break, /bro restates the last message plainly, unslop cuts AI tells from writing.",
       "source": "./plugins/pstack"
     }
   ]
