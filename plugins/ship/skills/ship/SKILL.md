@@ -80,7 +80,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - `## Evidence`, that it works, carried over from the existing description or the commits: a
      before and after, as a screencast or screenshots for a change users see, otherwise the test
      or command that failed before and passes now, with its output. Only what was run, and never
-     a suite's pass count or a list of test names. If the branch has none, say so in `Next`.
+     a suite's pass count or a list of test names. If the branch has none, the PR isn't ready
+     whatever the gate says (see `OPEN` below).
 
    The title says what the PR does, in plain words. End the description with your signature
    line if your harness asks for one. The `## Risk` section is ship's, rendered from Sol's grade
@@ -218,7 +219,8 @@ be followed up later: an open problem means the PR isn't ready.
 
 - `OPEN` (0): safe to merge. Every problem is closed. If the PR is still a draft, mark it ready
   (`gh pr ready <PR#>`) only when the caller asked to ship; for a plain review, say in `Next`
-  that it's still a draft. The human merges.
+  that it's still a draft. The human merges. With nothing under `## Evidence` it is not safe to
+  merge: don't mark it ready, and `Next` says to run the change and add the evidence first.
 - `REVIEW_AGAIN` (10): the caller closes every open problem (fixes it, or `wontfix` if it isn't
   relevant), then calls this skill again.
 - `MERGED` (30): the PR is in. Don't review; the caller closes it out with `Skill(ship:close)`.
@@ -265,7 +267,8 @@ Always include these caller rules in `Next` when they apply:
   wontfix <#> --reason "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for
   the next round, without asking the user."
 - With `OPEN`: "Tell the user it's safe to merge: every problem is closed. After they merge, call
-  `Skill(ship:close)` to close out."
+  `Skill(ship:close)` to close out." With `## Evidence` empty, instead: "Not safe to merge yet:
+  run the change, add its before and after under `## Evidence`, then call `Skill(ship:ship)`."
 - With `MERGED`: "Don't review. Call `Skill(ship:close)` to close the feature out."
 - With pre-existing bugs: "These aren't this PR's and don't hold its gate. Ask the user, for each,
   whether to fix it in a separate PR (`Skill(ship:start)` off the base branch) or just file an
