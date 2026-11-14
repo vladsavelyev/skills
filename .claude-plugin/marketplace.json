@@ -44,7 +44,7 @@
     },
     {
       "name": "mattpocock-skills",
-      "description": "Matt Pocock's skills (grilling, spec/ticket flows, TDD, domain modelling and more), from upstream, without pr: our PR-description rules set the body's shape.",
+      "description": "Matt Pocock's skills (grilling, spec/ticket flows, TDD, domain modelling and more), from upstream, without pr and code-review: our PR-description rules set the body's shape, and ship's Sol review covers code review.",
       "author": {
         "name": "Matt Pocock",
         "url": "https://www.aihero.dev"
@@ -73,7 +73,6 @@
         "./engineering/research",
         "./engineering/domain-modeling",
         "./engineering/codebase-design",
-        "./engineering/code-review",
         "./engineering/retro",
         "./engineering/wizard",
         "./productivity/grill-me",
