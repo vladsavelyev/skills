@@ -89,9 +89,12 @@ def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
         {"run": 3, "depth": "xhigh", "found": {}, "regressions": 0},
     ]
     assert assess.render(issue=39, review=_review(grade, history)) == (
-        "> **Risk: high**, one-way door: whole-body rewrites can corrupt the ref\n"
-        "> Blast radius: every open PR's body\n"
-        "> Complexity: medium, size: M (8 files, 412 lines)\n"
+        "## Risk\n"
+        "\n"
+        "**High**, one-way door: whole-body rewrites can corrupt the ref\n"
+        "**Blast radius:** every open PR's body\n"
+        "**Complexity:** medium, size M (8 files, 412 lines)\n"
+        "\n"
         "> Feature tracking issue: closes #39\n"
         "> **Review round 1** (high). Findings: 1 low (#40).\n"
         "> **Review round 2** (xhigh). Findings: 1 high (#41), 2 med (#42, #44), 1 of them back after a fix.\n"
@@ -102,9 +105,12 @@ def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
 def test_render_keeps_a_grade_recorded_before_the_door_and_blast_radius():
     grade = {"risk": "med", "complexity": "low", "why": "refine answers 429"}
     out = assess.render(issue=39, review=_review(grade, [{"run": 1, "depth": "medium", "found": {}}]))
-    assert out.splitlines()[:2] == [
-        "> **Risk: medium**: refine answers 429",
-        "> Complexity: low, size: M (8 files, 412 lines)",
+    assert out.splitlines()[:5] == [
+        "## Risk",
+        "",
+        "**Medium**: refine answers 429",
+        "**Complexity:** low, size M (8 files, 412 lines)",
+        "",
     ]
 
 

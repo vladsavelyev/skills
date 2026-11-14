@@ -261,8 +261,8 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
     return depth, size, files, lines, why
 
 
-def _block_quote(state: dict, issue: int) -> str:
-    """The quote for the PR body's ship block, rendered from `state`: the reference to `issue`, and
+def _block_content(state: dict, issue: int) -> str:
+    """The content of the PR body's ship block, rendered from `state`: the reference to `issue`, and
     once a review has graded the PR, Sol's latest grade and every round so far. Every command that
     writes the block renders it here, so the block always shows the current state."""
     # `feature reconcile` reads schema-1 states too; those predate grading, so they show the
@@ -280,7 +280,7 @@ def _block_quote(state: dict, issue: int) -> str:
 
 def _write_block(state: dict, issue: int) -> bool:
     """Set the linked PR's ship block from `state`; True if the body changed."""
-    return github.set_pr_block(state["pr"], _block_quote(state, issue), issue)
+    return github.set_pr_block(state["pr"], _block_content(state, issue), issue)
 
 
 def cmd_describe(args: argparse.Namespace) -> None:
@@ -291,7 +291,7 @@ def cmd_describe(args: argparse.Namespace) -> None:
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
-    github.set_pr_description(state["pr"], text, args.title, _block_quote(state, issue))
+    github.set_pr_description(state["pr"], text, args.title, _block_content(state, issue))
     print(f"Updated the description of PR #{state['pr']}")
 
 

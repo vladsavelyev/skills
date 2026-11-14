@@ -142,33 +142,34 @@ def _next_round(last: dict, depth: str) -> str:
     return f" Next round would run at {depth}."
 
 
-def _risk_lines(grade: dict) -> list[str]:
-    """The grade's risk, read as its two halves: whether a revert undoes a bug (the door) and what
-    a bug would reach (the blast radius)."""
-    risk, why = _SPELLED[grade["risk"]], grade["why"].strip()
+def _risk_section(review: Review) -> list[str]:
+    """The Risk section: Sol's grade of the risk, read as its two halves (the door: whether a
+    revert undoes what a bug did; the blast radius: who or what a bug reaches), then of the
+    complexity, with the PR's size. GitHub breaks a PR body's lines where they break here."""
+    grade = review.grade
+    risk, why = _SPELLED[grade["risk"]].capitalize(), grade["why"].strip()
+    complexity = (
+        f"**Complexity:** {_SPELLED[grade['complexity']]}, size {review.size} "
+        f"({review.changed_files} files, {review.changed_lines} lines)"
+    )
     if "door" not in grade:
         # Grades recorded before the door and blast radius existed carry neither. Kept ON PURPOSE:
         # they are already written into feature issues of PRs in flight.
-        return [f"**Risk: {risk}**: {why}"]
-    return [f"**Risk: {risk}**, {grade['door']} door: {why}", f"Blast radius: {grade['blast_radius'].strip()}"]
+        return ["## Risk", "", f"**{risk}**: {why}", complexity]
+    door = f"**{risk}**, {grade['door']} door: {why}"
+    return ["## Risk", "", door, f"**Blast radius:** {grade['blast_radius'].strip()}", complexity]
 
 
 def render(*, issue: int, review: Review | None) -> str:
-    """The quote in the PR body's ship block: Sol's latest grade, the closing reference to the
-    feature issue, and one line per review round. A round's line lists what it found, which never
-    changes afterwards. Before any review it is the reference alone."""
+    """The content of the PR body's ship block. Once a review has graded the PR, the Risk section
+    from Sol's latest grade; then a quote of the closing reference to the feature issue and one line
+    per review round. A round's line lists what it found, which never changes afterwards. Before
+    any review it is the reference alone."""
     # `closes` is what makes GitHub close the issue on merge; a bare `#39` would only link it.
-    lines = [f"Feature tracking issue: closes #{issue}"]
-    if review is not None:
-        grade = review.grade
-        runs = [e for e in review.history if "run" in e]
-        rounds = [_round_line(e) for e in runs]
-        rounds[-1] += _next_round(runs[-1], review.next_depth)
-        lines = [
-            *_risk_lines(grade),
-            f"Complexity: {_SPELLED[grade['complexity']]}, size: {review.size} "
-            f"({review.changed_files} files, {review.changed_lines} lines)",
-            *lines,
-            *rounds,
-        ]
-    return "\n".join(f"> {line}" for line in lines)
+    reference = f"> Feature tracking issue: closes #{issue}"
+    if review is None:
+        return reference
+    runs = [e for e in review.history if "run" in e]
+    rounds = [_round_line(e) for e in runs]
+    rounds[-1] += _next_round(runs[-1], review.next_depth)
+    return "\n".join([*_risk_section(review), "", reference, *(f"> {line}" for line in rounds)])

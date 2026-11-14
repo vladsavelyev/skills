@@ -69,8 +69,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
 2. **Describe the PR.** A branch from `feature start` got its title and description before any
    code existed. When they no longer fit what the branch does (always on its first ship), rewrite
-   them. The description has no headers (no "Summary", no "Evidence", no test plan) and runs in
-   this order:
+   them. It runs in this order, with `## Evidence` its only header (no "Summary", no test plan):
    - The motivation, in one to three informal sentences, from the original motivation in the PR
      body and the commit messages (`git log --format='%s%n%b' origin/<base>..HEAD`), not from the
      diff: Sol's spec check reads the PR's intent from these sentences.
@@ -78,13 +77,14 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      file tree, component tree or state change, pseudocode, or a Mermaid diagram. Keep only the
      calls, files and states the point needs. Leave it out when the change is a line or two the
      motivation already names.
-   - The evidence that it works, carried over from the existing description or the commits: a
+   - `## Evidence`, that it works, carried over from the existing description or the commits: a
      before and after, as a screencast or screenshots for a change users see, otherwise the test
      or command that failed before and passes now, with its output. Only what was run. If the
      branch has none, say so in `Next`.
 
    The title says what the PR does, in plain words. End the description with your signature
-   line if your harness asks for one. `feature describe` takes the
+   line if your harness asks for one. The `## Risk` section is ship's, rendered from Sol's grade
+   into its block: never write one. `feature describe` takes the
    text with or without ship's block (editing the fetched body is fine) and writes exactly one,
    above that signature. Sol and step 6 read this
    description to know the PR's intent, so it comes first.

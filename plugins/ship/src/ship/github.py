@@ -144,8 +144,8 @@ def open_pr_for_branch(branch: str) -> int | None:
     return int(out) if out else None
 
 
-def set_pr_block(pr: int, quote: str, issue: int) -> bool:
-    """Set ship's block in the PR body to `quote` (from `assess.render`). The block carries a native
+def set_pr_block(pr: int, content: str, issue: int) -> bool:
+    """Set ship's block in the PR body to `content` (from `assess.render`). The block carries a native
     `closes #<issue>` reference, a real GitHub link that shows in the PR's sidebar and closes the
     tracking issue when the PR merges. Returns True if the body changed.
 
@@ -162,21 +162,21 @@ def set_pr_block(pr: int, quote: str, issue: int) -> bool:
     `in-review` and nothing names what shipped.
     """
     body = run(["gh", "pr", "view", str(pr), "--json", "body", "--jq", ".body"])
-    new_body = prbody.with_block(body, quote, issue)
+    new_body = prbody.with_block(body, content, issue)
     if new_body == body:
         return False
     run(["gh", "pr", "edit", str(pr), "--body-file", "-"], input_text=new_body)
     return True
 
 
-def set_pr_description(pr: int, text: str, title: str | None, quote: str) -> None:
+def set_pr_description(pr: int, text: str, title: str | None, content: str) -> None:
     """Replace the PR's description with `text` (and its title with `title`), with ship's block
-    set to `quote` below it. `text` may carry the block already (the body fetched and edited): the
+    set to `content` below it. `text` may carry the block already (the body fetched and edited): the
     PR still ends up with exactly one (`prbody.with_description`)."""
     cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
     if title:
         cmd += ["--title", title]
-    run(cmd, input_text=prbody.with_description(text, quote))
+    run(cmd, input_text=prbody.with_description(text, content))
 
 
 def create_draft_pr(*, branch: str, base: str, title: str, body: str, cwd: str) -> str:

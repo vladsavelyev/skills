@@ -101,12 +101,15 @@ The block lives in the body, not a comment, because the `closes #<issue>` keywor
 for GitHub to close the tracking issue:
 
 ```
-<the author's description>
+<the author's description, its sketch and its ## Evidence>
 
 <!-- ship -->
-> **Risk: low**, two-way door: a bad write is visible and fixed by hand
-> Blast radius: ship's own block in this repo's PR bodies
-> Complexity: low, size: M (8 files, 412 lines)
+## Risk
+
+**Low**, two-way door: a bad write is visible and fixed by hand
+**Blast radius:** ship's own block in this repo's PR bodies
+**Complexity:** low, size M (8 files, 412 lines)
+
 > Feature tracking issue: closes #39
 > **Review round 1** (high). Findings: 1 low (#40).
 > **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
@@ -117,9 +120,10 @@ for GitHub to close the tracking issue:
 ```
 
 Every command that writes the block (`feature pr`, `feature describe`, `feature review record`,
-`feature reconcile`) renders the whole quote from the feature's state (`assess.render`) and sets it
-between the tags (`prbody.py`), so the block always shows the current state. Before any review it
-is the reference line alone. A body without the block gets it above the author's signature (a
+`feature reconcile`) renders the block's whole content from the feature's state (`assess.render`) and sets
+it between the tags (`prbody.py`), so the block always shows the current state. Before any review
+it is the reference line alone; once Sol has graded the PR, a Risk section comes first, the one
+header ship writes, so a reader finds the stakes without reading the review log below it. A body without the block gets it above the author's signature (a
 trailing one-line paragraph starting with `🤖`, the attribution line an agent harness asks for), or
 at the end. The grade is Sol's latest, its risk read as its two halves: the door (whether a revert
 undoes what a bug did) and the blast radius (who or what a bug reaches). Each round's line lists
