@@ -96,7 +96,8 @@ The PR is **ready** when, on the latest head:
 - no review thread is unresolved;
 - it is not `BEHIND` or `DIRTY`, and nothing that landed on the base since the last green run
   touches the PR's files;
-- *ship-tracked:* the latest `Skill(ship:ship)` report says the gate is `OPEN`. Don't run
+- *ship-tracked:* the latest `Skill(ship:ship)` report says the gate is `OPEN`, and its `Next`
+  doesn't say the PR is not safe to merge yet (it has no evidence). Don't run
   `feature gate` yourself to decide this; a review round has to cover the head first, and only
   ship runs one.
 
