@@ -79,8 +79,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      motivation already names.
    - `## Evidence`, that it works, carried over from the existing description or the commits: a
      before and after, as a screencast or screenshots for a change users see, otherwise the test
-     or command that failed before and passes now, with its output. Only what was run. If the
-     branch has none, say so in `Next`.
+     or command that failed before and passes now, with its output. Only what was run, and never
+     a suite's pass count or a list of test names. If the branch has none, say so in `Next`.
 
    The title says what the PR does, in plain words. End the description with your signature
    line if your harness asks for one. The `## Risk` section is ship's, rendered from Sol's grade
