@@ -12,6 +12,7 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 | [fleet](plugins/fleet) | Keep the per-user Claude Code setup (version, skill repos, plugins, `~/.claude/CLAUDE.md`, settings) the same on every machine I work from, and rotate a settings secret on all of them with `fleet set`. Moved from navari-stack's `nstack fleet`. |
 | [pstack](plugins/pstack) | Skills from [cursor/plugins](https://github.com/cursor/plugins)' pstack (MIT, © Lauren Tan), typed as `/pstack:<name>`. `how` explains a subsystem, `why` traces why code is shaped the way it is, `arena` races parallel candidates and grafts the best into one, `blast-radius` proves what a change could break, `bro` restates the last message in plain human language. `unslop` cuts AI tells (filler, AI vocabulary, em dashes, jargon, passive voice) from any writing, and is the one the agent also picks up on its own when it writes prose for people. The principle skills they cite come along. |
 | [cdt](plugins/cdt) | The `cdt` MCP (chrome-devtools-mcp) in every project, on the shared profile `nstack login` signs in. |
+| [mattpocock-skills](https://github.com/mattpocock/skills) | Matt Pocock's skills (MIT, © Matt Pocock), loaded from his repo, minus `pr`: its PR-body template, with `## Summary` and `## Merge Danger` headers, fights the description shape `agents/AGENTS.md` asks for, and the agent picked it up on its own whenever it wrote a PR body. A plugin's skills can't be switched off one by one, so the entry lists the rest itself. A skill he adds upstream shows up here only once it's added to the list. |
 
 ## Agent rules
 
@@ -50,3 +51,8 @@ plugin without a `version` is versioned by commit, so every push counts as an up
 To list a plugin that lives in another repo, use its HTTPS URL (`"source": "url"`), not the
 `github` shorthand: plugin updates clone the shorthand over SSH, which fails where there's no
 GitHub key.
+
+To list another repo's plugin with some of its skills left out, point `"source": "git-subdir"` at the
+directory holding its skills and list the ones to keep in the entry's `skills`, as
+`mattpocock-skills` does. The fetched directory then has no `plugin.json`, so the entry is the whole
+manifest; an entry's `skills` can only add to a `plugin.json`, never remove from it.
