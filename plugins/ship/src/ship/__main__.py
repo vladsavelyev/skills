@@ -261,8 +261,8 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
     return depth, size, files, lines, why
 
 
-def _block_quote(state: dict, issue: int) -> str:
-    """The quote for the PR body's ship block, rendered from `state`: the reference to `issue`, and
+def _block_content(state: dict, issue: int) -> str:
+    """The content of the PR body's ship block, rendered from `state`: the reference to `issue`, and
     once a review has graded the PR, Sol's latest grade and every round so far. Every command that
     writes the block renders it here, so the block always shows the current state."""
     # `feature reconcile` reads schema-1 states too; those predate grading, so they show the
@@ -280,7 +280,7 @@ def _block_quote(state: dict, issue: int) -> str:
 
 def _write_block(state: dict, issue: int) -> bool:
     """Set the linked PR's ship block from `state`; True if the body changed."""
-    return github.set_pr_block(state["pr"], _block_quote(state, issue), issue)
+    return github.set_pr_block(state["pr"], _block_content(state, issue), issue)
 
 
 def cmd_describe(args: argparse.Namespace) -> None:
@@ -291,7 +291,7 @@ def cmd_describe(args: argparse.Namespace) -> None:
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
-    github.set_pr_description(state["pr"], text, args.title, _block_quote(state, issue))
+    github.set_pr_description(state["pr"], text, args.title, _block_content(state, issue))
     print(f"Updated the description of PR #{state['pr']}")
 
 
@@ -366,7 +366,13 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     run_num = entry["run"]
     entry["found"] = found
     entry["depth"] = args.depth
-    entry["grade"] = {"risk": args.risk, "complexity": args.complexity, "why": args.why}
+    entry["grade"] = {
+        "risk": args.risk,
+        "door": args.door,
+        "blast_radius": args.blast_radius,
+        "complexity": args.complexity,
+        "why": args.why,
+    }
 
     # ORDER IS THE RETRY STRATEGY: every fallible call happens BEFORE the single state write, so a
     # failure anywhere leaves the round unrecorded and re-running the command records it exactly
@@ -1058,6 +1064,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--summary", required=True)
     r.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="Effort Sol ran at")
     r.add_argument("--risk", required=True, choices=assess.LEVELS, help="The reviewer's grade of the PR's risk")
+    r.add_argument("--door", required=True, choices=assess.DOORS, help="Whether reverting the PR undoes a bug in it")
+    r.add_argument("--blast-radius", required=True, help="A few words: who or what a bug in the PR would reach")
     r.add_argument("--complexity", required=True, choices=assess.LEVELS, help="The reviewer's grade of its complexity")
     r.add_argument("--why", required=True, help="One or two sentences: what drives that risk and complexity")
     r.add_argument("--branch")

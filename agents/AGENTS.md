@@ -14,7 +14,7 @@ Always build code cleanly, modularly, and with proper architecture and separatio
 
 **Never assume. Don't leave it to me to test.** Be independent: run the app, verify UI changes in a browser (see Browsers below), test user scenarios.
 
-**Prove user-facing changes on video.** When a PR changes what a user sees or does, screencast the browser test that shows it working (cdt's `screencast_start` and `screencast_stop`; copy out the .mp4 it saves) and embed it in the PR description with `gh pr edit <n> --attach <file>.mp4`, which uploads it to GitHub so it plays inline. To place it, write `![](./<file>.mp4)` where it belongs in the `--body-file` body; otherwise it's appended. If your `gh pr edit --help` has no `--attach`, upgrade `gh`. Record only data the PR's readers may see.
+**Prove the PR works.** Its description shows the evidence under `## Evidence`, right after the motivation and sketch: a before and after of what you ran, never a plan to run it. When a PR changes what a user sees or does, screencast the browser test that shows it working (cdt's `screencast_start` and `screencast_stop`; copy out the .mp4 it saves); a change a still shows (a layout, a colour) can be a before and after screenshot pair instead. Embed either with `gh pr edit <n> --attach <file>`, which uploads it to GitHub so it shows inline. To place it, write `![](./<file>)` where it belongs in the `--body-file` body; otherwise it's appended. If your `gh pr edit --help` has no `--attach`, upgrade `gh`. Record only data the PR's readers may see. Any other change shows the test that failed before and passes now, or the command and its output before and after. A suite's pass count or a list of test names isn't evidence: passing tests are a given.
 
 ### Coding rules
 
@@ -71,7 +71,7 @@ Never push directly to `main` branch. If working on a new feature, create a feat
 
 NEVER run `git reset --hard`. It destroys staged changes irreversibly. If you need to undo a bad `revert --no-commit` or similar, use `git checkout -- <file>` on specific files, or ask the user.
 
-PR descriptions must be minimalistic. Do NOT add the "Summary" header. Just describe the motivation in a brief and informal way. Never add a "Test plan". No "Generated with <tool>" attribution lines.
+PR descriptions are minimal. Open with no header: the motivation, brief and informal, and beside it the smallest sketch of what changed: a `diff` of a call tree, file tree, component tree or state change, pseudocode, or a Mermaid diagram, keeping only the calls, files and states the point needs. Leave the sketch out when the change is a line or two the motivation already names. Then `## Evidence` (see "Prove the PR works"). Ship adds `## Risk` when it reviews the PR (risk, door, blast radius, complexity and size, from the review's grade); don't write one by hand. No other headers: no "Summary", never a "Test plan", and no "Generated with <tool>" attribution lines.
 
 ### Fleet of machines
 

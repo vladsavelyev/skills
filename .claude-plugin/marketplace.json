@@ -41,6 +41,48 @@
       "name": "pstack",
       "description": "Skills from pstack: /how explains a subsystem, /why traces why code is shaped the way it is, /arena races parallel candidates and grafts the best, /blast-radius proves what a change could break, /bro restates the last message plainly, unslop cuts AI tells from writing.",
       "source": "./plugins/pstack"
+    },
+    {
+      "name": "mattpocock-skills",
+      "description": "Matt Pocock's skills (grilling, spec/ticket flows, TDD, domain modelling and more), from upstream, without pr and code-review: our PR-description rules set the body's shape, and ship's Sol review covers code review.",
+      "author": {
+        "name": "Matt Pocock",
+        "url": "https://www.aihero.dev"
+      },
+      "homepage": "https://github.com/mattpocock/skills",
+      "license": "MIT",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/mattpocock/skills.git",
+        "path": "skills"
+      },
+      "skills": [
+        "./engineering/ask-matt",
+        "./engineering/diagnosing-bugs",
+        "./engineering/grill-with-docs",
+        "./engineering/triage",
+        "./engineering/improve-codebase-architecture",
+        "./engineering/setup-matt-pocock-skills",
+        "./engineering/tdd",
+        "./engineering/to-spec",
+        "./engineering/to-tickets",
+        "./engineering/wayfinder",
+        "./engineering/implement",
+        "./engineering/implement-spec",
+        "./engineering/prototype",
+        "./engineering/research",
+        "./engineering/domain-modeling",
+        "./engineering/codebase-design",
+        "./engineering/retro",
+        "./engineering/wizard",
+        "./productivity/grill-me",
+        "./productivity/grilling",
+        "./productivity/handoff",
+        "./productivity/teach",
+        "./productivity/to-questionnaire",
+        "./productivity/wait-what",
+        "./productivity/writing-for-agents"
+      ]
     }
   ]
 }

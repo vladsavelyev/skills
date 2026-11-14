@@ -1,17 +1,21 @@
 """Ship's block in a PR body: one tagged region the CLI owns, and the only part of the body it edits.
 
-    <the author's description>
+    <the author's description, its sketch and its ## Evidence>
 
     <!-- ship -->
-    > **Risk: low**: …
-    > Complexity: low, size: S (2 files, 30 lines)
+    ## Risk
+
+    **Low**, two-way door: …
+    **Blast radius:** …
+    **Complexity:** low, size S (2 files, 30 lines)
+
     > Feature tracking issue: closes #39
     > **Review round 1** (medium). Findings: none. A re-review after new commits would run at low.
     <!-- /ship -->
 
     🤖 <model> in <harness>
 
-The CLI renders the whole quote from the feature's state (`assess.render`) and sets it between
+The CLI renders the block's whole content from the feature's state (`assess.render`) and sets it between
 the tags. Every body ship writes has exactly one block: written once, rewritten in place after
 that. A body without one gets it above the author's signature (a trailing one-line paragraph
 starting with `🤖`), or at the end if there is none. A new description may come with or without
@@ -65,8 +69,8 @@ def _without(body: str, start: int, end: int) -> str:
     return f"{head}\n\n{tail}" if head and tail else head or tail
 
 
-def _wrap(quote: str) -> str:
-    return f"{_BEGIN}\n{quote.strip()}\n{_END}"
+def _wrap(content: str) -> str:
+    return f"{_BEGIN}\n{content.strip()}\n{_END}"
 
 
 def _place(text: str, block: str) -> str:
@@ -88,8 +92,8 @@ def _one_block(body: str, block: str) -> str:
     return body
 
 
-def with_block(body: str, quote: str, issue: int) -> str:
-    """`body` with ship's block set to `quote`, rewriting only what is between its tags.
+def with_block(body: str, content: str, issue: int) -> str:
+    """`body` with ship's block set to `content`, rewriting only what is between its tags.
 
     A body that has no block under the current tags yet is one ship wrote before: its old
     reference lines for `issue` are dropped, since the block carries the reference now, and a
@@ -100,7 +104,7 @@ def with_block(body: str, quote: str, issue: int) -> str:
     if not blocks or not body.startswith(_BEGIN, blocks[-1][0]):
         body = _legacy_ref_re(issue).sub("", body)
         blocks = _blocks(body)
-    block = _wrap(quote)
+    block = _wrap(content)
     if not blocks:
         return _one_block(_place(body, block), block)
     *extra, (start, end) = blocks
@@ -110,11 +114,11 @@ def with_block(body: str, quote: str, issue: int) -> str:
     return _one_block(body, block)
 
 
-def with_description(text: str, quote: str) -> str:
+def with_description(text: str, content: str) -> str:
     """`text` as the new description, with ship's block placed below it. Any block `text` carries
     (it is often the PR body fetched, edited and passed back) is dropped first: nothing in it is
     the author's, since it is rendered from state."""
     for start, end in reversed(_blocks(text)):
         text = _without(text, start, end)
-    block = _wrap(quote)
+    block = _wrap(content)
     return _one_block(_place(text, block), block)
