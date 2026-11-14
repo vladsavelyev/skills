@@ -1,7 +1,0 @@
-{
-  "name": "bro",
-  "description": "/bro: restate the last message in plain human language, with no jargon.",
-  "author": {
-    "name": "Vlad Savelyev"
-  }
-}
