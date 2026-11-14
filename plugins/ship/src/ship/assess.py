@@ -112,8 +112,8 @@ def _found(entry: dict) -> str:
     return ", ".join(parts) + regressions
 
 
-def _round_line(entry: dict) -> str:
-    title = f"**Review round {entry['run']}**"
+def _round_item(entry: dict) -> str:
+    title = f"- **Round {entry['run']}**"
     if entry.get("placeholder"):
         return f"{title}. Not recorded."
     # Rounds from before review sizing carry no depth; also already written into feature issues.
@@ -145,31 +145,38 @@ def _next_round(last: dict, depth: str) -> str:
 def _risk_section(review: Review) -> list[str]:
     """The Risk section: Sol's grade of the risk, read as its two halves (the door: whether a
     revert undoes what a bug did; the blast radius: who or what a bug reaches), then of the
-    complexity, with the PR's size. GitHub breaks a PR body's lines where they break here."""
+    complexity, with the PR's size. Each line is a paragraph of its own."""
     grade = review.grade
-    risk, why = _SPELLED[grade["risk"]].capitalize(), grade["why"].strip()
+    risk, why = _SPELLED[grade["risk"]], grade["why"].strip()
     complexity = (
-        f"**Complexity:** {_SPELLED[grade['complexity']]}, size {review.size} "
+        f"**Complexity:** {_SPELLED[grade['complexity']]}, **size**: {review.size} "
         f"({review.changed_files} files, {review.changed_lines} lines)"
     )
     if "door" not in grade:
         # Grades recorded before the door and blast radius existed carry neither. Kept ON PURPOSE:
         # they are already written into feature issues of PRs in flight.
-        return ["## Risk", "", f"**{risk}**: {why}", complexity]
-    door = f"**{risk}**, {grade['door']} door: {why}"
-    return ["## Risk", "", door, f"**Blast radius:** {grade['blast_radius'].strip()}", complexity]
+        lines = [f"**Risk: {risk}**, {why}"]
+    else:
+        lines = [f"**Risk: {risk}**, {grade['door']} door: {why}", f"**Blast radius:** {grade['blast_radius'].strip()}"]
+    return ["## Risk", *(p for line in [*lines, complexity] for p in ("", line))]
+
+
+def _review_section(*, issue: int, review: Review | None) -> list[str]:
+    """The Review section: the closing reference to the feature issue, then one item per review
+    round. A round's item lists what it found, which never changes afterwards."""
+    # `closes` is what makes GitHub close the issue on merge; a bare `#39` would only link it.
+    reference = f"tracking issue: closes #{issue}"
+    if review is None:
+        return ["## Review", "", f"Not reviewed yet ({reference})."]
+    runs = [e for e in review.history if "run" in e]
+    rounds = [_round_item(e) for e in runs]
+    rounds[-1] += _next_round(runs[-1], review.next_depth)
+    return ["## Review", "", f"Review rounds (with {reference}):", "", *rounds]
 
 
 def render(*, issue: int, review: Review | None) -> str:
-    """The content of the PR body's ship block. Once a review has graded the PR, the Risk section
-    from Sol's latest grade; then a quote of the closing reference to the feature issue and one line
-    per review round. A round's line lists what it found, which never changes afterwards. Before
-    any review it is the reference alone."""
-    # `closes` is what makes GitHub close the issue on merge; a bare `#39` would only link it.
-    reference = f"> Feature tracking issue: closes #{issue}"
-    if review is None:
-        return reference
-    runs = [e for e in review.history if "run" in e]
-    rounds = [_round_line(e) for e in runs]
-    rounds[-1] += _next_round(runs[-1], review.next_depth)
-    return "\n".join([*_risk_section(review), "", reference, *(f"> {line}" for line in rounds)])
+    """The content of the PR body's ship block: once a review has graded the PR, the Risk section
+    from Sol's latest grade; then the Review section; then a rule that sets the block off from the
+    author's signature below it."""
+    risk = [*_risk_section(review), ""] if review else []
+    return "\n".join([*risk, *_review_section(issue=issue, review=review), "", "---"])

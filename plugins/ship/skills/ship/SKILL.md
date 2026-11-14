@@ -84,8 +84,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      whatever the gate says (see `OPEN` below).
 
    The title says what the PR does, in plain words. End the description with your signature
-   line if your harness asks for one. The `## Risk` section is ship's, rendered from Sol's grade
-   into its block: never write one. `feature describe` takes the
+   line if your harness asks for one. The `## Risk` and `## Review` sections are ship's, rendered
+   into its block from Sol's grade and the review rounds: never write either. `feature describe` takes the
    text with or without ship's block (editing the fetched body is fine) and writes exactly one,
    above that signature. Sol and step 6 read this
    description to know the PR's intent, so it comes first.
@@ -201,7 +201,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    smallest fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
-   the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
+   the CLI counts them by severity and lists them on the round's item in the PR body. Write `--summary` as a real
    sentence about what was reviewed and found, never a bare "clean pass"; name any spec and design
    findings in it. Pass the effort Sol ran
    at as `--depth`, and Sol's grade as `--risk`, `--door`, `--blast-radius`, `--complexity` and
@@ -239,7 +239,7 @@ be followed up later: an open problem means the PR isn't ready.
 - Never close a feature out here, and never merge for the human.
 - Close fixed problems with `problem resolve`, not a `Closes #a, #b` PR line (GitHub links only the
   first number).
-- Don't hand-edit the JSON block in a feature issue, or the assessment section in a PR body.
+- Don't hand-edit the JSON block in a feature issue, or ship's block (its Risk and Review sections) in a PR body.
 - The CLI fails fast. Report its errors, don't work around them.
 
 ## Report

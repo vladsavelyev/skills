@@ -106,14 +106,21 @@ for GitHub to close the tracking issue:
 <!-- ship -->
 ## Risk
 
-**Low**, two-way door: a bad write is visible and fixed by hand
-**Blast radius:** ship's own block in this repo's PR bodies
-**Complexity:** low, size M (8 files, 412 lines)
+**Risk: low**, two-way door: a bad write is visible and fixed by hand
 
-> Feature tracking issue: closes #39
-> **Review round 1** (high). Findings: 1 low (#40).
-> **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
-> **Review round 3** (medium). Findings: none. A re-review after new commits would run at low.
+**Blast radius:** ship's own block in this repo's PR bodies
+
+**Complexity:** low, **size**: M (8 files, 412 lines)
+
+## Review
+
+Review rounds (with tracking issue: closes #39):
+
+- **Round 1** (high). Findings: 1 low (#40).
+- **Round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
+- **Round 3** (medium). Findings: none. A re-review after new commits would run at low.
+
+---
 <!-- /ship -->
 
 🤖 Claude Opus 5.5 in Claude Code (T3 Code)
@@ -122,13 +129,15 @@ for GitHub to close the tracking issue:
 Every command that writes the block (`feature pr`, `feature describe`, `feature review record`,
 `feature reconcile`) renders the block's whole content from the feature's state (`assess.render`) and sets
 it between the tags (`prbody.py`), so the block always shows the current state. Before any review
-it is the reference line alone; once Sol has graded the PR, a Risk section comes first, the one
-header ship writes, so a reader finds the stakes without reading the review log below it. A body without the block gets it above the author's signature (a
+it is a Review section holding the reference alone; once Sol has graded the PR, a Risk section
+comes first, so a reader finds the stakes before the review log. Each section's lines are
+paragraphs or list items of their own (GitHub would run single-newline lines together into one
+block), and a closing rule sets the block off from the signature. A body without the block gets it above the author's signature (a
 trailing one-line paragraph starting with `🤖`, the attribution line an agent harness asks for), or
 at the end. The grade is Sol's latest, its risk read as its two halves: the door (whether a revert
-undoes what a bug did) and the blast radius (who or what a bug reaches). Each round's line lists
+undoes what a bug did) and the blast radius (who or what a bug reaches). Each round's item lists
 what it found by severity (recorded with the round from `--found`), which never changes after the
-round. The latest round's line ends with the depth Sol's grade buys the next round. After a clean
+round. The latest round's item ends with the depth Sol's grade buys the next round. After a clean
 round no round is due (the gate only reopens if new commits move the head), so it reads `A
 re-review after new commits would run at <depth>` instead of `Next round would run at <depth>`.
 
@@ -150,7 +159,7 @@ ship), has that example taken for ship's block and replaced. Quoted inline, inde
 blockquote, the tags are the author's text.
 
 The reference keeps the `closes` keyword: GitHub closes the issue on merge only when the keyword
-comes right before the number (checked on PR #38's `closingIssuesReferences`: a quoted
+comes right before the number (checked on PR #38's `closingIssuesReferences`:
 `Feature tracking issue: closes #39` closes it, `Feature tracking issue: #39` doesn't).
 
 Before the block held it, the reference was a standalone line, `Closes #<issue> <!-- ship -->`
@@ -489,7 +498,7 @@ regressions, and counts them by their severity labels: the high/med ones are the
 `new_blocking` count (the stored key predates every-problem-blocks and keeps its name, since it is
 already written into feature issues), the low ones its `new_low` count. A clean pass is a bare
 `--found`, which (with zero open sub-issues) opens the gate. Every find blocks until it is closed;
-the round's line in the PR body lists them by severity. `--regressions` counts re-opened high/med
+the round's item in the PR body lists them by severity. `--regressions` counts re-opened high/med
 problems only, and feeds the churn signal: a re-opened low-severity nit is not evidence the design
 is wrong.
 

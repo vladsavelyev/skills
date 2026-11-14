@@ -74,7 +74,7 @@ def _review(grade: dict, history: list[dict], **kw) -> assess.Review:
     return assess.Review(grade=grade, history=history, **(defaults | kw))
 
 
-def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
+def test_render_writes_a_risk_section_and_a_review_section_with_one_item_per_round():
     grade = {
         "risk": "high",
         "door": "one-way",
@@ -91,32 +91,40 @@ def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
     assert assess.render(issue=39, review=_review(grade, history)) == (
         "## Risk\n"
         "\n"
-        "**High**, one-way door: whole-body rewrites can corrupt the ref\n"
-        "**Blast radius:** every open PR's body\n"
-        "**Complexity:** medium, size M (8 files, 412 lines)\n"
+        "**Risk: high**, one-way door: whole-body rewrites can corrupt the ref\n"
         "\n"
-        "> Feature tracking issue: closes #39\n"
-        "> **Review round 1** (high). Findings: 1 low (#40).\n"
-        "> **Review round 2** (xhigh). Findings: 1 high (#41), 2 med (#42, #44), 1 of them back after a fix.\n"
-        "> **Review round 3** (xhigh). Findings: none. A re-review after new commits would run at max."
+        "**Blast radius:** every open PR's body\n"
+        "\n"
+        "**Complexity:** medium, **size**: M (8 files, 412 lines)\n"
+        "\n"
+        "## Review\n"
+        "\n"
+        "Review rounds (with tracking issue: closes #39):\n"
+        "\n"
+        "- **Round 1** (high). Findings: 1 low (#40).\n"
+        "- **Round 2** (xhigh). Findings: 1 high (#41), 2 med (#42, #44), 1 of them back after a fix.\n"
+        "- **Round 3** (xhigh). Findings: none. A re-review after new commits would run at max.\n"
+        "\n"
+        "---"
     )
 
 
 def test_render_keeps_a_grade_recorded_before_the_door_and_blast_radius():
     grade = {"risk": "med", "complexity": "low", "why": "refine answers 429"}
     out = assess.render(issue=39, review=_review(grade, [{"run": 1, "depth": "medium", "found": {}}]))
-    assert out.splitlines()[:5] == [
+    assert out.splitlines()[:6] == [
         "## Risk",
         "",
-        "**Medium**: refine answers 429",
-        "**Complexity:** low, size M (8 files, 412 lines)",
+        "**Risk: medium**, refine answers 429",
+        "",
+        "**Complexity:** low, **size**: M (8 files, 412 lines)",
         "",
     ]
 
 
 def test_render_before_any_review_is_the_reference_alone():
     # `closes` is what makes GitHub close the issue on merge.
-    assert assess.render(issue=39, review=None) == "> Feature tracking issue: closes #39"
+    assert assess.render(issue=39, review=None) == "## Review\n\nNot reviewed yet (tracking issue: closes #39).\n\n---"
 
 
 def test_render_lists_a_hand_given_severity_after_the_known_ones():
@@ -124,8 +132,8 @@ def test_render_lists_a_hand_given_severity_after_the_known_ones():
     history = [{"run": 1, "depth": "low", "found": {"critical": [9], "low": [8]}, "regressions": 0}]
     out = assess.render(issue=39, review=_review(grade, history, next_depth="low"))
     assert (
-        out.splitlines()[-1]
-        == "> **Review round 1** (low). Findings: 1 low (#8), 1 critical (#9). Next round would run at low."
+        out.splitlines()[-3]
+        == "- **Round 1** (low). Findings: 1 low (#8), 1 critical (#9). Next round would run at low."
     )
 
 
@@ -137,8 +145,8 @@ def test_render_shows_rounds_recorded_before_found_existed():
         {"run": 3, "depth": "low", "new_blocking": 0, "new_low": 0, "regressions": 0},
     ]
     out = assess.render(issue=39, review=_review(grade, history, next_depth="low"))
-    assert out.splitlines()[-3:] == [
-        "> **Review round 1**. Not recorded.",
-        "> **Review round 2**. Findings: 2 blocking, 1 low.",
-        "> **Review round 3** (low). Findings: none. A re-review after new commits would run at low.",
+    assert out.splitlines()[-5:-2] == [
+        "- **Round 1**. Not recorded.",
+        "- **Round 2**. Findings: 2 blocking, 1 low.",
+        "- **Round 3** (low). Findings: none. A re-review after new commits would run at low.",
     ]

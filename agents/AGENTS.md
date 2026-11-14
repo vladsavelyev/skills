@@ -71,7 +71,7 @@ Never push directly to `main` branch. If working on a new feature, create a feat
 
 NEVER run `git reset --hard`. It destroys staged changes irreversibly. If you need to undo a bad `revert --no-commit` or similar, use `git checkout -- <file>` on specific files, or ask the user.
 
-PR descriptions are minimal. Open with no header: the motivation, brief and informal, and beside it the smallest sketch of what changed: a `diff` of a call tree, file tree, component tree or state change, pseudocode, or a Mermaid diagram, keeping only the calls, files and states the point needs. Leave the sketch out when the change is a line or two the motivation already names. Then `## Evidence` (see "Prove the PR works"). Ship adds `## Risk` when it reviews the PR (risk, door, blast radius, complexity and size, from the review's grade); don't write one by hand. No other headers: no "Summary", never a "Test plan", and no "Generated with <tool>" attribution lines.
+PR descriptions are minimal. Open with no header: the motivation, brief and informal, and beside it the smallest sketch of what changed: a `diff` of a call tree, file tree, component tree or state change, pseudocode, or a Mermaid diagram, keeping only the calls, files and states the point needs. Leave the sketch out when the change is a line or two the motivation already names. Then `## Evidence` (see "Prove the PR works"). Ship adds `## Risk` (risk, door, blast radius, complexity and size, from the review's grade) and `## Review` (the tracking issue and each review round); don't write either by hand. No other headers: no "Summary", never a "Test plan", and no "Generated with <tool>" attribution lines.
 
 ### Fleet of machines
 

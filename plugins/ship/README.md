@@ -123,7 +123,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
-| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
+| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one item per round into the PR body) and print the resulting verdict. |
 | `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (it blocks the gate until closed, at any severity). |
 | `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue as fixed. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. |

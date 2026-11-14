@@ -5,12 +5,19 @@
     <!-- ship -->
     ## Risk
 
-    **Low**, two-way door: …
-    **Blast radius:** …
-    **Complexity:** low, size S (2 files, 30 lines)
+    **Risk: low**, two-way door: …
 
-    > Feature tracking issue: closes #39
-    > **Review round 1** (medium). Findings: none. A re-review after new commits would run at low.
+    **Blast radius:** …
+
+    **Complexity:** low, **size**: S (2 files, 30 lines)
+
+    ## Review
+
+    Review rounds (with tracking issue: closes #39):
+
+    - **Round 1** (medium). Findings: none. A re-review after new commits would run at low.
+
+    ---
     <!-- /ship -->
 
     🤖 <model> in <harness>
