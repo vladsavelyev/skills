@@ -69,7 +69,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
 2. **Describe the PR.** A branch from `feature start` got its title and description before any
    code existed. When they no longer fit what the branch does (always on its first ship), rewrite
-   them. It runs in this order, with `## Evidence` its only header (no "Summary", no test plan):
+   them. It runs in this order, with no headers:
    - The motivation, in one to three informal sentences, from the original motivation in the PR
      body and the commit messages (`git log --format='%s%n%b' origin/<base>..HEAD`), not from the
      diff: Sol's spec check reads the PR's intent from these sentences.
@@ -77,18 +77,16 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      file tree, component tree or state change, pseudocode, or a Mermaid diagram. Keep only the
      calls, files and states the point needs. Leave it out when the change is a line or two the
      motivation already names.
-   - `## Evidence`, that it works, carried over from the existing description or the commits: a
+   - The evidence that it works, carried over from the existing description or the commits: a
      before and after, as a screencast or screenshots for a change users see, otherwise the test
      or command that failed before and passes now, with its output. Only what was run, and never
-     a suite's pass count or a list of test names. If the branch has none, the PR isn't ready
-     whatever the gate says (see `OPEN` below).
+     a suite's pass count or a list of test names. A change with nothing to run or see (docs,
+     comments) needs none.
 
    The title says what the PR does, in plain words. End the description with your signature
-   line if your harness asks for one. The `## Risk` section is ship's, rendered from Sol's grade
-   into its block: never write one. `feature describe` takes the
-   text with or without ship's block (editing the fetched body is fine) and writes exactly one,
-   above that signature. Sol and step 6 read this
-   description to know the PR's intent, so it comes first.
+   line if your harness asks for one. `feature describe` takes the text with or without ship's
+   block (editing the fetched body is fine) and writes exactly one, above that signature. Sol and
+   step 6 read this description to know the PR's intent, so it comes first.
 3. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
    review it comes from the diff stats and the paths touched; after one, from the last review's
    grade. Don't read the diff to second-guess it. Go higher only when the user asked for a deeper
@@ -219,8 +217,8 @@ be followed up later: an open problem means the PR isn't ready.
 
 - `OPEN` (0): safe to merge. Every problem is closed. If the PR is still a draft, mark it ready
   (`gh pr ready <PR#>`) only when the caller asked to ship; for a plain review, say in `Next`
-  that it's still a draft. The human merges. With nothing under `## Evidence` it is not safe to
-  merge: don't mark it ready, and `Next` says to run the change and add the evidence first.
+  that it's still a draft. The human merges. When the change can be run or seen and the description shows
+  no proof it was, it is not safe to merge: don't mark it ready.
 - `REVIEW_AGAIN` (10): the caller closes every open problem (fixes it, or `wontfix` if it isn't
   relevant), then calls this skill again.
 - `MERGED` (30): the PR is in. Don't review; the caller closes it out with `Skill(ship:close)`.
@@ -239,7 +237,7 @@ be followed up later: an open problem means the PR isn't ready.
 - Never close a feature out here, and never merge for the human.
 - Close fixed problems with `problem resolve`, not a `Closes #a, #b` PR line (GitHub links only the
   first number).
-- Don't hand-edit the JSON block in a feature issue, or the assessment section in a PR body.
+- Don't hand-edit the JSON block in a feature issue, or ship's block in a PR body.
 - The CLI fails fast. Report its errors, don't work around them.
 
 ## Report
@@ -267,8 +265,9 @@ Always include these caller rules in `Next` when they apply:
   wontfix <#> --reason "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for
   the next round, without asking the user."
 - With `OPEN`: "Tell the user it's safe to merge: every problem is closed. After they merge, call
-  `Skill(ship:close)` to close out." With `## Evidence` empty, instead: "Not safe to merge yet:
-  run the change, add its before and after under `## Evidence`, then call `Skill(ship:ship)`."
+  `Skill(ship:close)` to close out." With no evidence where the change needs some, instead: "Not safe
+  to merge yet: run the change, add its before and after to the description, then call
+  `Skill(ship:ship)`."
 - With `MERGED`: "Don't review. Call `Skill(ship:close)` to close the feature out."
 - With pre-existing bugs: "These aren't this PR's and don't hold its gate. Ask the user, for each,
   whether to fix it in a separate PR (`Skill(ship:start)` off the base branch) or just file an
