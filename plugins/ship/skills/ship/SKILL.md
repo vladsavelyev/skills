@@ -69,7 +69,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
 2. **Describe the PR.** A branch from `feature start` got its title and description before any
    code existed. When they no longer fit what the branch does (always on its first ship), rewrite
-   them. It runs in this order, with no headers (no "Summary", no "Evidence", no test plan):
+   them. It runs in this order, with no headers:
    - The motivation, in one to three informal sentences, from the original motivation in the PR
      body and the commit messages (`git log --format='%s%n%b' origin/<base>..HEAD`), not from the
      diff: Sol's spec check reads the PR's intent from these sentences.
