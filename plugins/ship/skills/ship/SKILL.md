@@ -259,9 +259,8 @@ Always include these caller rules in `Next` when they apply:
 - If the caller may not be in the worktree: "Call `EnterWorktree` with `path: <worktree>` (never
   `name:`) before editing. Editing from the main checkout edits the base branch."
 - With open problems: "Every one must be closed before the PR ships, low included; none ships as
-  debt. Fix each at its root cause, never with a guard over the symptom: a band-aid gets copied.
-  Prefer deleting or narrowing over new code, and grow the diff only as far as the root cause
-  needs, never to appease the reviewer. Commit and push, then `feature problem resolve <#>
+  debt. Fix each at its root cause, not the symptom; prefer deleting or narrowing over new code,
+  and don't grow the diff to appease the reviewer. Commit and push, then `feature problem resolve <#>
   --commit <sha>`. If a finding isn't relevant (wrong, by design, out of scope), `feature problem
   wontfix <#> --reason "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for
   the next round, without asking the user."

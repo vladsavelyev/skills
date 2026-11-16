@@ -190,12 +190,9 @@ Severity still feeds the churn signal, which reads high/med counts only. A PR me
 anyway is the one exception: its fix needs a new PR regardless, so close-out lets the user hand each
 open problem to a separate fix PR or keep it as an issue (`problem hand-off`) instead of waiting.
 
-**12. The smallest fix → the root-cause fix.** Sol was asked for "the smallest fix" on every
-finding, and the caller was told to "fix each with the smallest change". That steered both toward
-band-aids: a guard over the symptom, a special case for the input that broke. The next agent copies
-whatever pattern it finds in the code, so a band-aid spreads, and the reason people wrote them (no
-time to do it right) doesn't hold for an agent. Findings now carry the root-cause fix, and the
-caller fixes at the root while still growing the diff only as far as the root cause needs.
+**12. The smallest fix → the root-cause fix.** Asking Sol and the caller for "the smallest fix"
+steered both toward band-aids, which the next agent then copies. Findings now carry the root-cause
+fix.
 
 ## Deliberately deferred
 

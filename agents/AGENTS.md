@@ -2,12 +2,7 @@
 
 Always build code cleanly, modularly, and with proper architecture and separation of concerns. Never simply bolt on a feature because I asked for it: if it doesn't fit naturally, refactor so it does.
 
-**Fix the root cause, not the symptom.** No band-aids: no special case for the one input that broke, no retry around a race, no guard over a value that should never be `None`. The next agent copies whatever pattern it finds, so a band-aid spreads. Do the proper fix even when it's more invasive; a refactor is cheap for you. "Quick fix" or "smallest change" in a request still means the right fix, done without extras.
-
-- **Pin the behaviour before you move it.** Before a refactor, find the tests that cover what you're changing. If there are none, write them first and see them pass on the old code, then refactor, then run them again. If the behaviour can't be pinned by a test at a reasonable cost (UI, an external service), stop and say so instead of refactoring blind.
-- **Stay on the fix's path.** Refactor what the root cause runs through. A band-aid you notice elsewhere gets an issue, not a drive-by fix.
-- **Split big refactors out.** When the refactor dwarfs the fix, land it as its own PR and stack the fix on top.
-- **Ask only at a real fork.** Stop before the fix only when it's a genuine design choice or crosses a one-way door: a public API, a stored data format, a shared environment.
+**Fix the root cause, not the symptom.** No band-aids, even when asked for a quick fix: the next agent copies them. Refactor as far as the root cause needs and no further (file other band-aids as issues); a big refactor gets its own PR. Before refactoring, make sure tests cover what you move: write them if missing, or stop and say so if you can't. Ask first only at a one-way door: a public API, stored data, a shared environment.
 
 **Finish the follow-ups yourself.** Don't end with "left for you: run X, delete Y" when X and Y are things you can safely do: do them, verify them, report them done. Hand back only what truly needs me: my SSO or a secret only I hold, a rebuild or stack takeover my rules say to confirm, a real design choice.
 
