@@ -1,23 +1,13 @@
 """Ship's block in a PR body: one tagged region the CLI owns, and the only part of the body it edits.
 
-    <the author's description, its sketch and its ## Evidence>
+    <the author's description: the motivation, its sketch, and the evidence>
 
     <!-- ship -->
-    ## Risk
-
-    **Risk: low**, two-way door: …
-
-    **Blast radius:** …
-
-    **Complexity:** low, **size**: S (2 files, 30 lines)
-
-    ## Review
-
-    Review rounds (with tracking issue: closes #39):
-
-    - **Round 1** (medium). Findings: none. A re-review after new commits would run at low.
-
-    ---
+    > **Risk: low**, two-way door: a bad write is visible and fixed by hand
+    > **Blast radius:** ship's own block in this repo's PR bodies
+    > **Complexity:** low, size M (8 files, 412 lines)
+    > **Tracking issue:** closes #39
+    > **Review round 1** (medium). Findings: none. A re-review after new commits would run at low.
     <!-- /ship -->
 
     🤖 <model> in <harness>
