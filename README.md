@@ -20,7 +20,8 @@ My Claude Code plugins, as a marketplace (`vlad-skills`). Every plugin lives her
 project. `~/.claude/CLAUDE.md` imports it from the marketplace clone
 (`@~/.claude/plugins/marketplaces/vlad-skills/agents/AGENTS.md`), and `fleet` generates
 `~/.codex/AGENTS.md` from the same file plus the machine's own part of `~/.claude/CLAUDE.md`. The repo's own instructions are the root
-[AGENTS.md](AGENTS.md).
+[AGENTS.md](AGENTS.md). [agents/issue-tracker.md](agents/issue-tracker.md) is how Matt Pocock's skills use a
+project's GitHub Issues, the tracker the rules give every project.
 
 Change the rules here, with a PR. The marketplace clone and `~/.codex/AGENTS.md` are copies: the
 `sync` plugin refuses an agent's Edit or Write to them and says where the change goes, stops updating

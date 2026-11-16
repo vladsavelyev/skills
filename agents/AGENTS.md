@@ -75,6 +75,10 @@ NEVER run `git reset --hard`. It destroys staged changes irreversibly. If you ne
 
 PR descriptions are minimal and have no headers. Open with the motivation, brief and informal, and beside it the smallest sketch of what changed: a `diff` of a call tree, file tree, component tree or state change, pseudocode, or a Mermaid diagram, keeping only the calls, files and states the point needs. Leave the sketch out when the change is a line or two the motivation already names. Then the evidence (see "Prove the PR works"). Ship adds its own block when it reviews the PR. No "Generated with <tool>" attribution lines.
 
+### Issue tracker
+
+In every project, Matt Pocock's engineering skills (wayfinder, to-tickets, to-spec, triage) track work in the GitHub Issues of the project's own repo, following `~/.claude/plugins/marketplaces/vlad-skills/agents/issue-tracker.md`; no per-repo `/setup-matt-pocock-skills` is needed. A project whose `CLAUDE.md` or `AGENTS.md` has its own `## Agent skills` block follows that block instead.
+
 ### Fleet of machines
 
 I work from a fleet of machines: my laptop and remote T3 Code VMs. Each has its own `~/.claude`. These rules are `agents/AGENTS.md` in `vladsavelyev/skills`: every machine's `~/.claude/CLAUDE.md` imports them from the vlad-skills marketplace clone, which the `sync` plugin pulls at every session start. Each machine's own instructions (which machine it is, the rest of the fleet, what's installed there) are the part of its `~/.claude/CLAUDE.md` below the fleet marker. Codex reads both from `~/.codex/AGENTS.md`, which `fleet` generates. Change them with a PR in `~/git/skills`; they reach every machine from its next session. `fleet` (the `fleet` plugin), run on the laptop, keeps the rest in sync: the Claude Code version, skill repos, plugins, `~/.claude/settings*.json`, and the shared part of `~/.claude/CLAUDE.md`. Those machine instructions say which machine you are on.

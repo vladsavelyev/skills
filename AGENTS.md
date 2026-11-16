@@ -13,7 +13,7 @@ README.md for the layout.
 
 ### Issue tracker
 
-GitHub Issues on `vladsavelyev/skills`, via `gh`. See `docs/agents/issue-tracker.md`.
+GitHub Issues on `vladsavelyev/skills`, via `gh`. See `agents/issue-tracker.md`, the conventions every project uses.
 
 ### Triage labels
 
