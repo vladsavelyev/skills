@@ -190,6 +190,19 @@ Severity still feeds the churn signal, which reads high/med counts only. A PR me
 anyway is the one exception: its fix needs a new PR regardless, so close-out lets the user hand each
 open problem to a separate fix PR or keep it as an issue (`problem hand-off`) instead of waiting.
 
+**12. Every commit re-reviewed → only code no review has seen.** Once lows blocked (#11), a round
+that found only lows no longer ended the loop: their fixes moved the head off the reviewed SHA, and
+coverage asked for another full round. On navari #4890 that came to three rounds at high effort for
+four low findings (two docs, a test name, a docstring). Round 2 followed the round-1 fix and a merge
+of the parent branch that resolved a conflict in a decision doc. Each re-review of the whole PR
+turned up fresh nits of its own, so the loop ended on the budget, not on the code. Now `problem
+resolve --commit` records its fix commits, and the gate asks for a round only for a commit that adds
+code a review must see. Fixes of low problems don't, nor does a merge of the base that git made by
+itself (the base's code is reviewed in its own PRs, a squash-merged parent's in the parent's), nor a
+change confined to docs and tests. Replayed on #4890's commits, that is one round instead of three.
+`feature sync` invalidates the review only for a merge that resolved code by hand, and a re-invoked
+ship checks the gate before it asks Sol for anything.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

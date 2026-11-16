@@ -142,3 +142,13 @@ def test_render_shows_rounds_recorded_before_found_existed():
         "> **Review round 2**. Findings: 2 blocking, 1 low.",
         "> **Review round 3** (low). Findings: none. A re-review after new commits would run at low.",
     ]
+
+
+def test_a_round_that_found_only_low_problems_announces_no_further_round():
+    grade = {"risk": "med", "complexity": "med", "why": "a filter"}
+    history = [{"run": 1, "depth": "high", "found": {"low": [4910, 4911]}, "regressions": 0}]
+    out = assess.render(issue=4900, review=_review(grade, history, next_depth="high"))
+    assert out.splitlines()[-1] == (
+        "> **Review round 1** (high). Findings: 2 low (#4910, #4911). Their fixes need no further round; "
+        "other new commits would be reviewed at high."
+    )

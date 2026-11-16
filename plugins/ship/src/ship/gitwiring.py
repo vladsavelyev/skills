@@ -46,6 +46,45 @@ def branch_head_sha(branch: str, cwd: str | None = None) -> str:
     return run(["git", "rev-parse", "--short", branch], cwd=cwd)
 
 
+def full_sha(rev: str, cwd: str | None = None) -> str:
+    """The full sha of the commit `rev` names. Aborts if it names none."""
+    return run(["git", "rev-parse", "--verify", f"{rev}^{{commit}}"], cwd=cwd)
+
+
+def has_object(full_sha: str, cwd: str | None = None) -> bool:
+    """Whether this clone has the object a full sha names (`cat-file -e` exits 1 when it doesn't)."""
+    return try_run(["git", "cat-file", "-e", full_sha], cwd=cwd) is not None
+
+
+def fetch_pr_head(number: int, cwd: str | None = None) -> None:
+    """Fetch a PR's head commits. GitHub keeps `refs/pull/<n>/head` after the merge and after the
+    branch is deleted, so a merged PR's code is always reachable there."""
+    run(["git", "fetch", "--quiet", "origin", f"refs/pull/{number}/head"], cwd=cwd)
+
+
+def commits_since(since: str, head: str, cwd: str | None = None) -> list[tuple[str, list[str]]]:
+    """The commits on `head`'s own line that `since` doesn't have, oldest first, each with its
+    parents. The walk follows first parents only, so a merge stands for everything it brought in:
+    the base's commits behind it are the base's, not the branch's."""
+    out = run(["git", "rev-list", "--reverse", "--first-parent", "--parents", f"{since}..{head}"], cwd=cwd)
+    return [(sha, parents) for sha, *parents in (line.split() for line in out.splitlines())]
+
+
+def is_ancestor(commit: str, of: str, cwd: str | None = None) -> bool:
+    return try_run(["git", "merge-base", "--is-ancestor", commit, of], cwd=cwd) is not None
+
+
+def auto_merge_tree(first: str, second: str, cwd: str | None = None) -> str:
+    """The tree git makes of merging two commits by itself, conflict markers and all."""
+    return run(["git", "merge-tree", "--write-tree", first, second], cwd=cwd, ok=(0, 1)).splitlines()[0]
+
+
+def changed_paths(old: str, new: str, cwd: str | None = None) -> list[str]:
+    """The paths that differ between two commits or trees. A rename lists both of its paths."""
+    out = run(["git", "diff", "--name-only", "--no-renames", old, new], cwd=cwd)
+    return out.splitlines() if out else []
+
+
 def worktree_for_branch(branch: str, cwd: str | None = None) -> str | None:
     """Absolute path of the worktree that has `branch` checked out, or None if none does.
 

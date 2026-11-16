@@ -14,11 +14,18 @@ from datetime import UTC, datetime
 
 from . import assess, budget, gate, github, problems
 from .gitwiring import (
+    auto_merge_tree,
     branch_head_sha,
+    changed_paths,
+    commits_since,
     create_branch_and_worktree,
     current_branch,
     feature_issue,
+    fetch_pr_head,
+    full_sha,
     git_town_sync,
+    has_object,
+    is_ancestor,
     local_only_commits,
     parent_branch,
     remote_ref,
@@ -38,6 +45,8 @@ from .state import (
     parse_block_raw,
     render_block,
     replace_block,
+    fixes,
+    record_fix,
     record_review,
     set_status,
 )
@@ -97,6 +106,66 @@ def _review_head(branch: str, state: dict, pr_merged: bool) -> str:
     """The commit the last review has to cover. Once the PR has merged that is the PR's head — the code
     that went in; the local branch may lag behind it (pushed from another checkout) or be gone."""
     return github.pr_head_sha(state["pr"]) if pr_merged else branch_head_sha(branch)
+
+
+def _base_heads(state: dict) -> list[str]:
+    """The commits whose history counts as the PR's base: its base branch on origin and, once a
+    parent it was stacked on has merged, that parent's PR head. A squash merge leaves the parent's
+    own commits out of the base branch, but they were reviewed in the parent's PR all the same."""
+    base = github.pr_base_branch(state["pr"])
+    base_ref = remote_ref(base)
+    if base_ref is None:
+        sys.exit(
+            f"PR #{state['pr']} targets '{base}', which origin doesn't have: can't tell its merges of the base apart."
+        )
+    heads = [base_ref]
+    if state["base"] != base and (parent := github.merged_pr_for_branch(state["base"])) is not None:
+        fetch_pr_head(parent)
+        heads.append(github.pr_head_sha(parent))
+    return heads
+
+
+def _own_changes(commits: list[tuple[str, list[str]]], state: dict) -> list[tuple[str, list[str]]]:
+    """Each of `commits` (`commits_since`) with the paths of what it adds to the PR's code: a commit's
+    diff from its parent, a merge of the base's diff from the merge git makes of its parents by
+    itself (so only what was resolved by hand), any other merge's diff from its first parent."""
+    heads: list[str] | None = None
+    changes = []
+    for sha, parents in commits:
+        start = parents[0]
+        if len(parents) == 2:
+            heads = _base_heads(state) if heads is None else heads
+            if any(is_ancestor(parents[1], head) for head in heads):
+                start = auto_merge_tree(*parents)
+        changes.append((sha, changed_paths(start, sha)))
+    return changes
+
+
+def _unreviewed(state: dict, head: str, subs: list[dict]) -> list[str]:
+    """The commits since the last review that a review still has to see (`gate.needs_review`)."""
+    last = state["last_review"]
+    if last is None or gate.covers_head(last, head):
+        return []
+    if not has_object(head):
+        # A merged PR's head, read from GitHub, need not be in this clone at all.
+        fetch_pr_head(state["pr"])
+    changes = _own_changes(commits_since(last["sha"], head), state)
+    low_fixes = problems.low_fix_commits(fixes(state), subs)
+    return gate.needs_review(changes, low_fixes=low_fixes, sensitive=sensitive_patterns())
+
+
+def _decide(branch: str, state: dict, subs: list[dict], merged: bool) -> gate.GateDecision:
+    """The merge gate for `branch`, from its state and its problems (`github.sub_issues`)."""
+    rounds, pinned, _ = _resolve_budget(state)
+    return gate.evaluate(
+        blocking_open=len(problems.blocking(subs)),
+        last_review=state["last_review"],
+        history=state["review_history"],
+        budget=rounds,
+        unreviewed=_unreviewed(state, _review_head(branch, state, merged), subs),
+        budget_is_explicit=pinned,
+        pr_merged=merged,
+    )
 
 
 def _blocking(issue: int) -> list[dict]:
@@ -381,17 +450,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # the agent learns whether to fix and review again or to stop and escalate.
     blocking = problems.blocking(subs)
     _write_block(state, issue)
-    rounds, pinned, _ = _resolve_budget(state)
-    merged = _pr_merged(state)
-    decision = gate.evaluate(
-        blocking_open=len(blocking),
-        last_review=state["last_review"],
-        history=state["review_history"],
-        budget=rounds,
-        head_sha=_review_head(branch, state, merged),
-        budget_is_explicit=pinned,
-        pr_merged=merged,
-    )
+    decision = _decide(branch, state, subs, _pr_merged(state))
     github.comment(
         issue,
         f"🔍 Review run {run_num} ({args.sha}): {new_serious} new high/med, {new_low} new low, "
@@ -430,10 +489,20 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
 
 
 def cmd_problem_resolve(args: argparse.Namespace) -> None:
-    _require_problem(args.branch or current_branch(), args.number)
-    note = f"Fixed in {args.commit}." if args.commit else "Resolved."
+    """Close a fixed problem, recording its fix commits in the feature state: a commit that fixed
+    only low problems needs no review round of its own (`gate.needs_review`)."""
+    branch = args.branch or current_branch()
+    sub = _require_problem(branch, args.number)
+    commits = [full_sha(c) for c in args.commit]
+    if commits:
+        # State first, close second: if the close fails the problem is still open and still blocks,
+        # and a re-run records nothing twice.
+        issue, state, body = _load_state(branch)
+        record_fix(state, args.number, commits)
+        _save_state(issue, body, state)
+    note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
     github.close_issue(args.number, note)
-    print(f"Resolved problem #{args.number}")
+    print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
 def cmd_problem_wontfix(args: argparse.Namespace) -> None:
@@ -552,22 +621,15 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"Branch '{branch}' is not a tracked feature (no wired issue).")
         return
     _, state, _ = _load_state(branch)
-    blocking = _blocking(issue)
+    subs = github.sub_issues(issue)
+    blocking = problems.blocking(subs)
     # The PR's real state, not just its number: a merged PR whose feature never reached `merged` is
     # the failure that left a repo full of open tracking issues for PRs merged weeks earlier, and
     # this is the one place an agent reliably looks (the SessionStart hook prints it).
     pr_state = github.pr_state(state["pr"]) if state["pr"] is not None else None
     needs_close_out = pr_state == "MERGED" and state["status"] != "merged"
-    rounds, pinned, rounds_why = _resolve_budget(state)
-    decision = gate.evaluate(
-        blocking_open=len(blocking),
-        last_review=state["last_review"],
-        history=state["review_history"],
-        budget=rounds,
-        head_sha=_review_head(branch, state, pr_state == "MERGED"),
-        budget_is_explicit=pinned,
-        pr_merged=pr_state == "MERGED",
-    )
+    rounds, _, rounds_why = _resolve_budget(state)
+    decision = _decide(branch, state, subs, pr_state == "MERGED")
 
     if args.json:
         print(
@@ -623,19 +685,8 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 def _gate_for(branch: str) -> tuple[int, dict, list[dict], gate.GateDecision]:
     issue, state, _ = _load_state(branch)
-    blocking = _blocking(issue)
-    rounds, pinned, _ = _resolve_budget(state)
-    merged = _pr_merged(state)
-    decision = gate.evaluate(
-        blocking_open=len(blocking),
-        last_review=state["last_review"],
-        history=state["review_history"],
-        budget=rounds,
-        head_sha=_review_head(branch, state, merged),
-        budget_is_explicit=pinned,
-        pr_merged=merged,
-    )
-    return issue, state, blocking, decision
+    subs = github.sub_issues(issue)
+    return issue, state, problems.blocking(subs), _decide(branch, state, subs, _pr_merged(state))
 
 
 def cmd_gate(args: argparse.Namespace) -> None:
@@ -958,9 +1009,11 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
-    """Sync the branch with its base (recursively, via git-town), then invalidate the last
-    review so the gate reopens — the base moved, so the prior clean pass no longer covers
-    the code. Delegates the actual sync to git-town; does not auto-resolve conflicts."""
+    """Sync the branch with its base (recursively, via git-town). A merge git made by itself adds
+    none of the PR's code, so the last review still covers it, and so does one that resolved
+    conflicts only in docs and tests (`gate.needs_review`). One that resolved code by hand
+    invalidates the last review, and the next round starts a fresh budget. Delegates the actual
+    sync to git-town; does not auto-resolve conflicts."""
     branch = args.branch or current_branch()
     issue, state, _ = _load_state(branch)
 
@@ -970,26 +1023,30 @@ def cmd_sync(args: argparse.Namespace) -> None:
     after = run_head_sha()
 
     if after == before:
-        # Base already up to date and nothing merged in — the prior review still holds.
         print(f"Already up to date ({after}); review unchanged.")
         return
+    if state["last_review"] is None:
+        print(f"Synced to {after}. No review to keep or invalidate.")
+        return
+    merges = [(sha, parents) for sha, parents in commits_since(before, after) if len(parents) > 1]
+    if not gate.needs_review(_own_changes(merges, state), low_fixes=set(), sensitive=sensitive_patterns()):
+        print(f"Synced to {after}. The merge added no code a review must see, so the last review still covers it.")
+        return
 
-    # The base advanced: any prior "clean" review predates the newly merged code, so drop it.
-    # The gate reopens and a fresh in-session review + `feature review record` is required first.
-    # The marker in the history is load-bearing: the gate counts review rounds and reads the
-    # convergence trend only from runs AFTER it, so new base code buys a fresh round of budget
-    # instead of inheriting an exhausted one.
+    # The merge carries code resolved by hand. The marker in the history is load-bearing: the gate
+    # counts review rounds and reads the convergence trend only from runs AFTER it, so a conflicted
+    # base change buys a fresh round of budget instead of inheriting an exhausted one.
     stale = bool(gate.rounds_since_invalidation(state["review_history"]))
     if stale:
         state["review_history"].append({"event": "base-advanced", "sha": after, "at": _now()})
     state["last_review"] = None
     body = github.get_issue_body(issue)
     _save_state(issue, body, state)
-    note = f"🔄 Synced with base — now at {after} (was {before})."
+    note = f"🔄 Synced with base — now at {after} (was {before}), resolving conflicts in the merge."
     if stale:
-        note += " Previous clean review invalidated; re-review and `feature review record` before merge."
+        note += " Previous review invalidated; re-review and `feature review record` before merge."
     github.comment(issue, note)
-    print(f"Synced to {after}." + (" Gate reopened (review invalidated)." if stale else ""))
+    print(f"Synced to {after}." + (" The merge resolved conflicts, so the review was invalidated." if stale else ""))
 
 
 # ── arg parsing ───────────────────────────────────────────────────────────────
@@ -1085,7 +1142,12 @@ def build_parser() -> argparse.ArgumentParser:
     pa.set_defaults(func=cmd_problem_add)
     pr = psub.add_parser("resolve", help="Close a problem sub-issue")
     pr.add_argument("number", type=int)
-    pr.add_argument("--commit")
+    pr.add_argument(
+        "--commit",
+        action="append",
+        default=[],
+        help="A commit that fixed it (repeat for several). A commit that fixed only low problems needs no review round",
+    )
     pr.add_argument("--branch")
     pr.set_defaults(func=cmd_problem_resolve)
     pw = psub.add_parser(
@@ -1153,7 +1215,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--dry-run", action="store_true", help="Report what would change; write nothing")
     c.set_defaults(func=cmd_reconcile)
 
-    c = sub.add_parser("sync", help="Sync branch with base via git-town; reopens the gate if base moved")
+    c = sub.add_parser(
+        "sync", help="Sync branch with base via git-town; a merge that resolved conflicts reopens the gate"
+    )
     c.add_argument("--branch")
     c.add_argument("--stack", action="store_true", help="Sync the whole stack, not just this branch")
     c.set_defaults(func=cmd_sync)

@@ -3,7 +3,8 @@
 The gate has **three** outcomes, because a review loop has three real endings:
 
   OPEN            — no problem is open, and a review has covered the code that is on the
-                    branch right now. Ship it.
+                    branch right now, give or take fixes of low problems, merges of the
+                    base, and docs and tests (see `needs_review`). Ship it.
   REVIEW_AGAIN    — open problems or unreviewed code are outstanding and there is review budget
                     left to spend.
   NEEDS_DECISION  — the loop is not converging on its own: the budget is spent, or the trend
@@ -28,6 +29,8 @@ settle it says so out loud instead of asking for one more expensive round foreve
 
 from dataclasses import dataclass
 from enum import StrEnum
+
+from . import assess, budget
 
 # What to do next, per verdict — the gate's most useful output for an agent driving the loop.
 _NEXT_OPEN = "Human merges the PR, then close it out with `Skill(ship:close)`."
@@ -135,7 +138,7 @@ def churn_reason(rounds: list[dict]) -> str | None:
 
 
 def covers_head(last_review: dict | None, head_sha: str) -> bool:
-    """Whether the last valid review looked at the code that is on the branch right now.
+    """Whether the last valid review looked at exactly the commit that is on the branch now.
 
     Short and long shas both occur (the CLI hands out `--short`, a caller may pass a full one), so
     compare by prefix in either direction rather than demanding identical strings.
@@ -146,13 +149,38 @@ def covers_head(last_review: dict | None, head_sha: str) -> bool:
     return reviewed.startswith(head_sha) or head_sha.startswith(reviewed)
 
 
+def needs_review(changes: list[tuple[str, list[str]]], *, low_fixes: set[str], sensitive: list[str]) -> list[str]:
+    """The commits since the last review that a review still has to see, oldest first.
+
+    `changes` pairs each commit on the branch's own line since the reviewed one with the paths of its
+    own change: what it adds to the PR that no review has read (see `__main__._own_changes`; a merge
+    of the base git made by itself adds nothing). A commit needs no review when it:
+
+    - fixed low problems only (`low_fixes`, recorded by `feature problem resolve --commit`). A round
+      whose findings were all low used to cost a full extra round per fix, because the fix moved the
+      head: navari #4890 ran three rounds at high effort over four low findings (docs, a test name, a
+      docstring), and each re-review of the whole PR turned up fresh nits of its own. A fix of a high
+      or med problem still gets reviewed: that change was wrong enough that its fix may be too.
+    - adds nothing, or touches only paths whose bugs cost little (`assess.path_risk` low: docs and
+      tests, never a path the repo declared `sensitive`). That covers a merge that resolved a
+      conflict in a doc, as both of #4890's base merges did.
+    """
+    return [
+        sha
+        for sha, paths in changes
+        if sha not in low_fixes
+        and paths
+        and assess.path_risk(paths, budget.sensitive_matches(paths, sensitive)) != "low"
+    ]
+
+
 def evaluate(
     *,
     blocking_open: int,
     last_review: dict | None,
     history: list[dict],
     budget: int,
-    head_sha: str,
+    unreviewed: list[str],
     budget_is_explicit: bool = False,
     pr_merged: bool = False,
 ) -> GateDecision:
@@ -166,8 +194,11 @@ def evaluate(
     a commit: once the agent closed the rest as not relevant, the gate still saw the old nonzero
     count and stayed shut with no way to reopen it. Coverage asks the question the safety property
     actually cares about — *has this code been reviewed?* — and answers both cases correctly: a fix
-    commits, so HEAD moves and a fresh review is required; a `wontfix` close doesn't, so the
-    existing review still stands. Counts remain in `review_history` for the convergence trend.
+    of a serious problem commits code a review must see; a `wontfix` close doesn't, so the existing
+    review still stands. Counts remain in `review_history` for the convergence trend.
+
+    `unreviewed` is what the last review didn't see and must (`needs_review`), ignored when there is
+    no last review.
 
     `pr_merged` short-circuits to MERGED but keeps the reasons: the loop is over either way, and the
     close-out record names what was still outstanding when the PR went in.
@@ -180,10 +211,10 @@ def evaluate(
         reasons.append(f"{blocking_open} problem(s) open, every one blocking")
     if last_review is None:
         reasons.append("no valid review run recorded")
-    elif not covers_head(last_review, head_sha):
+    elif unreviewed:
         reasons.append(
-            f"the last review looked at {last_review['sha']}, but the branch is now at {head_sha} — "
-            f"that code has never been reviewed"
+            f"{len(unreviewed)} commit(s) since the last review at {last_review['sha'][:9]} have never been "
+            f"reviewed: {', '.join(sha[:9] for sha in unreviewed)}"
         )
 
     if pr_merged:
@@ -206,8 +237,9 @@ def evaluate(
             budget,
         )
     next_step = (
-        "Close every open problem: fix it, or `feature problem wontfix <#> --reason '<why>'` if it "
-        "isn't relevant. Then re-review and `feature review record`."
+        "Close every open problem: fix it and `feature problem resolve <#> --commit <sha>` for each "
+        "fix commit, or `feature problem wontfix <#> --reason '<why>'` if it isn't relevant. Then check "
+        "the gate again: fixes of low problems need no review, anything else gets one (`feature review record`)."
         if blocking_open > 0
         else "Review the PR and `feature review record` the run."
     )

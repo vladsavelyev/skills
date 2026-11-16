@@ -106,8 +106,29 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         "review_history": [],
         "last_prompt": None,
         "last_review": None,
+        # Fix commit (full sha) -> the problems it fixed, from `feature problem resolve --commit`.
+        # The gate lets a commit that only fixed low problems through without another review.
+        "fixes": {},
         "updated": updated,
     }
+
+
+def fixes(state: dict) -> dict[str, list[int]]:
+    """The recorded fix commits, each with the problems it fixed.
+
+    A block without the key reads as no fixes recorded. Kept ON PURPOSE: schema-2 blocks written
+    before fixes were recorded are in the feature issues of PRs in flight, and every fix there is
+    simply one the gate can't vouch for, so it asks for a review as it always did.
+    """
+    return state.get("fixes", {})
+
+
+def record_fix(state: dict, problem: int, commits: list[str]) -> None:
+    """Record that `commits` (full shas) fixed `problem`. Idempotent, so a retried resolve is safe."""
+    recorded = state.setdefault("fixes", {})
+    for sha in commits:
+        if problem not in recorded.setdefault(sha, []):
+            recorded[sha].append(problem)
 
 
 def review_entry(*, run: int, sha: str, new_blocking: int, new_low: int, regressions: int, summary: str) -> dict:
