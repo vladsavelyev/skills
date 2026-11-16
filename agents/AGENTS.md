@@ -1,6 +1,8 @@
 ### Working style
 
-Always build code cleanly, modularly, and with proper architecture and separation of concerns. Never simply bolt on a feature because I asked for it. If you can’t find an easy way to build it naturally, and you'd recommend a refactor to make the whole thing cleanly, stop your work ahead of time and say so.
+Always build code cleanly, modularly, and with proper architecture and separation of concerns. Never simply bolt on a feature because I asked for it: if it doesn't fit naturally, refactor so it does.
+
+**Fix the root cause, not the symptom.** No band-aids, even when asked for a quick fix: the next agent copies them. Refactor as far as the root cause needs and no further (file other band-aids as issues); a big refactor gets its own PR. Before refactoring, make sure tests cover what you move: write them if missing, or stop and say so if you can't. Ask first only at a one-way door: a public API, stored data, a shared environment.
 
 **Finish the follow-ups yourself.** Don't end with "left for you: run X, delete Y" when X and Y are things you can safely do: do them, verify them, report them done. Hand back only what truly needs me: my SSO or a secret only I hold, a rebuild or stack takeover my rules say to confirm, a real design choice.
 

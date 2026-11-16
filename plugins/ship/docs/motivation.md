@@ -199,6 +199,10 @@ review must see: not a recorded fix of low problems, not a merge of the base git
 squash-merged parent's commits count as base), not a change to docs and tests alone. On #4890's
 commits that is one round, not three.
 
+**13. The smallest fix → the root-cause fix.** Asking the reviewer and the caller for "the smallest
+fix" steered both toward band-aids, which the next agent then copies. Findings now carry the
+root-cause fix.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

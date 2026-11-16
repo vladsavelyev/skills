@@ -125,10 +125,10 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    file:line; a concrete failure scenario (inputs or state → wrong outcome); the evidence, as
    far up this ladder as is cheap: cited (you read the line), traced (you walked the failure
    step by step and it gets there), ran (a script or test calling the real code fails as
-   described; include it); the smallest fix. If you find nothing, say so plainly.
+   described; include it); the root-cause fix. If you find nothing, say so plainly.
 
    Then, separately from the defects, two more checks, each under its own heading. Give each
-   finding a title, file:line where there is one, and the smallest fix; no severity.
+   finding a title, file:line where there is one, and the root-cause fix; no severity.
    - Spec: what the PR's intent asks for that the diff leaves missing or partial, and behaviour
      the diff adds that nothing asked for. The intent is the PR description's prose (its sketch
      and evidence show what was built, not what was asked), the issues it or its
@@ -199,7 +199,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
    the repro, its evidence (traced or ran, with the script if ran; for a spec gap, the quoted
    intent; for a design finding, the rule or smell and the code), `file:line` and the suggested
-   smallest fix.
+   root-cause fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
    the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
@@ -252,8 +252,8 @@ Feature: <name>  Branch: <branch>  PR: <url or none>  Worktree: <abs path>
 Did: <one line>
 Review: Sol <model> at <depth>; graded risk <…> (<door> door, blast radius <…>), complexity <…>; next round at <depth>   (or not run)
 Gate: <verdict, or not run>
-Open: #<n> [sev] <title> — <file:line>, fix: <smallest fix>   (every open problem, low included, one per line; or none)
-Pre-existing: [sev] <title> — <file:line>, <failure scenario>, fix: <smallest fix>   (bugs this PR didn't cause, one per line; or none)
+Open: #<n> [sev] <title> — <file:line>, fix: <root-cause fix>   (every open problem, low included, one per line; or none)
+Pre-existing: [sev] <title> — <file:line>, <failure scenario>, fix: <root-cause fix>   (bugs this PR didn't cause, one per line; or none)
 Next:
 - <exact steps for the caller>
 ```
@@ -262,10 +262,10 @@ Always include these caller rules in `Next` when they apply:
 - If the caller may not be in the worktree: "Call `EnterWorktree` with `path: <worktree>` (never
   `name:`) before editing. Editing from the main checkout edits the base branch."
 - With open problems: "Every one must be closed before the PR ships, low included; none ships as
-  debt. Fix each with the smallest change; prefer deleting or narrowing over new code, and don't
-  grow the diff to appease the reviewer. Commit fixes apart from other work (a low problem's fix
-  skips review) and push, then `feature problem resolve <#> --commit <sha>…` with every commit of
-  the fix. If a finding isn't relevant (wrong, by design, out of scope), `feature problem wontfix
+  debt. Fix each at its root cause, not the symptom; prefer deleting or narrowing over new code,
+  and don't grow the diff to appease the reviewer. Commit fixes apart from other work (a low
+  problem's fix skips review) and push, then `feature problem resolve <#> --commit <sha>…` with
+  every commit of the fix. If a finding isn't relevant (wrong, by design, out of scope), `feature problem wontfix
   <#> --reason "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` again, without
   asking the user."
 - With `OPEN`: "Tell the user it's safe to merge: every problem is closed. After they merge, call
@@ -275,7 +275,7 @@ Always include these caller rules in `Next` when they apply:
 - With `MERGED`: "Don't review. Call `Skill(ship:close)` to close the feature out."
 - With pre-existing bugs: "These aren't this PR's and don't hold its gate. Ask the user, for each,
   whether to fix it in a separate PR (`Skill(ship:start)` off the base branch) or just file an
-  issue for it (`gh issue create`, with the failure scenario, `file:line` and the smallest fix).
+  issue for it (`gh issue create`, with the failure scenario, `file:line` and the root-cause fix).
   Don't decide for them, and don't fix it in this PR."
 - With `NEEDS_DECISION`: "Close every open problem as for `REVIEW_AGAIN` (fix, commit, push,
   `feature problem resolve`, or `wontfix` if it isn't relevant); the budget limits review rounds,
