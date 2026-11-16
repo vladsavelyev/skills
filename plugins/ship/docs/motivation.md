@@ -191,8 +191,8 @@ anyway is the one exception: its fix needs a new PR regardless, so close-out let
 open problem to a separate fix PR or keep it as an issue (`problem hand-off`) instead of waiting.
 
 **12. The smallest fix → the root-cause fix.** Asking the reviewer and the caller for "the smallest
-fix" steered both toward band-aids, which the next agent then copies. Findings now carry the root-
-cause fix.
+fix" steered both toward band-aids, which the next agent then copies. Findings now carry the
+root-cause fix.
 
 ## Deliberately deferred
 
