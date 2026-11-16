@@ -86,7 +86,7 @@ def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
         {"run": 1, "depth": "high", "found": {"low": [40]}, "regressions": 0},
         {"event": "base-advanced"},
         {"run": 2, "depth": "xhigh", "found": {"high": [41], "med": [42, 44]}, "regressions": 1},
-        {"run": 3, "depth": "xhigh", "found": {}, "regressions": 0},
+        {"run": 3, "depth": "xhigh", "found": {}, "new_blocking": 0, "regressions": 0},
     ]
     assert assess.render(issue=39, review=_review(grade, history)) == (
         "## Risk\n"
@@ -104,7 +104,9 @@ def test_render_quotes_the_grade_the_reference_and_one_line_per_round():
 
 def test_render_keeps_a_grade_recorded_before_the_door_and_blast_radius():
     grade = {"risk": "med", "complexity": "low", "why": "refine answers 429"}
-    out = assess.render(issue=39, review=_review(grade, [{"run": 1, "depth": "medium", "found": {}}]))
+    out = assess.render(
+        issue=39, review=_review(grade, [{"run": 1, "depth": "medium", "found": {}, "new_blocking": 0}])
+    )
     assert out.splitlines()[:5] == [
         "## Risk",
         "",
@@ -121,7 +123,7 @@ def test_render_before_any_review_is_the_reference_alone():
 
 def test_render_lists_a_hand_given_severity_after_the_known_ones():
     grade = {"risk": "low", "complexity": "low", "why": "docs"}
-    history = [{"run": 1, "depth": "low", "found": {"critical": [9], "low": [8]}, "regressions": 0}]
+    history = [{"run": 1, "depth": "low", "found": {"critical": [9], "low": [8]}, "new_blocking": 1, "regressions": 0}]
     out = assess.render(issue=39, review=_review(grade, history, next_depth="low"))
     assert (
         out.splitlines()[-1]
@@ -146,9 +148,8 @@ def test_render_shows_rounds_recorded_before_found_existed():
 
 def test_a_round_that_found_only_low_problems_announces_no_further_round():
     grade = {"risk": "med", "complexity": "med", "why": "a filter"}
-    history = [{"run": 1, "depth": "high", "found": {"low": [4910, 4911]}, "regressions": 0}]
+    history = [{"run": 1, "depth": "high", "found": {"low": [4910, 4911]}, "new_blocking": 0, "regressions": 0}]
     out = assess.render(issue=4900, review=_review(grade, history, next_depth="high"))
     assert out.splitlines()[-1] == (
-        "> **Review round 1** (high). Findings: 2 low (#4910, #4911). Their fixes need no further round; "
-        "other new commits would be reviewed at high."
+        "> **Review round 1** (high). Findings: 2 low (#4910, #4911). A re-review after new commits would run at high."
     )

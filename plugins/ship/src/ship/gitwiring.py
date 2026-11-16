@@ -57,15 +57,13 @@ def has_object(full_sha: str, cwd: str | None = None) -> bool:
 
 
 def fetch_pr_head(number: int, cwd: str | None = None) -> None:
-    """Fetch a PR's head commits. GitHub keeps `refs/pull/<n>/head` after the merge and after the
-    branch is deleted, so a merged PR's code is always reachable there."""
+    """Fetch a PR's head commits. GitHub keeps `refs/pull/<n>/head` after the merge and the branch."""
     run(["git", "fetch", "--quiet", "origin", f"refs/pull/{number}/head"], cwd=cwd)
 
 
 def commits_since(since: str, head: str, cwd: str | None = None) -> list[tuple[str, list[str]]]:
-    """The commits on `head`'s own line that `since` doesn't have, oldest first, each with its
-    parents. The walk follows first parents only, so a merge stands for everything it brought in:
-    the base's commits behind it are the base's, not the branch's."""
+    """The commits on `head`'s first-parent line that `since` doesn't have, oldest first, each with
+    its parents: a merge stands for everything it brought in."""
     out = run(["git", "rev-list", "--reverse", "--first-parent", "--parents", f"{since}..{head}"], cwd=cwd)
     return [(sha, parents) for sha, *parents in (line.split() for line in out.splitlines())]
 

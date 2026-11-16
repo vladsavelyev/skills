@@ -67,8 +67,6 @@ def handed_off(subs: list[dict]) -> list[dict]:
 
 
 def low_fix_commits(fixes: dict[str, list[int]], subs: list[dict]) -> set[str]:
-    """The fix commits (`state.fixes`) whose every problem is `low`. A commit that also fixed a high
-    or med problem is not one: that fix gets reviewed. Aborts on a problem that isn't one of `subs`,
-    since `problem resolve` only ever records the feature's own."""
+    """The fix commits (`state.fixes`) whose every problem is `low`."""
     sev = {s["number"]: severity(s) for s in subs}
     return {sha for sha, fixed in fixes.items() if all(sev[n] == LOW_SEV for n in fixed)}

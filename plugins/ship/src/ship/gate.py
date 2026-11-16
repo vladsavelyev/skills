@@ -3,8 +3,8 @@
 The gate has **three** outcomes, because a review loop has three real endings:
 
   OPEN            — no problem is open, and a review has covered the code that is on the
-                    branch right now, give or take fixes of low problems, merges of the
-                    base, and docs and tests (see `needs_review`). Ship it.
+                    branch right now, or by nothing since that needs one (`needs_review`).
+                    Ship it.
   REVIEW_AGAIN    — open problems or unreviewed code are outstanding and there is review budget
                     left to spend.
   NEEDS_DECISION  — the loop is not converging on its own: the budget is spent, or the trend
@@ -152,18 +152,10 @@ def covers_head(last_review: dict | None, head_sha: str) -> bool:
 def needs_review(changes: list[tuple[str, list[str]]], *, low_fixes: set[str], sensitive: list[str]) -> list[str]:
     """The commits since the last review that a review still has to see, oldest first.
 
-    `changes` pairs each commit on the branch's own line since the reviewed one with the paths of its
-    own change: what it adds to the PR that no review has read (see `__main__._own_changes`; a merge
-    of the base git made by itself adds nothing). A commit needs no review when it:
-
-    - fixed low problems only (`low_fixes`, recorded by `feature problem resolve --commit`). A round
-      whose findings were all low used to cost a full extra round per fix, because the fix moved the
-      head: navari #4890 ran three rounds at high effort over four low findings (docs, a test name, a
-      docstring), and each re-review of the whole PR turned up fresh nits of its own. A fix of a high
-      or med problem still gets reviewed: that change was wrong enough that its fix may be too.
-    - adds nothing, or touches only paths whose bugs cost little (`assess.path_risk` low: docs and
-      tests, never a path the repo declared `sensitive`). That covers a merge that resolved a
-      conflict in a doc, as both of #4890's base merges did.
+    `changes` pairs each commit since the reviewed one with the paths of its own change
+    (`__main__._own_changes`). A commit needs no review if it fixed only low problems (`low_fixes`;
+    a high or med problem's fix may be as wrong as the change it fixed), or if its own change is
+    empty or only docs and tests (`assess.path_risk` low). Why: docs/motivation.md #12.
     """
     return [
         sha
@@ -197,8 +189,7 @@ def evaluate(
     of a serious problem commits code a review must see; a `wontfix` close doesn't, so the existing
     review still stands. Counts remain in `review_history` for the convergence trend.
 
-    `unreviewed` is what the last review didn't see and must (`needs_review`), ignored when there is
-    no last review.
+    `unreviewed` is `needs_review`'s list, ignored when there is no last review.
 
     `pr_merged` short-circuits to MERGED but keeps the reasons: the loop is over either way, and the
     close-out record names what was still outstanding when the PR went in.
@@ -237,9 +228,9 @@ def evaluate(
             budget,
         )
     next_step = (
-        "Close every open problem: fix it and `feature problem resolve <#> --commit <sha>` for each "
-        "fix commit, or `feature problem wontfix <#> --reason '<why>'` if it isn't relevant. Then check "
-        "the gate again: fixes of low problems need no review, anything else gets one (`feature review record`)."
+        "Close every open problem: fix it (`feature problem resolve <#> --commit <sha>…`), or "
+        "`feature problem wontfix <#> --reason '<why>'` if it isn't relevant. Then review and "
+        "`feature review record` if the gate still asks for it."
         if blocking_open > 0
         else "Review the PR and `feature review record` the run."
     )

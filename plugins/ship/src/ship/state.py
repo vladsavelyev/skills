@@ -107,19 +107,14 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         "last_prompt": None,
         "last_review": None,
         # Fix commit (full sha) -> the problems it fixed, from `feature problem resolve --commit`.
-        # The gate lets a commit that only fixed low problems through without another review.
         "fixes": {},
         "updated": updated,
     }
 
 
 def fixes(state: dict) -> dict[str, list[int]]:
-    """The recorded fix commits, each with the problems it fixed.
-
-    A block without the key reads as no fixes recorded. Kept ON PURPOSE: schema-2 blocks written
-    before fixes were recorded are in the feature issues of PRs in flight, and every fix there is
-    simply one the gate can't vouch for, so it asks for a review as it always did.
-    """
+    """The recorded fix commits, each with the problems it fixed. A block without the key has none:
+    kept ON PURPOSE, as blocks from before `fixes` are in the feature issues of PRs in flight."""
     return state.get("fixes", {})
 
 

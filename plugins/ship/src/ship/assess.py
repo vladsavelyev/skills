@@ -133,26 +133,13 @@ class Review:
     next_depth: str
 
 
-def _only_low(entry: dict) -> bool:
-    """Whether a round found something, all of it low."""
-    if "found" in entry:
-        return set(entry["found"]) == {"low"}
-    # Rounds recorded before `--found` carry only their counts (see `_found_parts`).
-    return entry["new_blocking"] == 0 and entry["new_low"] > 0
-
-
 def _next_round(last: dict, depth: str) -> str:
-    """The depth the next round would run at. After a clean round no round is due, so the line
-    says one only follows new commits (they move the head off the reviewed SHA and reopen the gate),
-    rather than read as if another round were pending. Nor is one due after a round that found
-    only low problems: their fixes need none (`gate.needs_review`)."""
-    if last.get("placeholder"):
+    """The depth the next round would run at. After a round that found no high or med problem no
+    round is due (low problems' fixes need none, see `gate.needs_review`), so the line says one only
+    follows new commits, rather than read as if another round were pending."""
+    if last.get("placeholder") or last["new_blocking"]:
         return f" Next round would run at {depth}."
-    if not _found_parts(last):
-        return f" A re-review after new commits would run at {depth}."
-    if _only_low(last):
-        return f" Their fixes need no further round; other new commits would be reviewed at {depth}."
-    return f" Next round would run at {depth}."
+    return f" A re-review after new commits would run at {depth}."
 
 
 def _risk_section(review: Review) -> list[str]:

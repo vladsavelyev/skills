@@ -110,8 +110,8 @@ def _review_head(branch: str, state: dict, pr_merged: bool) -> str:
 
 def _base_heads(state: dict) -> list[str]:
     """The commits whose history counts as the PR's base: its base branch on origin and, once a
-    parent it was stacked on has merged, that parent's PR head. A squash merge leaves the parent's
-    own commits out of the base branch, but they were reviewed in the parent's PR all the same."""
+    parent it was stacked on has merged, that parent's PR head (a squash merge leaves the parent's
+    commits out of the base branch, but its PR reviewed them)."""
     base = github.pr_base_branch(state["pr"])
     base_ref = remote_ref(base)
     if base_ref is None:
@@ -126,9 +126,9 @@ def _base_heads(state: dict) -> list[str]:
 
 
 def _own_changes(commits: list[tuple[str, list[str]]], state: dict) -> list[tuple[str, list[str]]]:
-    """Each of `commits` (`commits_since`) with the paths of what it adds to the PR's code: a commit's
-    diff from its parent, a merge of the base's diff from the merge git makes of its parents by
-    itself (so only what was resolved by hand), any other merge's diff from its first parent."""
+    """Each of `commits` with the paths of what it adds to the PR's code: its diff from its first
+    parent or, for a merge of the base, from the merge git makes by itself (so only what was resolved
+    by hand)."""
     heads: list[str] | None = None
     changes = []
     for sha, parents in commits:
@@ -489,14 +489,12 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
 
 
 def cmd_problem_resolve(args: argparse.Namespace) -> None:
-    """Close a fixed problem, recording its fix commits in the feature state: a commit that fixed
-    only low problems needs no review round of its own (`gate.needs_review`)."""
+    """Close a fixed problem, recording its fix commits for the gate (`gate.needs_review`)."""
     branch = args.branch or current_branch()
     sub = _require_problem(branch, args.number)
     commits = [full_sha(c) for c in args.commit]
     if commits:
-        # State first, close second: if the close fails the problem is still open and still blocks,
-        # and a re-run records nothing twice.
+        # State first: if the close fails, the problem still blocks, and a re-run records nothing twice.
         issue, state, body = _load_state(branch)
         record_fix(state, args.number, commits)
         _save_state(issue, body, state)
@@ -1009,11 +1007,9 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
-    """Sync the branch with its base (recursively, via git-town). A merge git made by itself adds
-    none of the PR's code, so the last review still covers it, and so does one that resolved
-    conflicts only in docs and tests (`gate.needs_review`). One that resolved code by hand
-    invalidates the last review, and the next round starts a fresh budget. Delegates the actual
-    sync to git-town; does not auto-resolve conflicts."""
+    """Sync the branch with its base (recursively, via git-town). If the merge resolved code by hand
+    (`gate.needs_review`), invalidate the last review, so the next round starts a fresh budget.
+    Delegates the actual sync to git-town; does not auto-resolve conflicts."""
     branch = args.branch or current_branch()
     issue, state, _ = _load_state(branch)
 
@@ -1033,9 +1029,9 @@ def cmd_sync(args: argparse.Namespace) -> None:
         print(f"Synced to {after}. The merge added no code a review must see, so the last review still covers it.")
         return
 
-    # The merge carries code resolved by hand. The marker in the history is load-bearing: the gate
-    # counts review rounds and reads the convergence trend only from runs AFTER it, so a conflicted
-    # base change buys a fresh round of budget instead of inheriting an exhausted one.
+    # The marker in the history is load-bearing: the gate counts review rounds and reads the
+    # convergence trend only from runs AFTER it, so a conflicted base change buys a fresh round of
+    # budget instead of inheriting an exhausted one.
     stale = bool(gate.rounds_since_invalidation(state["review_history"]))
     if stale:
         state["review_history"].append({"event": "base-advanced", "sha": after, "at": _now()})
@@ -1146,7 +1142,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--commit",
         action="append",
         default=[],
-        help="A commit that fixed it (repeat for several). A commit that fixed only low problems needs no review round",
+        help="A commit that fixed it (repeat for several); one that fixed only low problems needs no review",
     )
     pr.add_argument("--branch")
     pr.set_defaults(func=cmd_problem_resolve)
