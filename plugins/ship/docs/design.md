@@ -104,7 +104,7 @@ The block lives in the body, not a comment, because the `closes #<issue>` keywor
 for GitHub to close the tracking issue:
 
 ```
-<the author's description: the motivation, its sketch, and the evidence>
+<the author's description: the motivation and the evidence>
 
 <!-- ship -->
 > **Risk: low**, two-way door: a bad write is visible and fixed by hand

@@ -76,10 +76,6 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - The motivation, in one to three informal sentences, from the original motivation in the PR
      body and the commit messages (`git log --format='%s%n%b' origin/<base>..HEAD`), not from the
      diff: Sol's spec check reads the PR's intent from these sentences.
-   - Beside it, the smallest sketch of what changed, drawn from the diff: a `diff` of a call tree,
-     file tree, component tree or state change, pseudocode, or a Mermaid diagram. Keep only the
-     calls, files and states the point needs. Leave it out when the change is a line or two the
-     motivation already names.
    - The evidence that it works, carried over from the existing description or the commits: a
      before and after, as a screencast or screenshots for a change users see, otherwise the test
      or command that failed before and passes now, with its output. Only what was run, and never
@@ -130,8 +126,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    Then, separately from the defects, two more checks, each under its own heading. Give each
    finding a title, file:line where there is one, and the root-cause fix; no severity.
    - Spec: what the PR's intent asks for that the diff leaves missing or partial, and behaviour
-     the diff adds that nothing asked for. The intent is the PR description's prose (its sketch
-     and evidence show what was built, not what was asked), the issues it or its
+     the diff adds that nothing asked for. The intent is the PR description's prose (its evidence
+     shows what was built, not what was asked), the issues it or its
      commits reference, and the user's request: <recorded request, or "none recorded">. Don't
      open issues labelled `feature` or `problem`: they're this review's own bookkeeping. Quote the
      line of intent each finding rests on. Something asked for but built wrong is a defect: report
