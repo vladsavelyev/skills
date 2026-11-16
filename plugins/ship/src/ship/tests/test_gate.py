@@ -1,6 +1,6 @@
 """Tests for the merge-gate decision logic — the tri-state verdict, coverage, and churn signals."""
 
-from ship.gate import EXIT_CODES, Verdict, churn_reason, covers_head, evaluate, rounds_since_invalidation
+from ship.gate import EXIT_CODES, Verdict, churn_reason, covers_head, evaluate, needs_review, rounds_since_invalidation
 
 HEAD = "head99"
 
@@ -16,13 +16,13 @@ def run(n: int, *, blocking: int = 0, low: int = 0, regressions: int = 0, sha: s
     }
 
 
-def gate(*, blocking_open, last_review, history, budget=3, head_sha=HEAD, pinned=False, merged=False):
+def gate(*, blocking_open, last_review, history, budget=3, unreviewed=(), pinned=False, merged=False):
     return evaluate(
         blocking_open=blocking_open,
         last_review=last_review,
         history=history,
         budget=budget,
-        head_sha=head_sha,
+        unreviewed=list(unreviewed),
         budget_is_explicit=pinned,
         pr_merged=merged,
     )
@@ -60,10 +60,28 @@ def test_closing_the_findings_as_wontfix_opens_the_gate_without_another_round():
 
 def test_commits_after_a_clean_review_close_the_gate_again():
     """Coverage, not counts: code nobody reviewed must not ship behind an older green light."""
-    d = gate(blocking_open=0, last_review=CLEAN, history=[CLEAN], head_sha="newsha")
+    d = gate(blocking_open=0, last_review=CLEAN, history=[CLEAN], unreviewed=["newsha"])
     assert not d.open
-    assert any("never been reviewed" in r for r in d.reasons)
+    assert d.reasons == [f"1 commit(s) since the last review at {HEAD} have never been reviewed: newsha"]
     assert d.verdict is Verdict.REVIEW_AGAIN
+
+
+def test_fixes_of_low_problems_and_changes_to_docs_and_tests_need_no_review():
+    """navari #4890: a round found two low problems, their fix and a merge of the parent branch that
+    resolved a conflict in a decision doc moved the head, and the gate asked for a full round, twice."""
+    changes = [
+        ("fix1", ["src/app.py"]),
+        ("merge", ["docs/decisions/D-x.md"]),
+        ("by-git", []),
+        ("work", ["src/app.py", "tests/test_app.py"]),
+        ("tests", ["src/ship/tests/test_app.py"]),
+    ]
+    assert needs_review(changes, low_fixes={"fix1"}, sensitive=[]) == ["work"]
+    assert needs_review(changes, low_fixes=set(), sensitive=[]) == ["fix1", "work"]
+
+
+def test_docs_on_a_sensitive_path_still_need_review():
+    assert needs_review([("c", ["docs/auth.md"])], low_fixes=set(), sensitive=["docs/auth*"]) == ["c"]
 
 
 def test_covers_head_matches_short_against_long_shas():
@@ -189,13 +207,19 @@ def test_churn_trend_ignores_rounds_before_a_base_change():
 
 
 def test_both_reasons_reported_together():
-    d = gate(blocking_open=3, last_review=DIRTY, history=[DIRTY], head_sha="newsha")
+    d = gate(blocking_open=3, last_review=DIRTY, history=[DIRTY], unreviewed=["newsha"])
     assert len(d.reasons) == 2
 
 
 def test_a_merged_pr_never_asks_for_another_review_but_names_what_was_outstanding():
     """An unreviewed tail on a merged PR used to read REVIEW_AGAIN, and an agent reviewed a merged PR."""
-    d = gate(blocking_open=0, last_review=run(1, sha="old11"), history=[run(1, sha="old11")], merged=True)
+    d = gate(
+        blocking_open=0,
+        last_review=run(1, sha="old11"),
+        history=[run(1, sha="old11")],
+        unreviewed=["new22"],
+        merged=True,
+    )
     assert d.verdict is Verdict.MERGED
     assert d.exit_code == 30
     assert "ship:close" in d.next_step and "review" not in d.next_step.replace("Don't review", "")

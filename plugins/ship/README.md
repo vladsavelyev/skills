@@ -15,7 +15,7 @@ terminates — a real reviewer always finds *something*. After it, a fourth ends
 
 | `feature gate` | Exit | Meaning |
 | --- | --- | --- |
-| `OPEN` | 0 | No open problems, and a review has covered the current branch head. Ship it. |
+| `OPEN` | 0 | No open problems, and nothing since the last review needs one (low fixes, base merges, docs and tests don't). Ship it. |
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code left, review budget remains. |
 | `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign. |
 | `MERGED` | 30 | The PR is in. Nothing left to review; close the feature out. |
@@ -103,7 +103,7 @@ feature problem list --open                    # every one holds the merge, low 
 # ... fix each, or close the ones that aren't relevant:
 feature problem resolve 46 --commit abc1234
 feature problem wontfix 48 --reason "verifier is validated upstream in middleware.py:40"
-# re-review, then record it; the gate opens once nothing is open and the review covers HEAD:
+# #46 is high, so its fix gets a review (a low problem's fix wouldn't); record it:
 feature review record --sha $(git rev-parse HEAD) --found 51 \
     --summary "Re-reviewed oauth.py; #46 fixed; one naming nit filed" \
     --depth max --risk high --door one-way --blast-radius "every signed-in user" \
@@ -125,7 +125,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature pr <number>` | Link a PR to the feature. |
 | `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
 | `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (it blocks the gate until closed, at any severity). |
-| `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue as fixed. |
+| `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue as fixed, recording its fix commits: one that fixed only low problems needs no review. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: hand an open problem to a separate fix PR, or keep it as an issue. Labels it `handed-off`; it stays open, outside the feature, and stops holding the close-out. |
 | `feature problem block <number> --reason <why>` | Reopen a closed problem (a regression, or a `wontfix` overturned) so it blocks again. |

@@ -7,9 +7,11 @@ from ship.state import (
     BEGIN,
     END,
     SCHEMA,
+    fixes,
     migrate,
     new_state,
     parse_block,
+    record_fix,
     record_review,
     render_block,
     replace_block,
@@ -167,3 +169,14 @@ def test_recording_a_run_takes_a_parked_feature_back_into_review():
     set_status(state, "needs-decision")
     _recorded(state, "aaa", 0)
     assert state["status"] == "in-review"
+
+
+def test_record_fix_is_idempotent_and_a_block_from_before_fixes_has_none():
+    state = new_state(branch="feat-x", base="main", updated="t0")
+    record_fix(state, 5, ["aaa", "bbb"])
+    record_fix(state, 5, ["aaa"])
+    record_fix(state, 6, ["aaa"])
+    assert fixes(state) == {"aaa": [5, 6], "bbb": [5]}
+    older = new_state(branch="feat-x", base="main", updated="t0")
+    del older["fixes"]
+    assert fixes(older) == {}

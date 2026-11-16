@@ -144,6 +144,14 @@ def open_pr_for_branch(branch: str) -> int | None:
     return int(out) if out else None
 
 
+def merged_pr_for_branch(branch: str) -> int | None:
+    """The number of the merged PR whose head was `branch`, or None if there is none."""
+    out = run(
+        ["gh", "pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--jq", ".[0].number // empty"]
+    )
+    return int(out) if out else None
+
+
 def set_pr_block(pr: int, content: str, issue: int) -> bool:
     """Set ship's block in the PR body to `content` (from `assess.render`). The block carries a native
     `closes #<issue>` reference, a real GitHub link that shows in the PR's sidebar and closes the

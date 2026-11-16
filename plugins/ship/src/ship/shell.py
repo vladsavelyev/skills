@@ -17,8 +17,16 @@ class CommandFailed(subprocess.CalledProcessError):
         return f"{super().__str__()}\n{detail}" if detail else super().__str__()
 
 
-def run(cmd: list[str], *, cwd: str | None = None, input_text: str | None = None, timeout: float | None = None) -> str:
-    """Run a command, return stdout stripped. Raises CommandFailed on non-zero exit.
+def run(
+    cmd: list[str],
+    *,
+    cwd: str | None = None,
+    input_text: str | None = None,
+    timeout: float | None = None,
+    ok: tuple[int, ...] = (0,),
+) -> str:
+    """Run a command, return stdout stripped. Raises CommandFailed on an exit code outside `ok`
+    (`git merge-tree`, say, exits 1 on a conflict and still prints the tree it wrote).
 
     We deliberately do NOT swallow errors: a missing branch, an unauthenticated gh, or a
     failed GraphQL call must crash loudly, not produce a misleading empty result. A `timeout`
@@ -33,7 +41,7 @@ def run(cmd: list[str], *, cwd: str | None = None, input_text: str | None = None
         text=True,
         timeout=timeout,
     )
-    if result.returncode != 0:
+    if result.returncode not in ok:
         raise CommandFailed(result.returncode, cmd, result.stdout, result.stderr)
     return result.stdout.strip()
 

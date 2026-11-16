@@ -64,3 +64,9 @@ def undecided(subs: list[dict]) -> list[dict]:
 def handed_off(subs: list[dict]) -> list[dict]:
     """Open problems of a merged PR, handed to a separate fix PR or kept as an issue."""
     return [s for s in blocking(subs) if is_handed_off(s)]
+
+
+def low_fix_commits(fixes: dict[str, list[int]], subs: list[dict]) -> set[str]:
+    """The fix commits (`state.fixes`) whose every problem is `low`."""
+    sev = {s["number"]: severity(s) for s in subs}
+    return {sha for sha, fixed in fixes.items() if all(sev[n] == LOW_SEV for n in fixed)}

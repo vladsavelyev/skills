@@ -106,8 +106,24 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         "review_history": [],
         "last_prompt": None,
         "last_review": None,
+        # Fix commit (full sha) -> the problems it fixed, from `feature problem resolve --commit`.
+        "fixes": {},
         "updated": updated,
     }
+
+
+def fixes(state: dict) -> dict[str, list[int]]:
+    """The recorded fix commits, each with the problems it fixed. A block without the key has none:
+    kept ON PURPOSE, as blocks from before `fixes` are in the feature issues of PRs in flight."""
+    return state.get("fixes", {})
+
+
+def record_fix(state: dict, problem: int, commits: list[str]) -> None:
+    """Record that `commits` (full shas) fixed `problem`. Idempotent, so a retried resolve is safe."""
+    recorded = state.setdefault("fixes", {})
+    for sha in commits:
+        if problem not in recorded.setdefault(sha, []):
+            recorded[sha].append(problem)
 
 
 def review_entry(*, run: int, sha: str, new_blocking: int, new_low: int, regressions: int, summary: str) -> dict:
