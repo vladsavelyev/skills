@@ -81,15 +81,12 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      before and after, as a screencast or screenshots for a change users see, otherwise the test
      or command that failed before and passes now, with its output. Only what was run, and never
      a suite's pass count or a list of test names. A change with nothing to run or see (docs,
-     comments) needs none; any other change without it isn't ready whatever the gate says (see
-     `OPEN` below).
+     comments) needs none.
 
    The title says what the PR does, in plain words. End the description with your signature
-   line if your harness asks for one. Ship's block, the quote of Sol's grade and the review rounds,
-   is rendered from state: never write one. `feature describe` takes the
-   text with or without ship's block (editing the fetched body is fine) and writes exactly one,
-   above that signature. Sol and step 6 read this
-   description to know the PR's intent, so it comes first.
+   line if your harness asks for one. `feature describe` takes the text with or without ship's
+   block (editing the fetched body is fine) and writes exactly one, above that signature. Sol and
+   step 6 read this description to know the PR's intent, so it comes first.
 3. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
    review it comes from the diff stats and the paths touched; after one, from the last review's
    grade. Don't read the diff to second-guess it. Go higher only when the user asked for a deeper
@@ -221,8 +218,7 @@ be followed up later: an open problem means the PR isn't ready.
 - `OPEN` (0): safe to merge. Every problem is closed. If the PR is still a draft, mark it ready
   (`gh pr ready <PR#>`) only when the caller asked to ship; for a plain review, say in `Next`
   that it's still a draft. The human merges. When the change can be run or seen and the description shows
-  no proof it was, it is not safe to merge: don't mark it ready, and `Next` says to run the
-  change and add the evidence first.
+  no proof it was, it is not safe to merge: don't mark it ready.
 - `REVIEW_AGAIN` (10): the caller closes every open problem (fixes it, or `wontfix` if it isn't
   relevant), then calls this skill again.
 - `MERGED` (30): the PR is in. Don't review; the caller closes it out with `Skill(ship:close)`.
