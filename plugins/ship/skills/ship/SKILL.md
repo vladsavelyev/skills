@@ -24,8 +24,9 @@ that the caller must call `Skill(ship:close)`.
 The `feature` CLI (`plugins/ship` in the `vladsavelyev/skills` repo, design in its
 `docs/design.md`) keeps all state in GitHub + git config. A tracked feature is a branch, its
 worktree under the main checkout's `.claude/worktrees/<name>/`, its PR, and a tracking issue.
-Review findings become sub-issues. The merge gate opens when no problem is open and the last
-review covers HEAD. Features begin untracked (`Skill(ship:start)`: branch, worktree, draft PR);
+Review findings become sub-issues. The merge gate opens when no problem is open and nothing since
+the last review needs one (fixes of low problems, base merges, docs and tests don't). Features
+begin untracked (`Skill(ship:start)`: branch, worktree, draft PR);
 this skill adopts them on the first ship.
 
 **Work in the feature worktree.** The main checkout has the same files on the base branch, so
@@ -47,7 +48,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
 | Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
-| Problems | `feature problem list [--open]`, `add`, `resolve <#> --commit <sha>`, `wontfix\|block <#> --reason "…"` |
+| Problems | `feature problem list [--open]`, `add`, `resolve <#> --commit <sha>…`, `wontfix\|block <#> --reason "…"` |
 | Review budget | `feature budget [--set <n> \| --auto]` |
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
 | Sync with base | `feature sync [--stack]` |
@@ -67,6 +68,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Tracked branch with no PR linked: `feature pr <PR#>`.
    - The PR's base isn't the tracked parent: don't review. Report the mismatch.
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
+   - Then `feature gate`. `OPEN`: don't review; skip to the Gate verdict, unless the user asked
+     for a fresh review.
 2. **Describe the PR.** A branch from `feature start` got its title and description before any
    code existed. When they no longer fit what the branch does (always on its first ship), rewrite
    them. It runs in this order, with no headers:
@@ -260,10 +263,11 @@ Always include these caller rules in `Next` when they apply:
   `name:`) before editing. Editing from the main checkout edits the base branch."
 - With open problems: "Every one must be closed before the PR ships, low included; none ships as
   debt. Fix each at its root cause, not the symptom; prefer deleting or narrowing over new code,
-  and don't grow the diff to appease the reviewer. Commit and push, then `feature problem resolve <#>
-  --commit <sha>`. If a finding isn't relevant (wrong, by design, out of scope), `feature problem
-  wontfix <#> --reason "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` for
-  the next round, without asking the user."
+  and don't grow the diff to appease the reviewer. Commit fixes apart from other work (a low
+  problem's fix skips review) and push, then `feature problem resolve <#> --commit <sha>…` with
+  every commit of the fix. If a finding isn't relevant (wrong, by design, out of scope), `feature problem wontfix
+  <#> --reason "<evidence>"` instead of changing code. Then call `Skill(ship:ship)` again, without
+  asking the user."
 - With `OPEN`: "Tell the user it's safe to merge: every problem is closed. After they merge, call
   `Skill(ship:close)` to close out." With no evidence where the change needs some, instead: "Not safe
   to merge yet: run the change, add its before and after to the description, then call

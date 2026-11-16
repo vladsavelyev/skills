@@ -134,12 +134,12 @@ class Review:
 
 
 def _next_round(last: dict, depth: str) -> str:
-    """The depth the next round would run at. After a clean round no round is due, so the line
-    says one only follows new commits (they move the head off the reviewed SHA and reopen the gate),
-    rather than read as if another round were pending."""
-    if not last.get("placeholder") and not _found_parts(last):
-        return f" A re-review after new commits would run at {depth}."
-    return f" Next round would run at {depth}."
+    """The depth the next round would run at. After a round that found no high or med problem no
+    round is due (low problems' fixes need none, see `gate.needs_review`), so the line says one only
+    follows new commits, rather than read as if another round were pending."""
+    if last.get("placeholder") or last["new_blocking"]:
+        return f" Next round would run at {depth}."
+    return f" A re-review after new commits would run at {depth}."
 
 
 def _grade_lines(review: Review) -> list[str]:

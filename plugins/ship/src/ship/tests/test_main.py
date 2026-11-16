@@ -242,6 +242,10 @@ def test_a_merged_pr_is_judged_by_what_merged_not_by_a_stale_local_branch(monkey
 
 def test_an_open_pr_is_still_judged_by_the_branch_tip(monkeypatch):
     _stub_gate_inputs(monkeypatch, pr_state="OPEN", reviewed="fff666", branch_tip="aaa111", pr_head="fff666aaaa")
+    monkeypatch.setattr(cli, "has_object", lambda sha: True)
+    monkeypatch.setattr(cli, "commits_since", lambda since, head: [("aaa111", ["fff666"])])
+    monkeypatch.setattr(cli, "changed_paths", lambda old, new: ["src/app.py"])
+    monkeypatch.setattr(cli, "sensitive_patterns", lambda: [])
     _, _, _, decision = cli._gate_for("add-oauth")
     assert decision.verdict is cli.gate.Verdict.REVIEW_AGAIN
 
@@ -352,3 +356,26 @@ def test_escalate_offers_what_the_gate_says_next(monkeypatch):
     monkeypatch.setattr(github, "comment", lambda number, body: posted.append(body))
     cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="budget spent"))
     assert "not fixes" in posted[0] and "ship the rest as debt" not in posted[0]
+
+
+def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
+    """The gate reads a low problem's fix commits from the state block to let them through unreviewed."""
+    did: list[str] = []
+    state = _merged_state()
+    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:low"))
+    monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
+    monkeypatch.setattr(cli, "_load_state", lambda branch: (7, state, "body"))
+    monkeypatch.setattr(cli, "_save_state", lambda issue, body, s: did.append(f"save {s['fixes']}"))
+    monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(f"close {note}"))
+    cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=["abc12", "def34"]))
+    full = ["abc12" * 8, "def34" * 8]
+    assert did == [f"save {{'{full[0]}': [5], '{full[1]}': [5]}}", f"close Fixed in {full[0][:9]}, {full[1][:9]}."]
+
+
+def test_resolve_without_a_commit_records_no_fix(monkeypatch):
+    did: list[str] = []
+    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:low"))
+    monkeypatch.setattr(cli, "_load_state", lambda branch: pytest.fail("touched the state"))
+    monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(note))
+    cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=[]))
+    assert did == ["Resolved."]

@@ -190,7 +190,16 @@ Severity still feeds the churn signal, which reads high/med counts only. A PR me
 anyway is the one exception: its fix needs a new PR regardless, so close-out lets the user hand each
 open problem to a separate fix PR or keep it as an issue (`problem hand-off`) instead of waiting.
 
-**12. The smallest fix → the root-cause fix.** Asking the reviewer and the caller for "the smallest
+**12. Every commit re-reviewed → only code no review has seen.** Once lows blocked (#11), their
+fixes moved the head off the reviewed SHA, so a round that found only lows still bought another full
+round. navari #4890 ran three rounds at high effort over four low findings (two docs, a test name, a
+docstring), after fixes and parent merges that resolved a conflict in a decision doc, and each
+re-read of the whole PR found fresh nits. Now a round is due only for a commit that adds code a
+review must see: not a recorded fix of low problems, not a merge of the base git made by itself (a
+squash-merged parent's commits count as base), not a change to docs and tests alone. On #4890's
+commits that is one round, not three.
+
+**13. The smallest fix → the root-cause fix.** Asking the reviewer and the caller for "the smallest
 fix" steered both toward band-aids, which the next agent then copies. Findings now carry the
 root-cause fix.
 

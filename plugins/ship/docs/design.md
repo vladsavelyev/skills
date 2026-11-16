@@ -74,6 +74,7 @@ git config (per branch, local wiring):
     "regressions": 0,
     "summary": "No new blocking issues; one naming nit filed. Token-refresh race from run 1 is fixed."
   },
+  "fixes": {"5e1f00d…": [46], "c0ffee1…": [47]},
   "updated": "2026-07-13T10:22:00Z"
 }
 ```
@@ -86,10 +87,12 @@ idempotently no matter what humans add around it. Never blind-string-replace.
 `review_budget` is `null` for "auto-size from the PR diff at query time" (so a growing branch earns
 its extra round without anyone re-running a command) or an integer a human pinned with
 `feature budget --set`. `review_history` is the append-only audit log the gate reads the
-convergence trend from; `feature sync` appends an `{"event": "base-advanced", …}` marker to it,
-and everything before the newest marker is excluded from both the trend and the budget count —
-new base code legitimately buys a fresh round. `last_review` is only the *currently valid* clean-pass
+convergence trend from; `feature sync` appends an `{"event": "base-advanced", …}` marker to it
+when its merge resolved code by hand, and everything before the newest marker is excluded from both
+the trend and the budget count. `last_review` is only the *currently valid* clean-pass
 evidence, and is nulled on invalidation, which is why it duplicates the last history entry.
+`fixes` maps each commit `feature problem resolve --commit` recorded (full sha) to the problems it
+fixed; a block from before `fixes` has none.
 
 Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
 than read with guessed-at defaults.
@@ -127,8 +130,8 @@ line. A body without the block gets it above the author's signature (a trailing 
 paragraph starting with `🤖`, the attribution line an agent harness asks for), or at the end. The grade is Sol's latest, its risk read as its two halves: the door (whether a revert
 undoes what a bug did) and the blast radius (who or what a bug reaches). Each round's line lists
 what it found by severity (recorded with the round from `--found`), which never changes after the
-round. The latest round's line ends with the depth Sol's grade buys the next round. After a clean
-round no round is due (the gate only reopens if new commits move the head), so it reads `A
+round. The latest round's line ends with the depth Sol's grade buys the next round. After a round
+that found no high or med problem no round is due (low problems' fixes need none), so it reads `A
 re-review after new commits would run at <depth>` instead of `Next round would run at <depth>`.
 
 Every body ship writes has exactly one block. It is created once; every later write finds it and
@@ -182,7 +185,7 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
 
 | Verdict | Exit | When |
 | --- | --- | --- |
-| `OPEN` | 0 | Zero problems open, at any severity, and the last valid review covered the current branch head. |
+| `OPEN` | 0 | Zero problems open, at any severity, and nothing since the last valid review needs one. |
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code outstanding, review budget remains, and the trend is converging. |
 | `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human, but the open problems still get closed: the budget limits reviews, not fixes. |
 | `MERGED` | 30 | The PR has merged. Checked first, so it outranks the other three; its reasons still name what was outstanding when it went in. |
@@ -223,12 +226,20 @@ condition was actually protecting is narrower: *a fix must not introduce a new d
 a commit. Closing the remaining findings as not relevant leaves the old nonzero count in place, so
 the gate stayed shut with no way to reopen it: the close didn't take effect, and neither
 did buying another round, because the churn signal was re-derived from the same unchanged history and
-checked first. The condition is therefore **coverage**: `last_review.sha` must match the branch head.
-That asks what the safety property actually cares about — *has this code been reviewed?* — and gets
-both cases right. A fix commits, so the head moves and a fresh review is required; a `wontfix` close
-doesn't commit, so the existing review still stands and the close takes effect. It also closes a
-hole the count rule never covered: commits landing *after* a clean review used to keep the gate open
-on code no review had seen. Counts stay in `review_history`, where the convergence trend reads them.
+checked first. The condition is therefore **coverage**: no commit since `last_review.sha` may add
+code a review must see. That asks what the safety property actually cares about — *has this code
+been reviewed?* — and gets both cases right. A fix of a high or med problem commits such code; a
+`wontfix` close doesn't commit, so the existing review still stands and the close takes effect. It
+also closes a hole the count rule never covered: commits landing *after* a clean review used to keep
+the gate open on code no review had seen. Counts stay in `review_history`, where the convergence
+trend reads them.
+
+A commit on the branch's first-parent line needs no review (`gate.needs_review`) if it fixed only low
+problems (`problem resolve --commit`), or if its own change is empty or only docs and tests
+(`assess.path_risk` low, so never a sensitive path; where markdown is instructions, declare it
+sensitive). Its own change is its diff from its parent, or for a merge of the base, from the tree
+`git merge-tree` makes of its parents: only what was resolved by hand. The base includes a
+squash-merged former parent's PR head, whose commits that PR reviewed. Why: motivation.md #12.
 
 An explicitly pinned budget (`feature budget --set`) also outranks the churn signal while rounds
 remain, because churn exists to escalate *early* — a human who has seen that escalation and chosen to
@@ -248,10 +259,9 @@ review-more problem), or high/med findings are rising round over round. Both rea
 only: low problems block like any other, but a rising count of nits is not evidence the design is
 wrong.
 
-`feature sync` upholds the coverage condition across base changes: the sync commit moves the head,
-which alone would already invalidate the review, and sync additionally clears `last_review` and
-appends an invalidation marker to `review_history` — the gate reopens, the round count resets to the runs after
-the marker (new code deserves a fresh budget), and a fresh review + `review record` is required.
+When `feature sync`'s merge resolved code by hand, it clears `last_review` and appends an
+invalidation marker to `review_history`: the gate reopens, and the round count resets to the runs
+after the marker (hand-merged code deserves a fresh budget).
 
 The gate is still a pure query: `feature gate` never mutates state. Parking a feature at
 `needs-decision` is an explicit act — `feature escalate --reason "…"` — which posts the current gate
@@ -347,7 +357,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature prompt <text>` | Record the latest prompt into the state block. |
 | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
-| `feature problem resolve <number> [--commit <sha>]` | Close a problem sub-issue with a fixing-commit reference. |
+| `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses until then: that would be shipping debt. Old `follow-up` labels count as `handed-off`, and old `rejected` ones as `wontfix`. |
 | `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. Refuses an open problem, which already blocks. |
@@ -358,7 +368,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION`, 30 = `MERGED` (1 and 2 stay "the command itself failed"). |
 | `feature merge [--branch <b>] [--force]` | Final transition: verify **that the PR actually merged**, record what the gate still had outstanding, set status `merged`, close the feature issue (or just comment, if the PR's `Closes` reference already closed it). Does not merge the PR itself; `--force` records a feature that shipped without its PR merging. |
 | `feature reconcile [--branch <b>] [--dry-run]` | Repo-wide sweep for features the close-out never reached: closes out every feature whose PR merged, closes as `abandoned` those whose PR was closed unmerged (unless the branch has a newer open PR, which it reports instead), and repairs ship's block on still-open PRs (a stale reference, or duplicate blocks merged into one). GitHub-only (no git), so it reaches features whose branch is long deleted. |
-| `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If the base advanced, invalidates the last review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
+| `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If its merge resolved code by hand, invalidates the last review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
 
 ## The in-session review
 
