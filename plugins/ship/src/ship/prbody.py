@@ -1,6 +1,6 @@
 """Ship's block in a PR body: one tagged region the CLI owns, and the only part of the body it edits.
 
-    <the author's description: the motivation, its sketch, and the evidence>
+    <the author's description: the motivation and the evidence>
 
     <!-- ship -->
     > **Risk: low**, two-way door: a bad write is visible and fixed by hand

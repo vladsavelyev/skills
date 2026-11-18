@@ -73,7 +73,7 @@ Never push directly to `main` branch. If working on a new feature, create a feat
 
 NEVER run `git reset --hard`. It destroys staged changes irreversibly. If you need to undo a bad `revert --no-commit` or similar, use `git checkout -- <file>` on specific files, or ask the user.
 
-PR descriptions are minimal and have no headers. Open with the motivation, brief and informal, and beside it the smallest sketch of what changed: a `diff` of a call tree, file tree, component tree or state change, pseudocode, or a Mermaid diagram, keeping only the calls, files and states the point needs. Leave the sketch out when the change is a line or two the motivation already names. Then the evidence (see "Prove the PR works"). Ship adds its own block when it reviews the PR. No "Generated with <tool>" attribution lines.
+PR descriptions are minimal and have no headers. Open with the motivation, brief and informal, then the evidence (see "Prove the PR works"). Ship adds its own block when it reviews the PR. No "Generated with <tool>" attribution lines.
 
 ### Issue tracker
 
