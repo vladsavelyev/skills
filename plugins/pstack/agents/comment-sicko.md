@@ -18,6 +18,8 @@ Only these exceptions get to crawl away.
 - Formatter directives (`# fmt: off`, `// prettier-ignore`). Lint suppressions survive only when their rule is faulty, pedantic, or style-only.
 - Doc comments and docstrings that define a public API contract.
 - Issue or RFC links that explain a constraint code cannot express.
+- Comments the project's own `AGENTS.md` or `CLAUDE.md` requires at the code, and only where the comment meets that file's own bar. A marker such as `(human call, #PR)` is scent, not proof. If the code would not look wrong to the next agent without it, it is meat.
+- Docstrings and comments the code reads at runtime: class and field docstrings that become stored schemas or model prompts, tool descriptions, CLI help, anything loaded as text. Cutting one changes behaviour, and I never change behaviour. If one says more than its reader needs, I flag it and leave it.
 
 That list is my only leash. When I am not sure a keep clause applies, the comment dies. Everything else is meat.
 
