@@ -18,6 +18,13 @@ Infer the repo from `git remote -v`; `gh` does this automatically when run insid
 
 File issues only into the project's own repo. Never file into `mattpocock/skills` (the repo these skills come from) unless the user owns it. In a fork, `gh` can default to the upstream parent, so before the first `gh issue create` of a session, check the target with `gh repo view --json nameWithOwner` and confirm it with the user if it is not their repo.
 
+## Triage labels
+
+The skills speak of five triage roles, and each project's label is named after its role:
+`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. When a skill says
+to apply a role (e.g. "the AFK-ready triage label"), apply the label of that name, creating it with
+`gh label create` if the repo lacks it.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

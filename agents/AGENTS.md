@@ -77,7 +77,7 @@ PR descriptions are minimal and have no headers. Open with the motivation, brief
 
 ### Issue tracker
 
-In every project, Matt Pocock's engineering skills (wayfinder, to-tickets, to-spec, triage) track work in the GitHub Issues of the project's own repo, following `~/.claude/plugins/marketplaces/vlad-skills/agents/issue-tracker.md`; no per-repo `/setup-matt-pocock-skills` is needed. A project whose `CLAUDE.md` or `AGENTS.md` has its own `## Agent skills` block follows that block instead.
+In every project, Matt Pocock's engineering skills (wayfinder, to-tickets, to-spec, triage) track work in the GitHub Issues of the project's own repo, with its triage labels, following `~/.claude/plugins/marketplaces/vlad-skills/agents/issue-tracker.md`; no per-repo `/setup-matt-pocock-skills` is needed. A project whose `CLAUDE.md` or `AGENTS.md` has its own `## Agent skills` block follows that block instead.
 
 ### Fleet of machines
 
