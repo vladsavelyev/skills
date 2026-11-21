@@ -1,6 +1,6 @@
 {
   "name": "pstack",
-  "description": "Skills from pstack: /how explains a subsystem, /why traces why code is shaped the way it is, /arena races parallel candidates and grafts the best, /blast-radius proves what a change could break, /bro restates the last message plainly, unslop cuts AI tells from writing.",
+  "description": "Skills from pstack: /how explains a subsystem, /why traces why code is shaped the way it is, /arena races parallel candidates and grafts the best, /blast-radius proves what a change could break, /bro restates the last message plainly, /no-comments deletes comments and fixes the code they excused, /architect sketches a shape before code, unslop cuts AI tells from writing.",
   "author": {
     "name": "Vlad Savelyev"
   }
