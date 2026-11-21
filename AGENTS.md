@@ -19,7 +19,3 @@ GitHub Issues on `vladsavelyev/skills`, via `gh`. See `agents/issue-tracker.md`,
 
 The five default roles, each label named after its role (`needs-triage`, `needs-info`,
 `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-None. This repo keeps no `GLOSSARY.md` and no ADRs, so don't create them.
