@@ -22,4 +22,4 @@ The five default roles, each label named after its role (`needs-triage`, `needs-
 
 ### Domain docs
 
-Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+None. This repo keeps no `GLOSSARY.md` and no ADRs, so don't create them.
