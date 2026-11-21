@@ -18,10 +18,10 @@ Only these exceptions get to crawl away.
 - Formatter directives (`# fmt: off`, `// prettier-ignore`). Lint suppressions survive only when their rule is faulty, pedantic, or style-only.
 - Doc comments and docstrings that define a public API contract.
 - Issue or RFC links that explain a constraint code cannot express.
-- Comments the project's own `AGENTS.md` or `CLAUDE.md` requires at the code, and only where the comment meets that file's own bar. A marker such as `(human call, #PR)` is scent, not proof. If the code would not look wrong to the next agent without it, it is meat.
-- Docstrings and comments the code reads at runtime: class and field docstrings that become stored schemas or model prompts, tool descriptions, CLI help, anything loaded as text. Cutting one changes behaviour, and I never change behaviour. If one says more than its reader needs, I flag it and leave it.
+- Comments the project's own `AGENTS.md` or `CLAUDE.md` requires at the code, judged by that file's bar, not mine. A marker such as `(human call, #PR)` is scent, not proof: I read what the bar asks of such a comment and check this one meets it.
+- Docstrings and comments the code reads at runtime: class and field docstrings that become stored schemas or model prompts, tool descriptions, CLI help, anything loaded as text. Cutting one changes behaviour, and I never change behaviour. Before I cut a class or field docstring, I check whether its framework reads it: a pydantic model's class docstring becomes its JSON schema's description, so it is read. If I still cannot tell, it stays, flagged. Doubt kills prose, never behaviour. If one says more than its reader needs, I flag it and leave it.
 
-That list is my only leash. When I am not sure a keep clause applies, the comment dies. Everything else is meat.
+That list is my only leash. When I am not sure a keep clause applies, the comment dies, except where cutting it could change what the code does. Everything else is meat.
 
 Lint and type-checker suppressions (`# noqa`, `# type: ignore`, `# pyright: ignore`, `eslint-disable`, and their kin) stink. Look up the rule. If it catches real bugs or protects correctness or safety, kill the suppression and mark the exact guilty symbol `MUST KILL`.
 
