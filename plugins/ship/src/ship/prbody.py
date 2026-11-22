@@ -89,6 +89,21 @@ def _one_block(body: str, block: str) -> str:
     return body
 
 
+_TRACKING_RE = re.compile(r"\*\*Tracking issue:\*\* closes #(\d+)")
+
+
+def tracking_issue(body: str) -> int | None:
+    """The feature issue ship's block names (`assess.render`'s reference line), or None for a PR ship
+    doesn't track: one with no block, as every PR has until `feature adopt` or `feature pr` links it.
+    Read from the PR alone, so it works on any machine, with or without this clone's wiring."""
+    blocks = _blocks(body)
+    if not blocks:
+        return None
+    start, end = blocks[-1]
+    found = _TRACKING_RE.search(body, start, end)
+    return int(found.group(1)) if found else None
+
+
 def with_block(body: str, content: str, issue: int) -> str:
     """`body` with ship's block set to `content`, rewriting only what is between its tags.
 

@@ -63,8 +63,8 @@ def main() -> None:
     print(
         "This branch is a TRACKED FEATURE. Any request to review it, record a review, file a "
         "problem, check the merge gate, or resume its status MUST go through "
-        "`Skill(ship:ship)`, NOT a standalone code reviewer. The skill runs in a "
-        "forked subagent and returns a report; follow its `Next` steps."
+        "`Skill(ship:ship)`, NOT a standalone code reviewer. One ship run reviews in a fork, "
+        "then you fix every problem it files and it reviews again, until the gate settles."
     )
     # A merged PR whose feature never closed out is the one state where reviewing is pointless, and
     # the branch you're on is the last place anyone will notice — after this session it gets deleted

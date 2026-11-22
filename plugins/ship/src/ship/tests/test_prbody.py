@@ -108,3 +108,15 @@ def test_the_legacy_inline_marker_is_not_an_opening_tag():
     # line opens the block.
     old = "Why.\n\nCloses #7 <!-- ship -->\n\n<!-- ship:assessment -->\n> old\n<!-- /ship:assessment -->\n"
     assert prbody.with_block(old, CONTENT, 7) == f"Why.\n\n{_block()}\n"
+
+
+def test_tracking_issue_is_read_from_ships_block():
+    tracking_issue, with_description = prbody.tracking_issue, prbody.with_description
+    body = with_description("Why.\n\n🤖 sig", "> **Tracking issue:** closes #39\n> **Review round 1** (low).")
+    assert tracking_issue(body) == 39
+
+
+def test_a_pr_without_ships_block_is_not_tracked():
+    tracking_issue = prbody.tracking_issue
+    # An author's own `Closes #…` line is theirs, not ship's link to a feature issue.
+    assert tracking_issue("Why.\n\nCloses #12") is None

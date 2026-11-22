@@ -242,6 +242,21 @@ def pr_state(number: int) -> str:
     return pr_states([number])[number]
 
 
+def pr_view(target: str | None, *, repo: str | None) -> dict:
+    """The PR `gh pr merge` would merge: `target` is its number, URL or branch, None for the current
+    branch's PR, in `repo` (`OWNER/NAME`) or the current one. Returns `number`, `url`, `body`,
+    `headRefName`, `headRefOid`, `state`, and `repo` as `OWNER/NAME`."""
+    args = ["gh", "pr", "view", *([target] if target else []), *(["--repo", repo] if repo else [])]
+    pr = json.loads(run([*args, "--json", "number,url,body,headRefName,headRefOid,state"]))
+    owner, name = re.fullmatch(r"https://[^/]+/([^/]+)/([^/]+)/pull/\d+", pr["url"]).groups()
+    return {**pr, "repo": f"{owner}/{name}"}
+
+
+def current_repo() -> str:
+    """`OWNER/NAME` of the repo the current directory is a checkout of."""
+    return "/".join(_owner_repo())
+
+
 def pr_head_sha(number: int) -> str:
     """The commit a PR's head points at (`headRefOid`): for a merged PR, the code that went in."""
     out = run(["gh", "pr", "view", str(number), "--json", "headRefOid", "--jq", ".headRefOid"])

@@ -1,0 +1,119 @@
+"""The merge guard: which commands are merges, and what it lets through."""
+
+import io
+import json
+
+import pytest
+
+from ship import github, merge_guard
+from ship.gate import GateDecision, Verdict
+from ship.merge_guard import MergeCall, merge_calls
+
+
+def test_a_bare_merge_names_the_current_branchs_pr():
+    assert merge_calls("gh pr merge --admin --squash", "/repo") == [
+        MergeCall(target=None, repo=None, cwd="/repo", override=None)
+    ]
+
+
+def test_flag_values_are_not_read_as_the_pr():
+    [call] = merge_calls('gh pr merge -t "Ship 12" --body=x -R org/app 5355 -d', "/repo")
+    assert (call.target, call.repo) == ("5355", "org/app")
+
+
+def test_cd_and_the_override_carry_into_the_merge_and_other_commands_dont_count():
+    command = 'cd sub && git push\nSHIP_PAST_GATE="user: ship it" /usr/bin/gh pr merge 7; gh pr view 7'
+    assert merge_calls(command, "/repo") == [
+        MergeCall(target="7", repo=None, cwd="/repo/sub", override="user: ship it")
+    ]
+
+
+@pytest.mark.parametrize("command", ["gh pr view 7", "echo 'gh pr merge 7'", "git merge origin/main", "gh pr merged"])
+def test_commands_that_only_mention_a_merge_are_not_merges(command):
+    assert merge_calls(command, "/repo") == []
+
+
+def _stub_pr(monkeypatch, *, verdict: Verdict, body: str = "> **Tracking issue:** closes #39") -> list[tuple[int, str]]:
+    posted: list[tuple[int, str]] = []
+    pr = {
+        "number": 5355,
+        "repo": "org/app",
+        "state": "OPEN",
+        "headRefName": "fix-it",
+        "headRefOid": "f" * 40,
+        "body": f"Why.\n\n<!-- ship -->\n{body}\n<!-- /ship -->\n",
+    }
+    decision = GateDecision(
+        verdict=verdict, reasons=["1 problem(s) open, every one blocking"], next_step="", rounds_used=1, budget=2
+    )
+    monkeypatch.setattr(merge_guard.os, "chdir", lambda path: None)
+    monkeypatch.setattr(github, "use_owner_account", lambda: None)
+    monkeypatch.setattr(github, "pr_view", lambda target, repo: pr)
+    monkeypatch.setattr(github, "current_repo", lambda: "org/app")
+    monkeypatch.setattr(merge_guard, "has_object", lambda sha: True)
+    monkeypatch.setattr(github, "get_issue_body", lambda n: "")
+    monkeypatch.setattr(merge_guard, "parse_block", lambda body: {"pr": 5355})
+    monkeypatch.setattr(
+        github,
+        "sub_issues",
+        lambda n: [{"number": 5400, "title": "stale cache", "state": "OPEN", "labels": ["sev:med"]}],
+    )
+    monkeypatch.setattr(merge_guard, "decide", lambda branch, state, subs, merged, head: decision)
+    monkeypatch.setattr(github, "comment", lambda n, text: posted.append((n, text)))
+    return posted
+
+
+def _call(override=None):
+    return MergeCall(target="5355", repo=None, cwd="/repo", override=override)
+
+
+def test_the_navari_5355_admin_merge_is_refused_with_whats_open(monkeypatch):
+    posted = _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
+    refusal = merge_guard.check(_call())
+    assert "refuses to merge PR #5355" in refusal and "#5400 [sev:med] stale cache" in refusal
+    assert posted == []
+
+
+def test_the_users_reason_lets_it_through_on_the_record(monkeypatch):
+    posted = _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
+    assert merge_guard.check(_call(override="demo at 3pm, fix after")) is None
+    [(issue, text)] = posted
+    assert issue == 39 and "demo at 3pm, fix after" in text and "#5400 [sev:med]" in text
+
+
+def test_an_open_gate_merges(monkeypatch):
+    posted = _stub_pr(monkeypatch, verdict=Verdict.OPEN)
+    assert merge_guard.check(_call()) is None
+    assert posted == []
+
+
+def test_a_pr_ship_doesnt_track_merges(monkeypatch):
+    _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN, body="> nothing of ship's")
+    assert merge_guard.check(_call()) is None
+
+
+def test_a_tracked_pr_of_another_repo_than_the_checkout_is_refused(monkeypatch):
+    _stub_pr(monkeypatch, verdict=Verdict.OPEN)
+    monkeypatch.setattr(github, "current_repo", lambda: "org/other")
+    assert "run the merge from a checkout of org/app" in merge_guard.check(_call())
+
+
+def _run_hook(monkeypatch, capsys, command: str) -> str:
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "/repo"}
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    merge_guard.main()
+    return capsys.readouterr().out
+
+
+def test_an_error_checking_a_merge_denies_it(monkeypatch, capsys):
+    def boom(call):
+        raise RuntimeError("gh: HTTP 503")
+
+    monkeypatch.setattr(merge_guard, "check", boom)
+    out = json.loads(_run_hook(monkeypatch, capsys, "gh pr merge 5355 --admin"))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "HTTP 503" in out["permissionDecisionReason"]
+
+
+def test_other_commands_pass_without_a_word(monkeypatch, capsys):
+    monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("checked a non-merge"))
+    assert _run_hook(monkeypatch, capsys, "git merge origin/main") == ""

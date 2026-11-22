@@ -79,6 +79,12 @@ class GateDecision:
     def exit_code(self) -> int:
         return EXIT_CODES[self.verdict]
 
+    @property
+    def settled(self) -> bool:
+        """Whether a ship run may end here: the PR is safe to merge, or already in. Anything else
+        leaves work in the loop (fixes, a review), and a held session keeps going (`hold.py`)."""
+        return self.verdict in (Verdict.OPEN, Verdict.MERGED)
+
     def __str__(self) -> str:
         used = f"reviews {self.rounds_used}/{self.budget}"
         if self.open:
@@ -166,6 +172,31 @@ def needs_review(changes: list[tuple[str, list[str]]], *, low_fixes: set[str], s
     ]
 
 
+def escalation_refusal(decision: GateDecision, *, open_problems: list[int], named: list[int]) -> str | None:
+    """Why `feature escalate` must not hand this feature to a human yet, or None if it may.
+
+    Escalating ends a held ship run (`hold.py`), so it is only for what a human really has to decide:
+    whether to review the fixes again once the budget is spent (every problem closed first: the budget
+    limits reviews, not fixes), or a problem that needs the user's call, named with `--problem`.
+    Everything else stays in the loop, or escalating would be the way around fixing.
+    """
+    if decision.verdict is Verdict.OPEN:
+        return "the gate is OPEN: there is nothing to decide. Tell the user it's safe to merge."
+    if decision.verdict is Verdict.MERGED:
+        return "the PR has merged: close the feature out with `Skill(ship:close)` instead."
+    if stray := sorted(set(named) - set(open_problems)):
+        return f"{', '.join(f'#{n}' for n in stray)} is not an open problem of this feature."
+    if unnamed := sorted(set(open_problems) - set(named)):
+        return (
+            f"{', '.join(f'#{n}' for n in unnamed)} still open. Fix each (`feature problem resolve <#> --commit "
+            f"<sha>`) or close it as not relevant (`feature problem wontfix <#> --reason '<why>'`) first; the "
+            f"budget limits reviews, not fixes. Name with `--problem` only a problem that needs the user's call."
+        )
+    if decision.verdict is Verdict.REVIEW_AGAIN and not named:
+        return "review budget remains: review the fixes again (`Skill(ship:ship)`) instead of escalating."
+    return None
+
+
 def evaluate(
     *,
     blocking_open: int,
@@ -229,9 +260,9 @@ def evaluate(
         )
     next_step = (
         "Close every open problem: fix it (`feature problem resolve <#> --commit <sha>…`), or "
-        "`feature problem wontfix <#> --reason '<why>'` if it isn't relevant. Then review and "
-        "`feature review record` if the gate still asks for it."
+        "`feature problem wontfix <#> --reason '<why>'` if it isn't relevant. Then a fresh review "
+        "round (`Skill(ship:review)`) if the gate still asks for it."
         if blocking_open > 0
-        else "Review the PR and `feature review record` the run."
+        else "Run a fresh review round (`Skill(ship:review)`)."
     )
     return GateDecision(Verdict.REVIEW_AGAIN, reasons, next_step, used, budget)

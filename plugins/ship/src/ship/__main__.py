@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from datetime import UTC, datetime
 
-from . import assess, budget, gate, github, problems
+from . import assess, budget, gate, github, hold, problems
 from .gitwiring import (
     auto_merge_tree,
     branch_head_sha,
@@ -29,6 +29,7 @@ from .gitwiring import (
     local_only_commits,
     parent_branch,
     remote_ref,
+    main_checkout_root,
     run_head_sha,
     sensitive_patterns,
     set_feature_issue,
@@ -154,18 +155,30 @@ def _unreviewed(state: dict, head: str, subs: list[dict]) -> list[str]:
     return gate.needs_review(changes, low_fixes=low_fixes, sensitive=sensitive_patterns())
 
 
-def _decide(branch: str, state: dict, subs: list[dict], merged: bool) -> gate.GateDecision:
-    """The merge gate for `branch`, from its state and its problems (`github.sub_issues`)."""
+def decide(branch: str, state: dict, subs: list[dict], merged: bool, *, head: str | None = None) -> gate.GateDecision:
+    """The merge gate for `branch`, from its state and its problems (`github.sub_issues`), judged at
+    `head` (default `_review_head`)."""
     rounds, pinned, _ = _resolve_budget(state)
     return gate.evaluate(
         blocking_open=len(problems.blocking(subs)),
         last_review=state["last_review"],
         history=state["review_history"],
         budget=rounds,
-        unreviewed=_unreviewed(state, _review_head(branch, state, merged), subs),
+        unreviewed=_unreviewed(state, head or _review_head(branch, state, merged), subs),
         budget_is_explicit=pinned,
         pr_merged=merged,
     )
+
+
+def _hold(branch: str) -> bool:
+    """Hold `branch` for the Claude session running this command, if any (`hold.py`): the session
+    recording a review or closing a problem is working the loop, so it can't end its turn until the
+    gate settles. Returns whether a session was held."""
+    session = hold.current_session()
+    if session is None:
+        return False
+    hold.hold(session, branch=branch, checkout=main_checkout_root())
+    return True
 
 
 def _blocking(issue: int) -> list[dict]:
@@ -450,7 +463,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # the agent learns whether to fix and review again or to stop and escalate.
     blocking = problems.blocking(subs)
     _write_block(state, issue)
-    decision = _decide(branch, state, subs, _pr_merged(state))
+    decision = decide(branch, state, subs, _pr_merged(state))
     github.comment(
         issue,
         f"🔍 Review run {run_num} ({args.sha}): {new_serious} new high/med, {new_low} new low, "
@@ -464,6 +477,11 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     print(f"Recorded review run {run_num} for #{issue}")
     print(f"GATE {decision}")
     print(f"  → {decision.next_step}")
+    if not decision.settled and _hold(branch):
+        print(
+            "  This session is held: it can't end its turn until the gate is OPEN. Fix every open problem; "
+            "`feature escalate` only for what the user must decide, `feature release` only if they stop the run."
+        )
 
 
 def _add_problem(parent: int, title: str, sev: str, detail: str) -> int:
@@ -500,6 +518,7 @@ def cmd_problem_resolve(args: argparse.Namespace) -> None:
         _save_state(issue, body, state)
     note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
     github.close_issue(args.number, note)
+    _hold(branch)
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
@@ -510,7 +529,8 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     without changing code. Nothing ships as debt: there is no "open but not blocking" disposition,
     so a problem that matters is fixed, and one that doesn't is closed here with the reason on it.
     """
-    sub = _require_problem(args.branch or current_branch(), args.number)
+    branch = args.branch or current_branch()
+    sub = _require_problem(branch, args.number)
     if sub["state"] != "OPEN":
         sys.exit(f"#{args.number} is already closed.")
     # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
@@ -519,6 +539,7 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     # and a re-run finishes the job.
     github.add_label(args.number, problems.WONTFIX)
     github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
+    _hold(branch)
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
@@ -563,7 +584,7 @@ def _undecided_refusal(issue: int, undecided: list[dict]) -> str:
 def _handed_off_line(subs: list[dict]) -> str:
     """The close-out record's line for problems that stay open outside the feature, or ''."""
     handed = problems.handed_off(subs)
-    return f"\n\nHanded off, still open: {_blocking_refs(handed)}." if handed else ""
+    return f"\n\nHanded off, still open: {blocking_refs(handed)}." if handed else ""
 
 
 def cmd_problem_block(args: argparse.Namespace) -> None:
@@ -627,7 +648,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     pr_state = github.pr_state(state["pr"]) if state["pr"] is not None else None
     needs_close_out = pr_state == "MERGED" and state["status"] != "merged"
     rounds, _, rounds_why = _resolve_budget(state)
-    decision = _decide(branch, state, subs, pr_state == "MERGED")
+    decision = decide(branch, state, subs, pr_state == "MERGED")
 
     if args.json:
         print(
@@ -681,18 +702,18 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"  #{s['number']} [{problems.severity(s)}] {s['title']}")
 
 
-def _gate_for(branch: str) -> tuple[int, dict, list[dict], gate.GateDecision]:
+def gate_for(branch: str) -> tuple[int, dict, list[dict], gate.GateDecision]:
     issue, state, _ = _load_state(branch)
     subs = github.sub_issues(issue)
-    return issue, state, problems.blocking(subs), _decide(branch, state, subs, _pr_merged(state))
+    return issue, state, problems.blocking(subs), decide(branch, state, subs, _pr_merged(state))
 
 
 def cmd_gate(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    issue, _, blocking, decision = _gate_for(branch)
+    issue, _, blocking, decision = gate_for(branch)
     print(f"GATE {decision} (#{issue})")
     print(f"  → {decision.next_step}")
-    print(f"  open problems: {_blocking_refs(blocking)}")
+    print(f"  open problems: {blocking_refs(blocking)}")
     # Exit code is the machine interface: 0 ship, 10 review again, 20 human decision needed, 30 merged.
     # (1 and 2 mean the command itself failed — see gate.EXIT_CODES.)
     sys.exit(decision.exit_code)
@@ -732,18 +753,50 @@ def cmd_escalate(args: argparse.Namespace) -> None:
     and parks the feature at `needs-decision` (visible on the board).
     """
     branch = args.branch or current_branch()
-    issue, state, blocking, decision = _gate_for(branch)
+    issue, state, blocking, decision = gate_for(branch)
+    if refusal := gate.escalation_refusal(decision, open_problems=[s["number"] for s in blocking], named=args.problem):
+        sys.exit(f"Refusing to escalate #{issue}: {refusal}")
+    # The questions first: the escalation is what ends a held ship run, so it must never land without
+    # each problem saying what the user is asked.
+    for number in args.problem:
+        github.comment(number, f"⏸ Waiting on the user's call: {args.reason}")
     body = github.get_issue_body(issue)
     set_status(state, "needs-decision")
     _save_state(issue, body, state)
+    asked = f"Needs the user's call: {', '.join(f'#{n}' for n in args.problem)}\n\n" if args.problem else ""
     github.comment(
         issue,
         f"🚧 **Escalated for a human decision.** {args.reason}\n\n"
+        f"{asked}"
         f"Gate: {decision}\n\n"
-        f"Open problems, every one blocking: {len(blocking)} — {_blocking_refs(blocking)}\n\n"
+        f"Open problems, every one blocking: {len(blocking)} — {blocking_refs(blocking)}\n\n"
         f"Next: {decision.next_step}",
     )
+    if (session := hold.current_session()) is not None:
+        hold.release(session, branch)
     print(f"Escalated #{issue} for a human decision; status is now needs-decision.")
+
+
+def cmd_release(args: argparse.Namespace) -> None:
+    """Let this session end its turn with the gate still shut, on the record.
+
+    For a run that can't go on without the user: they told the agent to stop, or the review can't run
+    (Sol unavailable or failing). Not a way around fixing: the reason goes on the tracking issue, and
+    the merge guard still refuses the merge while the gate is shut.
+    """
+    branch = args.branch or current_branch()
+    session = hold.current_session()
+    if session is None or not any(h["branch"] == branch for h in hold.held(session)):
+        sys.exit(f"Nothing to release: this session doesn't hold '{branch}'.")
+    issue, _, blocking, decision = gate_for(branch)
+    github.comment(
+        issue,
+        f"⏏️ **Ship run stopped with the gate shut.** {args.reason}\n\n"
+        f"Gate: {decision}\n\n"
+        f"Open problems, every one blocking: {len(blocking)} — {blocking_refs(blocking)}",
+    )
+    hold.release(session, branch)
+    print(f"Released '{branch}': this session may end its turn. The gate is still {decision.verdict}.")
 
 
 def cmd_migrate(args: argparse.Namespace) -> None:
@@ -766,7 +819,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
     print(f"Workflow labels are up to date; migrated #{issue} state from schema {was} to {SCHEMA}.")
 
 
-def _blocking_refs(blocking: list[dict]) -> str:
+def blocking_refs(blocking: list[dict]) -> str:
     return ", ".join(f"#{s['number']} [{problems.severity(s)}]" for s in blocking) or "none"
 
 
@@ -782,7 +835,7 @@ def cmd_merge(args: argparse.Namespace) -> None:
     review a merged PR). What the gate still had outstanding goes into the record instead.
     """
     branch = args.branch or current_branch()
-    issue, state, blocking, decision = _gate_for(branch)
+    issue, state, blocking, decision = gate_for(branch)
     # "Merged" is a claim about the world, and this command writes it into the permanent record.
     # Verify it instead of trusting the caller's timing: run too early and the feature reads as
     # shipped while the PR is still open — or was closed unmerged, in which case the work never
@@ -955,7 +1008,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
         if undecided := problems.undecided(blocking):
             print(
                 f"#{issue} ({row['title']}): PR #{pr} {pr_state}, but {len(undecided)} open problem(s) need a "
-                f"decision first: {_blocking_refs(undecided)} — `feature problem hand-off|wontfix <#> --reason …`"
+                f"decision first: {blocking_refs(undecided)} — `feature problem hand-off|wontfix <#> --reason …`"
             )
             needs_human += 1
             continue
@@ -1191,8 +1244,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("escalate", help="Hand a non-converging review loop to a human decision")
     c.add_argument("--reason", required=True, help="What you found and what you recommend")
+    c.add_argument(
+        "--problem",
+        type=int,
+        nargs="*",
+        default=[],
+        metavar="NUMBER",
+        help="Open problems that need the user's call; every other open problem must be closed first",
+    )
     c.add_argument("--branch")
     c.set_defaults(func=cmd_escalate)
+
+    c = sub.add_parser("release", help="Let this session end its turn with the gate still shut, on the record")
+    c.add_argument(
+        "--reason", required=True, help="Why the run stops here: the user stopped it, or the review can't run"
+    )
+    c.add_argument("--branch")
+    c.set_defaults(func=cmd_release)
 
     c = sub.add_parser("migrate", help="Upgrade a repo's labels + a feature issue's state block for this CLI")
     c.add_argument("--branch")
