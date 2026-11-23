@@ -86,12 +86,12 @@ def release(session: str, *, branch: str, checkout: str) -> bool:
 
 def work() -> str:
     """What keeps a held session going, for the Stop hook and `review record` alike: the ship run, and
-    its two ways out on the record. The gate's own next step (`GateDecision.next_step`, printed beside
-    it) says what this gate asks for; a second, gate-specific text here drifted from it once (#153:
-    a redesign round was told to fix every open problem), and repeated the skill's loop each time the
-    hook fired."""
+    its two ways out on the record. What this gate asks for is the skill's loop and the gate's next
+    step to say: a gate-specific text here drifted from them once (#153: a redesign round was told to
+    fix every open problem), and restated the skill's loop each time the hook fired."""
     return (
-        "Go on with the ship run (`Skill(ship:ship)`). Short of OPEN, leave only on the record: `feature escalate "
+        "Go on with the ship run (`Skill(ship:ship)`): its loop says what this gate asks for. Short of OPEN, "
+        "leave only on the record: `feature escalate "
         "--reason '<…>' [--problem <#> …]` when the user must decide, `feature release --reason '<…>'` when they "
         "stopped the run or the review can't run."
     )

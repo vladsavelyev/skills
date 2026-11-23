@@ -36,14 +36,14 @@ def test_a_held_session_with_a_problem_open_is_sent_back_to_fix_it(monkeypatch, 
     """navari #5355: the round filed #5400 and the run ended. Now ending the turn there is refused."""
     out = json.loads(_run(monkeypatch, capsys, tmp_path, Verdict.REVIEW_AGAIN))
     assert out["decision"] == "block"
-    assert "#5400 [sev:med] stale cache" in out["reason"] and "Next: Fix it." in out["reason"]
+    assert "#5400 [sev:med] stale cache" in out["reason"] and "REVIEW_AGAIN" in out["reason"]
     assert hold.held("s1") != []
 
 
 def test_the_reason_points_back_to_the_ship_run_instead_of_repeating_its_loop(monkeypatch, capsys, tmp_path):
     """It lands in the agent's context each time it fires; it used to restate the skill's fixing steps."""
     reason = json.loads(_run(monkeypatch, capsys, tmp_path, Verdict.REVIEW_AGAIN))["reason"]
-    assert "`Skill(ship:ship)`" in reason and "root cause" not in reason
+    assert "`Skill(ship:ship)`" in reason and "root cause" not in reason and "Fix it." not in reason
 
 
 def test_a_settled_gate_lets_the_session_stop_and_drops_the_hold(monkeypatch, capsys, tmp_path):
@@ -62,7 +62,7 @@ def test_a_gate_recommending_a_redesign_holds_until_it_is_escalated_without_send
     """Fixing the problems first is the work a redesign throws away, and the patching that kept failing."""
     out = json.loads(_run(monkeypatch, capsys, tmp_path, Verdict.NEEDS_DECISION, redesign=True))
     assert out["decision"] == "block" and "feature escalate" in out["reason"]
-    assert "Don't fix the open problems yet" in out["reason"] and "Skill(ship:fix)" not in out["reason"]
+    assert "Skill(ship:fix)" not in out["reason"] and "fix each" not in out["reason"]
 
 
 def test_a_hold_whose_checkout_is_gone_is_dropped_out_loud(monkeypatch, capsys, tmp_path):

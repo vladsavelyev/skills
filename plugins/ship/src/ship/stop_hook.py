@@ -17,14 +17,13 @@ from .gitwiring import feature_issue
 
 
 def _why(branch: str, issue: int, state: dict, blocking: list[dict], decision) -> str:
-    # Short: it lands in the agent's context each time the hook fires, and the ship skill already
-    # holds the loop. What this gate asks for is `next_step`; the rest is the skill's.
+    # Short: it lands in the agent's context each time the hook fires. The gate and its reasons, the
+    # open problems, and the way back to the run: the ship skill's loop says what each gate asks for.
     listed = "\n".join(f"  #{s['number']} [{problems.severity(s)}] {s['title']}" for s in blocking) or "  none"
     return (
         f"ship: this session is shipping `{branch}` (PR #{state['pr']}, feature #{issue}), and its gate is "
         f"{decision}. Don't end the turn here.\n"
         f"Open problems:\n{listed}\n"
-        f"Next: {decision.next_step}\n"
         f"{hold.work()}"
     )
 

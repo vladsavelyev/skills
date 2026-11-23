@@ -246,8 +246,8 @@ like the review's, and the caller keeps its report: a line per problem. That giv
 hands it what the code and the issues don't say, and the fixer spends more tokens re-reading than
 the caller would have. #14's third reason doesn't apply: the fixer is a separate fork from the
 triager, so round 2's triage is still not the fixer's. The Stop hook's reason shrank with it: it
-restated the skill's fixing steps on every block; now it gives the gate, the open problems, the
-gate's next step and a pointer back to the run.
+restated the gate's next step and the skill's fixing steps on every block; now it gives the gate
+with its reasons, the open problems and a pointer back to the run.
 
 ## Deliberately deferred
 

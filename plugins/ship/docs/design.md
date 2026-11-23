@@ -440,9 +440,10 @@ the plugin holds the session instead (`hold.py`):
   sessions never share one.
 - The Stop hook (`stop_hook.py`) runs whenever the agent is about to end its turn. For each branch
   the session holds it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
-  the stop, and Claude Code hands the agent the reason: the gate, the open problems, the gate's
-  next step, and a pointer back to the run with its two ways out (`hold.work`). It stays that short
-  because it lands in the agent's context each time it fires, and the skill already holds the loop. A hold on a branch that is no longer a tracked feature is dropped with a message to the
+  the stop, and Claude Code hands the agent the reason: the gate with its reasons, the open
+  problems, and a pointer back to the run with its two ways out (`hold.work`). It stays that short
+  because it lands in the agent's context each time it fires, and the skill's loop already says
+  what each gate asks for. A hold on a branch that is no longer a tracked feature is dropped with a message to the
   user, and the others are still judged. Its shell wrapper looks for any hold before starting Python, so a session holding nothing
   pays one `ls`.
 - The two ways out short of `OPEN` both write to the tracking issue and drop the hold.
