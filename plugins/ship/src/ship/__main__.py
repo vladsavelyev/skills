@@ -352,7 +352,8 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     _write_block(state, issue)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     # The hold is a fallible write too (a file), and taking it twice is harmless, so it goes before.
-    held = not decision.settled and _hold(branch)
+    # A round the user asked for as a review alone fixes nothing, so it holds nobody to fixing.
+    held = not decision.settled and not args.review_only and _hold(branch)
     github.comment(
         issue,
         f"🔍 Review run {run_num} ({args.sha}): {new_serious} new high/med, {new_low} new low, "
@@ -1053,6 +1054,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--blast-radius", required=True, help="A few words: who or what a bug in the PR would reach")
     r.add_argument("--complexity", required=True, choices=assess.LEVELS, help="The reviewer's grade of its complexity")
     r.add_argument("--why", required=True, help="One or two sentences: what drives that risk and complexity")
+    r.add_argument(
+        "--review-only",
+        action="store_true",
+        help="The user asked for this review alone, without fixes: don't hold the session to fixing",
+    )
     r.add_argument("--branch")
     r.set_defaults(func=cmd_review_record)
 

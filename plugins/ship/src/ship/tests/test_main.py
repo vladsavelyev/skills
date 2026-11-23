@@ -455,10 +455,15 @@ def test_resolve_without_a_commit_records_no_fix(monkeypatch):
     assert did == ["Resolved."]
 
 
-def test_review_record_takes_the_hold_before_its_one_state_write(monkeypatch):
-    """#140: the hold came after the write, so a failed hold left the round recorded and a retry
-    spent another one."""
+_RECORD = (
+    "review record --sha abc --found 8 --summary s --depth low --risk low --door two-way "
+    "--blast-radius b --complexity low --why w --branch add-oauth"
+).split()
+
+
+def _stub_review_record(monkeypatch) -> list[str]:
     did: list[str] = []
+    monkeypatch.setattr(github, "use_owner_account", lambda: None)
     state = _merged_state()
     monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, ""))
     monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
@@ -472,31 +477,19 @@ def test_review_record_takes_the_hold_before_its_one_state_write(monkeypatch):
     monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment"))
     monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: did.append("save"))
-    args = cli.build_parser().parse_args(
-        [
-            "review",
-            "record",
-            "--sha",
-            "abc",
-            "--found",
-            "8",
-            "--summary",
-            "s",
-            "--depth",
-            "low",
-            "--risk",
-            "low",
-            "--door",
-            "two-way",
-            "--blast-radius",
-            "b",
-            "--complexity",
-            "low",
-            "--why",
-            "w",
-            "--branch",
-            "add-oauth",
-        ]
-    )
-    args.func(args)
+    return did
+
+
+def test_review_record_takes_the_hold_before_its_one_state_write(monkeypatch):
+    """#140: the hold came after the write, so a failed hold left the round recorded and a retry
+    spent another one."""
+    did = _stub_review_record(monkeypatch)
+    cli.main(_RECORD)
     assert did.index("hold") < did.index("save")
+
+
+def test_a_review_the_user_asked_for_alone_holds_nobody_to_fixing(monkeypatch):
+    """#142: a review-only round held the session, so the Stop hook made it fix and push."""
+    did = _stub_review_record(monkeypatch)
+    cli.main([*_RECORD, "--review-only"])
+    assert "hold" not in did and "save" in did
