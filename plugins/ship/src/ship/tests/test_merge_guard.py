@@ -131,3 +131,41 @@ def test_a_refusal_from_the_account_check_denies_the_merge(monkeypatch, capsys):
     monkeypatch.setattr(github, "use_owner_account", two_personal_accounts)
     out = json.loads(_run_hook(monkeypatch, capsys, "gh pr merge 5355 --admin"))["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and "Found 2 personal accounts" in out["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "command gh pr merge 5 --admin",
+        "if true; then gh pr merge 5 --admin; fi",
+        "env A=1 gh pr merge 5",
+        "sudo -u me gh pr merge 5",
+        "x && { gh pr merge 5; }",
+        "out=$(gh pr merge 5)",
+        "echo `gh pr merge 5`",
+        "cat <<EOF\n$(gh pr merge 5)\nEOF",
+    ],
+)
+def test_wrapped_and_nested_merges_are_merges(command):
+    """#138: each of these ran the merge and the guard found none."""
+    assert [c.target for c in merge_calls(command, "/repo")] == ["5"]
+
+
+def test_a_heredoc_body_is_data_even_with_an_apostrophe():
+    command = "gh pr merge 5 --admin && cat <<'EOF'\ndon't gh pr merge 6\nEOF\necho done"
+    assert [c.target for c in merge_calls(command, "/repo")] == ["5"]
+
+
+def test_the_override_survives_a_token_from_a_substitution():
+    """The skills tell agents to prefix GH_TOKEN=$(gh auth token --user …) for a personal repo."""
+    [call] = merge_calls('SHIP_PAST_GATE="ok" GH_TOKEN=$(gh auth token --user v) gh pr merge 5', "/repo")
+    assert (call.target, call.override) == ("5", "ok")
+
+
+def test_an_unreadable_command_that_mentions_a_merge_is_refused(monkeypatch, capsys):
+    out = json.loads(_run_hook(monkeypatch, capsys, "gh pr merge 5 --admin; echo 'unclosed"))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "can't read this command" in out["permissionDecisionReason"]
+
+
+def test_an_unreadable_command_that_merges_nothing_passes(monkeypatch, capsys):
+    assert _run_hook(monkeypatch, capsys, "git merge x; echo 'unclosed") == ""

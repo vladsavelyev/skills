@@ -17,12 +17,12 @@ that error, because letting it through would be the silent skip this exists to s
 
 import json
 import os
-import shlex
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import feature, github, prbody, problems
+from . import feature, github, prbody, problems, shellscan
 from .gitwiring import fetch_pr_head, has_object
 from .state import parse_block
 
@@ -30,7 +30,8 @@ OVERRIDE = "SHIP_PAST_GATE"
 # `gh pr merge` flags that take a value, so the value isn't read as the PR to merge.
 _VALUE_FLAGS = {"-A", "--author-email", "-b", "--body", "-F", "--body-file", "-t", "--subject", "--match-head-commit"}
 _REPO_FLAGS = {"-R", "--repo"}
-_SEPARATORS = set(";&|()\n")
+# A command that mentions a merge this loosely and can't be read is refused rather than guessed at.
+_MENTIONS_MERGE = re.compile(r"\bgh\b.*\bpr\b\s+merge\b", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -42,21 +43,6 @@ class MergeCall:
     repo: str | None
     cwd: str
     override: str | None
-
-
-def _segments(command: str) -> list[list[str]]:
-    """The simple commands of a shell command line, as words. Quotes are resolved, and a newline
-    separates commands as `;` and `&&` do."""
-    lex = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n")
-    lex.whitespace = " \t\r"
-    lex.whitespace_split = True
-    segments: list[list[str]] = [[]]
-    for token in lex:
-        if set(token) <= _SEPARATORS:
-            segments.append([])
-        else:
-            segments[-1].append(token)
-    return [s for s in segments if s]
 
 
 def _merge_args(args: list[str]) -> tuple[str | None, str | None]:
@@ -76,19 +62,15 @@ def _merge_args(args: list[str]) -> tuple[str | None, str | None]:
 
 
 def merge_calls(command: str, cwd: str) -> list[MergeCall]:
-    """Every `gh pr merge` in `command`, run from `cwd`."""
+    """Every `gh pr merge` in `command`, run from `cwd`. Raises ValueError for a command it can't read."""
     calls = []
-    for words in _segments(command):
+    for found in shellscan.commands(command):
+        words = found.words
         if words[0] == "cd" and len(words) == 2:
             cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(words[1])))
-            continue
-        env = {}
-        while words and "=" in words[0] and words[0].split("=", 1)[0].isidentifier():
-            name, _, value = words.pop(0).partition("=")
-            env[name] = value
-        if len(words) >= 3 and Path(words[0]).name == "gh" and words[1:3] == ["pr", "merge"]:
+        elif len(words) >= 3 and Path(words[0]).name == "gh" and words[1:3] == ["pr", "merge"]:
             target, repo = _merge_args(words[3:])
-            calls.append(MergeCall(target=target, repo=repo, cwd=cwd, override=env.get(OVERRIDE) or None))
+            calls.append(MergeCall(target=target, repo=repo, cwd=cwd, override=found.env.get(OVERRIDE) or None))
     return calls
 
 
@@ -142,10 +124,17 @@ def main() -> None:
     payload = json.load(sys.stdin)
     if payload.get("tool_name") != "Bash":
         return
+    command = payload["tool_input"]["command"]
     try:
-        calls = merge_calls(payload["tool_input"]["command"], payload["cwd"])
-    except ValueError:
-        return  # unbalanced quotes: bash refuses the command itself, so nothing merges
+        calls = merge_calls(command, payload["cwd"])
+    except ValueError as exc:
+        if _MENTIONS_MERGE.search(command):
+            _deny(
+                [
+                    f"ship can't read this command ({exc}), and it may run `gh pr merge`: run the merge as a plain command."
+                ]
+            )
+        return
     refusals = []
     for call in calls:
         try:
@@ -155,17 +144,12 @@ def main() -> None:
         if refusal:
             refusals.append(refusal)
     if refusals:
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": "\n\n".join(refusals),
-                    }
-                }
-            )
-        )
+        _deny(refusals)
+
+
+def _deny(refusals: list[str]) -> None:
+    decision = {"hookEventName": "PreToolUse", "permissionDecision": "deny"}
+    print(json.dumps({"hookSpecificOutput": decision | {"permissionDecisionReason": "\n\n".join(refusals)}}))
 
 
 if __name__ == "__main__":
