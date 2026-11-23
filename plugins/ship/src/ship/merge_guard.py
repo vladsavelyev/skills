@@ -93,6 +93,8 @@ def check(call: MergeCall) -> str | None:
     github.use_owner_account()
     pr = github.pr_view(call.target, repo=call.repo)
     issue = prbody.tracking_issue(pr["body"])
+    if issue is None:
+        issue = next((n for n in prbody.part_of_references(pr["body"]) if "feature" in github.issue_labels(n)), None)
     if issue is None or pr["state"] != "OPEN":
         return None
     if (here := github.current_repo()) != pr["repo"]:

@@ -169,3 +169,11 @@ def test_an_unreadable_command_that_mentions_a_merge_is_refused(monkeypatch, cap
 
 def test_an_unreadable_command_that_merges_nothing_passes(monkeypatch, capsys):
     assert _run_hook(monkeypatch, capsys, "git merge x; echo 'unclosed") == ""
+
+
+def test_a_part_of_line_naming_a_feature_issue_is_tracked(monkeypatch):
+    _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
+    pr = github.pr_view(None, repo=None) | {"body": "Why.\n\nPart of #12\nPart of #39\n"}
+    monkeypatch.setattr(github, "pr_view", lambda target, repo: pr)
+    monkeypatch.setattr(github, "issue_labels", lambda n: ["feature"] if n == 39 else ["bug"])
+    assert "feature #39" in merge_guard.check(_call())

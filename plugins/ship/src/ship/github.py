@@ -330,6 +330,10 @@ def get_issue_body(number: int) -> str:
     return run(["gh", "issue", "view", str(number), "--json", "body", "--jq", ".body"])
 
 
+def issue_labels(number: int) -> list[str]:
+    return run(["gh", "issue", "view", str(number), "--json", "labels", "--jq", ".labels[].name"]).splitlines()
+
+
 def get_issue(number: int) -> dict:
     """{number, title, state, body} for one issue — the same shape `feature_issues` yields, so a
     single-feature reconcile runs through the same code as the repo-wide sweep."""

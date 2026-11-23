@@ -120,3 +120,22 @@ def test_a_pr_without_ships_block_is_not_tracked():
     tracking_issue = prbody.tracking_issue
     # An author's own `Closes #…` line is theirs, not ship's link to a feature issue.
     assert tracking_issue("Why.\n\nCloses #12") is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Why.\n\n<!-- ship -->\n> Feature tracking issue: closes #39\n<!-- /ship -->\n",
+        "Why.\n\nCloses #39 <!-- ship -->\n\n<!-- ship:assessment -->\n> reviewed\n<!-- /ship:assessment -->\n",
+        "Why.\n\nCloses #39 <!-- feature-workflow -->\n",
+    ],
+)
+def test_tracking_issue_reads_the_formats_open_prs_still_carry(body):
+    """#139: an in-flight PR whose body ship wrote before the current block was taken for untracked."""
+    assert prbody.tracking_issue(body) == 39
+
+
+def test_an_unmarked_part_of_line_is_left_to_the_caller_to_check():
+    body = "Why.\n\nPart of #39\nCloses #12\n"
+    assert prbody.tracking_issue(body) is None
+    assert prbody.part_of_references(body) == [39]
