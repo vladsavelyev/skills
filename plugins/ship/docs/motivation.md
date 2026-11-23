@@ -217,7 +217,7 @@ Two hooks make it hold: the session that records a round or closes a problem can
 until the gate is `OPEN` (short of an escalation or a release, both on the record), and `gh pr
 merge` of a tracked PR is refused while the gate is shut unless the user's reason goes on the
 tracking issue. `feature escalate` refuses while a problem nobody asked the user about is open, so
-escalating isn't a way around fixing.
+escalating isn't a way around fixing. Running inline had one side effect we missed at first: ship kept the fill-in report block it had written for its fork's caller, and that block now landed in the user's chat as the run's last message. The run now ends with a plain reply to the user; only the forked `review` round keeps a template, since an agent reads it.
 
 **15. A bug back after its fix → recommend a redesign, not another round.** On navari #5176 every
 one of five rounds filed new high/med problems, mostly graded right, and nearly all of them were one
