@@ -61,10 +61,11 @@ def main() -> None:
     # the merge gate never moves. Naming the skill explicitly (not just its trigger phrases)
     # makes the routing deterministic regardless of skill auto-matching.
     print(
-        "This branch is a TRACKED FEATURE. Any request to review it, record a review, file a "
-        "problem, check the merge gate, or resume its status MUST go through "
-        "`Skill(ship:ship)`, NOT a standalone code reviewer. The skill runs in a "
-        "forked subagent and returns a report; follow its `Next` steps."
+        "This branch is a TRACKED FEATURE. A request to ship it, or to fix what its review "
+        "found, MUST go through `Skill(ship:ship)`: one run reviews in a fork, you fix every "
+        "problem it files, and it reviews again until the gate settles. A request only to "
+        "review it, without fixing, is `Skill(ship:review)`, NOT a standalone code reviewer. "
+        "Checking its merge gate or its status is `feature gate` or `feature status`."
     )
     # A merged PR whose feature never closed out is the one state where reviewing is pointless, and
     # the branch you're on is the last place anyone will notice — after this session it gets deleted

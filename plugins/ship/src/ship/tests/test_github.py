@@ -3,6 +3,7 @@
 import pytest
 
 from ship import github
+from ship.errors import Refusal
 
 
 def test_open_pr_for_branch_returns_number_when_present(monkeypatch):
@@ -171,5 +172,5 @@ def test_personal_account_aborts_unless_exactly_one(others):
     accounts = [{"login": "work", "active": True, "state": "success"}] + [
         {"login": o, "active": False, "state": "success"} for o in others
     ]
-    with pytest.raises(SystemExit):
+    with pytest.raises(Refusal):
         github.personal_account(accounts)

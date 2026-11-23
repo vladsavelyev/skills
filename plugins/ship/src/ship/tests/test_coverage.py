@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ship import __main__ as cli
-from ship import github
+from ship import feature, github
 from ship.state import new_state, record_fix
 
 LOW, HIGH = 5, 6
@@ -44,7 +43,7 @@ def repo(tmp_path, monkeypatch):
     git("checkout", "-q", "-b", "feat")
     reviewed = commit("feat.py", "feature\n", "feature")
     monkeypatch.setattr(github, "pr_base_branch", lambda pr: "main")
-    monkeypatch.setattr(cli, "sensitive_patterns", lambda: [])
+    monkeypatch.setattr(feature, "sensitive_patterns", lambda: [])
     state = new_state(branch="feat", base="main", updated="t0")
     state["pr"] = 9
     state["last_review"] = {"run": 1, "sha": reviewed[:9]}
@@ -65,7 +64,7 @@ def advance_main(path: str, text: str) -> None:
 
 
 def unreviewed(state: dict) -> list[str]:
-    return cli._unreviewed(state, git("rev-parse", "HEAD"), SUBS)
+    return feature.unreviewed(state, git("rev-parse", "HEAD"), SUBS)
 
 
 def test_fixes_of_low_problems_and_a_clean_base_merge_need_no_review(repo):
@@ -124,7 +123,7 @@ def test_the_tail_of_a_squash_merged_parent_counts_as_base(repo, monkeypatch):
     merge(tail)
     repo["base"] = "parent"
     monkeypatch.setattr(github, "merged_pr_for_branch", lambda branch: 8 if branch == "parent" else None)
-    monkeypatch.setattr(cli, "fetch_pr_head", lambda number: None)
+    monkeypatch.setattr(feature, "fetch_pr_head", lambda number: None)
     monkeypatch.setattr(github, "pr_head_sha", lambda number: tail)
     assert unreviewed(repo) == []
 
@@ -138,5 +137,5 @@ def test_a_merge_of_a_branch_other_than_the_base_needs_review(repo):
 
 
 def test_a_review_of_the_head_needs_no_walk(repo, monkeypatch):
-    monkeypatch.setattr(cli, "commits_since", lambda *a: pytest.fail("walked a covered head"))
+    monkeypatch.setattr(feature, "commits_since", lambda *a: pytest.fail("walked a covered head"))
     assert unreviewed(repo) == []

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stop hook. Most sessions hold nothing (ship's src/ship/hold.py), so look for any hold before
+# paying for Python: this runs every time any session ends a turn.
+dir="${XDG_STATE_HOME:-$HOME/.local/state}/ship/holds"
+[ -n "$(ls -A "$dir" 2>/dev/null)" ] || exit 0
+exec uv run --quiet --frozen --no-dev --project "$(dirname "$0")/.." feature-stop-hook "$@"

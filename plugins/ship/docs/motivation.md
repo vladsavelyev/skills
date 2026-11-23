@@ -203,6 +203,22 @@ commits that is one round, not three.
 fix" steered both toward band-aids, which the next agent then copies. Findings now carry the
 root-cause fix.
 
+**14. A ship run that ended at the review → one that fixes until the gate settles.** `ship` ran as
+a forked subagent that reviewed one round and handed the fixes back as a `Next:` list. On navari PR
+#5355 the round filed #5400 (med) and returned `REVIEW_AGAIN` with "close every open problem, then
+call `Skill(ship:ship)` again". The calling session didn't fix it, and at the user's next message
+("admin-merge the PR") it merged the PR with #5400 open. Advice in a report is only as good as the
+caller's next turn. Now `ship` runs inline and drives the loop itself: each round is the forked
+`review` skill (Sol still finds blind, and a fresh fork still triages), and the fixes happen in the
+caller's session, where the user sees them and the agent knows the code. Fixing inside the fork was
+the other option, but it would have hidden the fixes from the user, handed them to an agent with
+none of the feature's context, and left triage of round 2 to the agent whose fixes it was judging.
+Two hooks make it hold: the session that records a round or closes a problem can't end its turn
+until the gate is `OPEN` (short of an escalation or a release, both on the record), and `gh pr
+merge` of a tracked PR is refused while the gate is shut unless the user's reason goes on the
+tracking issue. `feature escalate` refuses while a problem nobody asked the user about is open, so
+escalating isn't a way around fixing.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).
