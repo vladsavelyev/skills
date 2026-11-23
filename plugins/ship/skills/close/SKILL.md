@@ -41,7 +41,7 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
      - a modified or untracked file;
      - a HEAD that isn't the PR's head, or a file assume-unchanged or skip-worktree hides from
        `status`;
-     - an initialized submodule;
+     - a repository inside it: another worktree, a submodule, a clone;
      - an ignored path the main checkout doesn't have and that isn't a rebuildable cache;
      - a folder you can't empty.
 

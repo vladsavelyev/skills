@@ -158,3 +158,48 @@ def test_a_branch_in_the_main_checkout_goes_once_the_main_checkout_is_back_on_th
     _git("checkout", "-q", "main", cwd=main)
     cli.main(["tidy", "--branch", "feat"])
     assert "feat" not in _branches(main)
+
+
+def test_keeps_a_checkout_holding_another_worktree(repo):
+    main, checkout = repo
+    nested = checkout / ".claude" / "worktrees" / "child"  # .claude/ is ignored, and the main checkout has it too
+    _git("worktree", "add", "-q", "-b", "child", str(nested), cwd=main)
+    (nested / "unsaved.md").write_text("important work\n")
+    assert str(nested) in _refused()
+    _kept(main, checkout)
+    assert (nested / "unsaved.md").is_file()
+
+
+def test_keeps_a_checkout_holding_a_repo_of_its_own(repo):
+    main, checkout = repo
+    nested = checkout / "logs" / "clone"  # logs/ is ignored, and the main checkout has it too
+    nested.mkdir()
+    _git("init", "-q", cwd=nested)
+    assert str(nested) in _refused()
+    _kept(main, checkout)
+
+
+def test_keeps_a_worktree_registered_inside_a_cache(repo):
+    main, checkout = repo
+    nested = checkout / ".venv" / "child"
+    _git("worktree", "add", "-q", "-b", "child", str(nested), cwd=main)
+    assert str(nested) in _refused()
+    _kept(main, checkout)
+
+
+def test_a_package_that_ships_its_own_git_in_a_cache_goes_with_it(repo):
+    main, checkout = repo
+    package = checkout / ".venv" / "lib" / "site-packages" / "pkg"
+    package.mkdir(parents=True)
+    _git("init", "-q", cwd=package)  # what pip leaves of a package installed from a git checkout
+    cli.main(["tidy", "--branch", "feat"])
+    assert not checkout.exists()
+
+
+def test_accepts_an_ignored_folder_as_tidy_prints_it(repo):
+    main, checkout = repo
+    (checkout / "results").mkdir()
+    (checkout / "results" / "run1.json").write_text("{}\n")
+    assert "results/" in _refused()
+    cli.main(["tidy", "--branch", "feat", "--accept", "results/"])
+    assert not checkout.exists()
