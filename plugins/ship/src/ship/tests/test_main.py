@@ -592,7 +592,15 @@ def test_escalating_a_recurring_bug_recommends_a_redesign_with_its_problems_stil
 
 
 def _round(run: int, repeats: dict) -> dict:
-    return {"run": run, "sha": f"sha{run}", "new_blocking": 1, "new_low": 0, "regressions": 0, "summary": "", "repeats": repeats}
+    return {
+        "run": run,
+        "sha": f"sha{run}",
+        "new_blocking": 1,
+        "new_low": 0,
+        "regressions": 0,
+        "summary": "",
+        "repeats": repeats,
+    }
 
 
 def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypatch):
