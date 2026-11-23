@@ -39,6 +39,9 @@ the active account for a repo owned by it or one of its orgs, else prefix
 
 1. **Review.** `Skill(ship:review)`, with `args` naming the PR (if the user named one) and anything
    the user asked of the review (a deeper one, a fresh one past an OPEN gate). Read its report.
+   Then `EnterWorktree` with `path: <worktree>` from it (never `name:`), unless you're in it: your
+   own commands (`feature gate`, `escalate`, `release`, `describe`, `gh pr ready`) act on the
+   branch they run on, and from another checkout they reach the wrong feature or none.
    - `Blocked: no PR`: open a draft against the feature's parent (`gh pr create --draft --base
      <parent>`), then review again.
    - `Blocked:` the PR's base isn't the tracked parent: retarget it (`gh pr edit <PR#> --base
