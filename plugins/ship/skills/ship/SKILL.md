@@ -11,7 +11,7 @@ and the agent that knows the code makes it. Each review round runs in its own fo
 (`Skill(ship:review)`), where Sol finds blind and a fresh agent triages, so the review stays
 independent of you, the fixer.
 
-The run ends only at one of these **end states**, and the report names which:
+The run ends only at one of these **end states**, and your reply names which:
 
 - `OPEN`: every problem closed, and a review covers the code. Safe to merge.
 - `NEEDS_DECISION`: the review budget is spent or the loop churns; every problem is closed and
@@ -105,18 +105,18 @@ If the user tells you to stop mid-run, `feature release --reason "<their words>"
   issue for it (`gh issue create`, with the failure scenario, `file:line` and the root-cause fix).
 - The CLI fails fast. Report its errors, don't work around them.
 
-## Report
+## Reply
 
-End with only this, filled in:
+Your last message is what the user reads, so end the run with a plain reply to them, not a
+filled-in form. Open with the end state and, in a sentence, why the run ended there. Then, as
+each applies:
 
-```
-Ship: <end state> — <one line: why it ended here>
-Feature: <name>  Branch: <branch>  PR: <url>  Worktree: <abs path>
-Rounds: <n> this run, Sol at <depth per round>; graded risk <…> (<door> door, blast radius <…>), complexity <…>
-Fixed: #<n> [sev] <title> — <sha>   (one per line; or none)
-Won't fix: #<n> [sev] <title> — <reason>   (one per line; or none)
-Open: #<n> [sev] <title> — <at YOUR CALL: the question for the user; at a redesign: repeats #<n>,
-      re-opened after its fix, or waits on the redesign>   (one per line; else none)
-Pre-existing: [sev] <title> — <file:line>, fix: <root-cause fix>   (or none)
-Next: <what the user decides or does: merge, answer the question, pick the escalation's option>
-```
+- what the run fixed or closed as won't-fix: each problem's number and title, with its commit or
+  the reason;
+- at `YOUR CALL`, each question with its options and your recommendation; at a redesign, which
+  problems came back after their fix;
+- the pre-existing bugs the review found, each with the choice the Rules give the user;
+- what the user does next: merge, answer a question, or pick the escalation's option.
+
+Link the PR. Leave out what the PR body and the tracking issue already show, like the grade and
+each round's depth.
