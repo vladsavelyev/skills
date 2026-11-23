@@ -30,6 +30,9 @@ OVERRIDE = "SHIP_PAST_GATE"
 # `gh pr merge` flags that take a value, so the value isn't read as the PR to merge.
 _VALUE_FLAGS = {"-A", "--author-email", "-b", "--body", "-F", "--body-file", "-t", "--subject", "--match-head-commit"}
 _REPO_FLAGS = {"-R", "--repo"}
+# Words in front of a command that leave it the same command, in the same scope.
+_RESERVED = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "{", "}", "!", "time"}
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 # A command that mentions a merge this loosely and can't be read is refused rather than guessed at.
 _MENTIONS_MERGE = re.compile(r"\bgh\b.*\bpr\b\s+merge\b", re.DOTALL)
 
@@ -61,17 +64,81 @@ def _merge_args(args: list[str]) -> tuple[str | None, str | None]:
     return target, repo
 
 
-def merge_calls(command: str, cwd: str) -> list[MergeCall]:
-    """Every `gh pr merge` in `command`, run from `cwd`. Raises ValueError for a command it can't read."""
-    calls = []
-    for found in shellscan.commands(command):
-        words = found.words
+def _gh_merge(words: list[str]) -> tuple[int, list[str], str | None] | None:
+    """Where `words` run `gh pr merge`, behind whatever wrapper (`command`, `env`, `sudo`, `timeout
+    10`, `xargs`, …): the index of `gh`, the words after `merge`, and a `--repo` given before it
+    (`gh pr --repo X merge`). None if they don't."""
+    for k, word in enumerate(words):
+        if Path(word).name != "gh":
+            continue
+        repo, path, rest = None, [], iter(enumerate(words[k + 1 :], start=k + 1))
+        for j, arg in rest:
+            flag, eq, value = arg.partition("=")
+            if flag in _REPO_FLAGS:
+                repo = value if eq else next(rest, (None, None))[1]
+            elif not arg.startswith("-"):
+                path.append(arg)
+                if path == ["pr", "merge"]:
+                    return k, words[j + 1 :], repo
+                if path != ["pr"]:
+                    break
+    return None
+
+
+def _shell_script(words: list[str]) -> str | None:
+    """The script a `sh -c`, `bash -lc` (and so on) in `words` runs, or None."""
+    for k, word in enumerate(words):
+        if Path(word).name in _SHELLS:
+            for j, arg in enumerate(words[k + 1 :], start=k + 1):
+                if arg.startswith("-") and not arg.startswith("--") and "c" in arg and j + 1 < len(words):
+                    return words[j + 1]
+    return None
+
+
+def _walk(script: shellscan.Script, cwd: str) -> tuple[list[MergeCall], str]:
+    """The merges `script` runs from `cwd`, and the directory it ends in. A subshell, a substitution
+    and a `sh -c` get their own scope, so their `cd`s stay in them; `eval` runs in this one."""
+    calls: list[MergeCall] = []
+    for item in script.items:
+        if isinstance(item, shellscan.Script):
+            calls += _walk(item, cwd)[0]
+            continue
+        for substitution in item.substitutions:
+            calls += _walk(substitution, cwd)[0]
+        words = list(item.words)
+        while words and words[0] in _RESERVED:
+            words.pop(0)
+        env = {}
+        while words and _is_assignment(words[0]):
+            name, _, value = words.pop(0).partition("=")
+            env[name] = value
+        if not words:
+            continue
         if words[0] == "cd" and len(words) == 2:
             cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(words[1])))
-        elif len(words) >= 3 and Path(words[0]).name == "gh" and words[1:3] == ["pr", "merge"]:
-            target, repo = _merge_args(words[3:])
-            calls.append(MergeCall(target=target, repo=repo, cwd=cwd, override=found.env.get(OVERRIDE) or None))
-    return calls
+        elif words[0] == "eval":
+            found, cwd = _walk(shellscan.parse(" ".join(words[1:])), cwd)
+            calls += found
+        elif (inner := _shell_script(words)) is not None:
+            calls += _walk(shellscan.parse(inner), cwd)[0]
+        elif (merge := _gh_merge(words)) is not None:
+            at, args, global_repo = merge
+            env |= dict(w.partition("=")[::2] for w in words[:at] if _is_assignment(w))
+            target, repo = _merge_args(args)
+            calls.append(
+                MergeCall(target=target, repo=repo or global_repo, cwd=cwd, override=env.get(OVERRIDE) or None)
+            )
+    return calls, cwd
+
+
+def _is_assignment(word: str) -> bool:
+    name, eq, _ = word.partition("=")
+    return bool(eq) and name.isidentifier()
+
+
+def merge_calls(command: str, cwd: str) -> list[MergeCall]:
+    """Every `gh pr merge` in `command`, run from `cwd`. Raises ValueError for a command it can't read."""
+    return _walk(shellscan.parse(command), cwd)[0]
 
 
 def _refusal(pr: dict, issue: int, decision, blocking: list[dict]) -> str:

@@ -177,3 +177,35 @@ def test_a_part_of_line_naming_a_feature_issue_is_tracked(monkeypatch):
     monkeypatch.setattr(github, "pr_view", lambda target, repo: pr)
     monkeypatch.setattr(github, "issue_labels", lambda n: ["feature"] if n == 39 else ["bug"])
     assert "feature #39" in merge_guard.check(_call())
+
+
+@pytest.mark.parametrize(
+    ("command", "repo"),
+    [
+        ("gh pr --repo org/app merge 5", "org/app"),
+        ("gh pr -R org/app merge 5 --admin", "org/app"),
+        ("bash -lc 'gh pr merge 5'", None),
+        ('sh -c "cd x && gh pr merge 5"', None),
+        ("timeout 60 gh pr merge 5", None),
+        ("echo 5 | xargs gh pr merge", None),
+    ],
+)
+def test_round_2s_forms_are_merges(command, repo):
+    """#138, rediscovered: a --repo before `merge`, a shell's -c script, a wrapper with arguments."""
+    [call] = merge_calls(command, "/repo")
+    assert call.repo == repo
+
+
+def test_a_single_quoted_commit_message_mentioning_a_merge_is_not_one():
+    """#145: substitutions were lifted out of single quotes, so this commit was refused."""
+    assert merge_calls("git commit -m 'refuse `gh pr merge` $(while shut)'", "/repo") == []
+
+
+def test_a_subshells_cd_stays_in_the_subshell():
+    """#146: the `cd` inside the parentheses sent the outer merge to the wrong repo."""
+    calls = merge_calls("(cd ../other && gh pr merge 1); gh pr merge 2", "/repo")
+    assert [(c.target, c.cwd) for c in calls] == [("1", "/other"), ("2", "/repo")]
+
+
+def test_eval_runs_in_this_shell_so_its_cd_carries():
+    assert [c.cwd for c in merge_calls('eval "cd sub"; gh pr merge 2', "/repo")] == ["/repo/sub"]

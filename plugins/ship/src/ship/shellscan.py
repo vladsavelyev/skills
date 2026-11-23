@@ -1,120 +1,200 @@
-"""Reading the commands out of a shell command line, far enough for the merge guard to find each one.
+"""Reading a shell command line into the commands it runs, far enough for the merge guard.
 
-Not a shell parser: it finds the simple commands a line runs, which is what the guard needs to
-spot `gh pr merge` however an agent wraps it. Quotes are resolved, so a quoted mention is an
-argument, not a command. Separators (`;`, `&&`, `||`, `|`, `&`, newlines, parentheses) split
-commands. A heredoc's body is data, except for the `$(…)` and backticks an unquoted one expands.
-Command substitutions run too, so their commands come out, just before the command they sit in.
-What goes in front of a command without changing it goes: reserved words (`if`, `then`, `do`, `{`,
-`!`, …), the wrappers `command`, `builtin`, `exec`, `env`, `sudo`, `nohup` and `time`, and leading
-`NAME=value` assignments, which are kept as the command's environment.
+Not a full shell parser: it reads the subset agents write. Words, with quotes and escapes resolved
+the way bash does (`$(…)` and backticks expand outside single quotes, so a quoted commit message
+is an argument, not a command). Separators (`;`, `&&`, `||`, `|`, `&`, newlines). Scopes: a `( … )`
+subshell and a command substitution are each their own, so a `cd` inside one stays there; `{ … }`
+and reserved words are plain words, in the same scope. Heredocs: the body is data, but an unquoted
+one expands its substitutions.
 
-Raises ValueError for a line it can't read (an unclosed quote), so the caller decides what an
-unreadable line means.
+The result is a tree (`Script` of `Command`s and nested `Script`s), so the guard knows which `cd`
+applies to which command. Raises ValueError for a line it can't read (an unclosed quote or paren),
+so the caller decides what an unreadable line means.
 """
 
-import re
-import shlex
 from dataclasses import dataclass, field
 
-_SEPARATORS = set(";&|()\n")
-_SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
-_PLACEHOLDER = re.compile(r"__ship_substitution_(\d+)__")
-_HEREDOC = re.compile(r"(?<!<)<<(-?)(?!<)\s*(['\"]?)([A-Za-z_]\w*)\2")
-_RESERVED = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "{", "}", "!", "time"}
-_WRAPPERS = {"command", "builtin", "exec", "nohup", "env", "sudo"}
-# Flags of `sudo` and `env` that take a value, so the value isn't read as the command.
-_WRAPPER_VALUE_FLAGS = {"-u", "-g", "-C", "-h", "-p", "-U", "-S", "--chdir", "--unset"}
+_SPACE = " \t\r"
+_OPERATORS = ";&|"
 
 
-@dataclass(frozen=True)
+@dataclass
 class Command:
-    words: list[str]
-    env: dict[str, str] = field(default_factory=dict)
+    """One simple command: its words, and the scripts its substitutions and heredocs run first."""
+
+    words: list[str] = field(default_factory=list)
+    substitutions: list["Script"] = field(default_factory=list)
 
 
-def _cut_heredocs(text: str) -> tuple[str, list[str]]:
-    """`text` without its heredoc bodies, and the bodies that expand substitutions (unquoted delimiter)."""
-    kept: list[str] = []
-    expanding: list[str] = []
-    lines = iter(text.split("\n"))
-    for line in lines:
-        kept.append(line)
-        for heredoc in _HEREDOC.finditer(line):
-            strip_tabs, quote, delimiter = heredoc.groups()
-            body = []
-            for body_line in lines:
-                if (body_line.lstrip("\t") if strip_tabs else body_line) == delimiter:
+@dataclass
+class Script:
+    """A sequence of commands run in one scope; a nested `Script` is a subshell."""
+
+    items: list["Command | Script"] = field(default_factory=list)
+
+
+class _Reader:
+    def __init__(self, text: str):
+        self.text = text
+        self.i = 0
+        self.heredocs: list[tuple[str, bool, bool, Command]] = []  # delimiter, quoted, strip tabs, command
+
+    def peek(self, n: int = 1) -> str:
+        return self.text[self.i : self.i + n]
+
+    def script(self, closer: str | None) -> Script:
+        """Read commands up to `closer` (`)` for a subshell or substitution) or the end."""
+        script = Script()
+        command = Command()
+
+        def finish():
+            nonlocal command
+            if command.words or command.substitutions:
+                script.items.append(command)
+            command = Command()
+
+        while self.i < len(self.text):
+            c = self.peek()
+            if c in _SPACE:
+                self.i += 1
+            elif c == "\\" and self.peek(2) == "\\\n":
+                self.i += 2
+            elif c == "\n":
+                self.i += 1
+                finish()
+                self._heredoc_bodies()
+            elif c in _OPERATORS:
+                self.i += 1
+                finish()
+            elif c == "#":
+                while self.i < len(self.text) and self.peek() != "\n":
+                    self.i += 1
+            elif c == "(":
+                self.i += 1
+                finish()
+                script.items.append(self.script(")"))
+            elif c == ")":
+                if closer != ")":
+                    raise ValueError("unmatched )")
+                self.i += 1
+                finish()
+                return script
+            elif self.peek(2) == "<<" and self.peek(3) != "<<<":
+                self._heredoc_start(command)
+            else:
+                command.words.append(self._word(command))
+        if closer is not None:
+            raise ValueError(f"missing {closer}")
+        finish()
+        return script
+
+    def _word(self, command: Command) -> str:
+        out: list[str] = []
+        while self.i < len(self.text):
+            c = self.peek()
+            if c in _SPACE or c == "\n" or c in "()" or (c in _OPERATORS and not self._redirect_ampersand(out)):
+                break
+            if c == "\\":
+                out.append(self.text[self.i + 1 : self.i + 2])
+                self.i += 2
+            elif c == "'":
+                end = self.text.find("'", self.i + 1)
+                if end < 0:
+                    raise ValueError("No closing quotation")
+                out.append(self.text[self.i + 1 : end])
+                self.i = end + 1
+            elif c == '"':
+                self.i += 1
+                out.append(self._double_quoted(command))
+            elif self.peek(2) == "$(":
+                self.i += 2
+                command.substitutions.append(self.script(")"))
+                out.append("$(…)")
+            elif c == "`":
+                command.substitutions.append(self._backticks())
+                out.append("`…`")
+            else:
+                out.append(c)
+                self.i += 1
+        return "".join(out)
+
+    def _redirect_ampersand(self, out: list[str]) -> bool:
+        # `2>&1` and `>&2` are one word, not a background `&`.
+        return self.peek() == "&" and bool(out) and out[-1].endswith((">", "<"))
+
+    def _double_quoted(self, command: Command, *, closing: str | None = '"') -> str:
+        """Read a double-quoted word's text after its opening quote, through `closing`; with `closing`
+        None, to the end (a heredoc body, which expands the same way but has no closing quote)."""
+        out: list[str] = []
+        while True:
+            if self.i >= len(self.text):
+                if closing is None:
+                    return "".join(out)
+                raise ValueError("No closing quotation")
+            c = self.peek()
+            if c == closing:
+                self.i += 1
+                return "".join(out)
+            if c == "\\" and self.peek(2)[1:] in ('"', "\\", "$", "`", "\n"):
+                out.append(self.text[self.i + 1])
+                self.i += 2
+            elif self.peek(2) == "$(":
+                self.i += 2
+                command.substitutions.append(self.script(")"))
+                out.append("$(…)")
+            elif c == "`":
+                command.substitutions.append(self._backticks())
+                out.append("`…`")
+            else:
+                out.append(c)
+                self.i += 1
+
+    def _backticks(self) -> Script:
+        end = self.text.find("`", self.i + 1)
+        if end < 0:
+            raise ValueError("No closing backtick")
+        inner = self.text[self.i + 1 : end]
+        self.i = end + 1
+        return parse(inner)
+
+    def _heredoc_start(self, command: Command) -> None:
+        self.i += 2
+        strip_tabs = self.peek() == "-"
+        self.i += strip_tabs
+        while self.peek() in (" ", "\t"):
+            self.i += 1
+        start = self.i
+        delimiter = self._word(Command())
+        quoted = any(q in self.text[start : self.i] for q in "'\"\\")
+        self.heredocs.append((delimiter, quoted, strip_tabs, command))
+
+    def _heredoc_bodies(self) -> None:
+        """At a newline: read the bodies of the heredocs its line started."""
+        for delimiter, quoted, strip_tabs, command in self.heredocs:
+            body: list[str] = []
+            while self.i < len(self.text):
+                end = self.text.find("\n", self.i)
+                end = len(self.text) if end < 0 else end
+                line = self.text[self.i : end]
+                self.i = min(end + 1, len(self.text))
+                if (line.lstrip("\t") if strip_tabs else line) == delimiter:
                     break
-                body.append(body_line)
-            if not quote:
-                expanding.append("\n".join(body))
-    return "\n".join(kept), expanding
+                body.append(line)
+            if not quoted:
+                command.substitutions += _expansions("\n".join(body))
+        self.heredocs = []
 
 
-def _lift_substitutions(text: str, inner: list[str]) -> str:
-    """`text` with each `$(…)` and backtick substitution, innermost first, swapped for a placeholder
-    word naming its text in `inner`."""
-
-    def lift(found: re.Match) -> str:
-        inner.append(found.group(1) if found.group(1) is not None else found.group(2))
-        return f"__ship_substitution_{len(inner) - 1}__"
-
-    while True:
-        text, count = _SUBSTITUTION.subn(lift, text)
-        if not count:
-            return text
+def _expansions(text: str) -> list[Script]:
+    """The substitutions an unquoted heredoc body runs: it expands like a double-quoted word."""
+    command = Command()
+    _Reader(text)._double_quoted(command, closing=None)
+    return command.substitutions
 
 
-def _words(text: str) -> list[list[str]]:
-    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()\n")
-    lex.whitespace = " \t\r"
-    lex.whitespace_split = True
-    segments: list[list[str]] = [[]]
-    for token in lex:
-        if set(token) <= _SEPARATORS:
-            segments.append([])
-        else:
-            segments[-1].append(token)
-    return [s for s in segments if s]
-
-
-def _command(words: list[str]) -> Command | None:
-    env: dict[str, str] = {}
-    words = list(words)
-    while words:
-        head = words[0]
-        if head in _RESERVED:
-            words.pop(0)
-        elif head in _WRAPPERS:
-            words.pop(0)
-            while words and words[0].startswith("-"):
-                flag = words.pop(0)
-                if flag in _WRAPPER_VALUE_FLAGS and words:
-                    words.pop(0)
-        elif "=" in head and head.split("=", 1)[0].isidentifier():
-            name, _, value = words.pop(0).partition("=")
-            env[name] = value
-        else:
-            return Command(words=words, env=env)
-    return None
-
-
-def _commands(text: str, inner: list[str]) -> list[Command]:
-    text, bodies = _cut_heredocs(text)
-    found: list[Command] = []
-    for body in bodies:
-        for substitution in _SUBSTITUTION.finditer(body):
-            found += commands(substitution.group(1) if substitution.group(1) is not None else substitution.group(2))
-    for words in _words(_lift_substitutions(text, inner)):
-        for word in words:
-            for placeholder in _PLACEHOLDER.finditer(word):
-                found += _commands(inner[int(placeholder.group(1))], inner)
-        if (command := _command(words)) is not None:
-            found.append(command)
-    return found
-
-
-def commands(text: str) -> list[Command]:
-    """The simple commands `text` runs, in order (a substitution's before the command holding it)."""
-    return _commands(text, [])
+def parse(text: str) -> Script:
+    """The commands `text` runs. Raises ValueError for a line it can't read."""
+    reader = _Reader(text)
+    script = reader.script(None)
+    reader._heredoc_bodies()
+    return script

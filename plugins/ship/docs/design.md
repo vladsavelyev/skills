@@ -425,11 +425,13 @@ reminder, and the merge guard below still holds the line.
 The gate decides whether the PR may merge, but nothing between the gate and the merge looked at
 it: on navari #5355 the agent admin-merged at the user's word with a filed problem open. A
 PreToolUse hook on Bash (`merge_guard.py`) now reads every command that mentions a merge (its
-wrapper skips the rest without Python). `shellscan.py` finds the simple commands the line runs:
-past wrappers (`command`, `env`, `sudo`), reserved words (`if … then`, `{ … }`), inside `$(…)`,
-backticks and expanding heredocs, with heredoc data skipped and quoted text left as arguments. For
-each `gh pr merge` the guard takes the `cd`s before it, the PR it names (number, URL, branch, or
-the current branch's) and its `--repo`. A PR whose body names a tracking issue in any format ship
+wrapper skips the rest without Python). `shellscan.py` reads the line into a tree of commands and
+scopes, with quotes resolved the way bash does: a substitution in single quotes is text, a `( … )`
+subshell or a substitution is its own scope, and a heredoc's body is data unless an unquoted one
+expands a substitution. The guard walks the tree, into `sh -c` scripts and `eval`, and finds
+`gh pr merge` behind any wrapper (`command`, `env`, `sudo`, `timeout 60`, `xargs`). For each it
+takes the `cd`s of its own scope, the PR it names (number, URL, branch, or the current branch's)
+and its `--repo`, before or after `merge`. A PR whose body names a tracking issue in any format ship
 has written (`prbody.tracking_issue`; an unmarked `Part of #N` only if that issue is labelled
 `feature`), read from the PR so it works without this clone's wiring, is judged at its head, the
 commit the merge would land, and refused unless the gate is `OPEN`, with the open problems listed.
