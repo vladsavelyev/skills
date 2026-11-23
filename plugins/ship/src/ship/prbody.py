@@ -89,6 +89,32 @@ def _one_block(body: str, block: str) -> str:
     return body
 
 
+# The reference line in ship's block: `**Tracking issue:** closes #N` now, `Feature tracking issue:
+# closes #N` before. Both are read ON PURPOSE: PRs still open carry the old one until ship next
+# writes their block.
+_BLOCK_REF_RE = re.compile(r"(?:\*\*Tracking issue:\*\*|Feature tracking issue:) closes #(\d+)")
+_MARKED_REF_RE = re.compile(r"(?m)^Closes #(\d+) <!-- (?:ship|feature-workflow) -->[ \t]*\r?$")
+_PART_OF_RE = re.compile(r"(?m)^Part of #(\d+)[ \t]*\r?$")
+
+
+def tracking_issue(body: str) -> int | None:
+    """The feature issue ship's own text in a PR body names, or None for a PR ship hasn't linked: its
+    block's reference line, or, in a body ship wrote before the block carried it, the marked
+    reference line (`_legacy_ref_re`). Read from the PR alone, so it works on any machine, with or
+    without this clone's wiring. An older body's unmarked `Part of #N` could be the author's:
+    `part_of_references` lists those for the caller to check."""
+    for start, end in reversed(_blocks(body)):
+        if found := _BLOCK_REF_RE.search(body, start, end):
+            return int(found.group(1))
+    found = _MARKED_REF_RE.search(body)
+    return int(found.group(1)) if found else None
+
+
+def part_of_references(body: str) -> list[int]:
+    """The issues a body's `Part of #N` lines name: ship's first reference line, or the author's own."""
+    return [int(n) for n in _PART_OF_RE.findall(body)]
+
+
 def with_block(body: str, content: str, issue: int) -> str:
     """`body` with ship's block set to `content`, rewriting only what is between its tags.
 

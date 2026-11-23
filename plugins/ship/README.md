@@ -1,6 +1,6 @@
 # ship
 
-A CLI + SessionStart hook for running multiple Claude features in parallel. A feature starts as
+A CLI and hooks for running multiple Claude features in parallel. A feature starts as
 a branch, a worktree and a draft PR (the `start` skill); when it's shipped (the `ship` skill) it
 gets a GitHub tracking issue and a review by Sol (Codex, via T3) at a reasoning effort sized from
 the PR: real defects, plus spec gaps and design smells, and Sol's grade of the PR's risk and complexity goes into the PR body. Features can be **stacked** on each
@@ -10,6 +10,11 @@ session on an existing branch reconstructs full context (base branch, last promp
 open problems) from GitHub. Once the PR merges, the `close` skill closes the feature out: it
 records what shipped and closes the tracking issue, and never reviews.
 
+A ship run doesn't stop at the review. It fixes every problem the review files, in the caller's
+session, and reviews again until the gate settles. Each round runs in a fresh fork, where Sol finds
+blind. A Stop hook keeps the session from ending its turn with the gate shut, and a guard refuses
+`gh pr merge` of a tracked PR until the gate opens.
+
 Before the merge the gate has three verdicts, because "review until a run finds nothing" never
 terminates — a real reviewer always finds *something*. After it, a fourth ends the loop:
 
@@ -17,7 +22,7 @@ terminates — a real reviewer always finds *something*. After it, a fourth ends
 | --- | --- | --- |
 | `OPEN` | 0 | No open problems, and nothing since the last review needs one (low fixes, base merges, docs and tests don't). Ship it. |
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code left, review budget remains. |
-| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign. |
+| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign. When a kind of bug came back after its fix, the gate recommends the redesign, and the problems wait for that call. |
 | `MERGED` | 30 | The PR is in. Nothing left to review; close the feature out. |
 
 **Nothing ships as debt.** Every open problem blocks the gate, at every severity including `low`.
@@ -42,7 +47,7 @@ claude plugin marketplace add vladsavelyev/skills
 claude plugin install ship@vlad-skills
 ```
 
-The plugin ships the `start` and `ship` skills, the SessionStart hook, and the `feature` CLI. Its `bin/` is on
+The plugin ships the `start`, `ship`, `review` and `close` skills, the hooks, and the `feature` CLI. Its `bin/` is on
 the agent's PATH, and `bin/feature` runs the CLI from the plugin's own checkout via `uv run`, so
 the CLI always matches the skill it was shipped with.
 
@@ -81,7 +86,7 @@ chmod +x ~/.local/bin/feature
 
 Reviews are run by **Sol**, delegated through T3 Code (`delegate_task` to the Codex provider) at
 the reasoning effort `feature depth` picked. Sol gets the **PR by number** and nothing about
-earlier rounds, so each re-run finds blind; the `ship` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run
+earlier rounds, so each re-run finds blind; the `review` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run
 via this CLI. A linked PR is required — the PR diff defines the review scope (correct even for
 stacked branches), and `feature review record` refuses to run without one. There is no headless
 review subcommand.
@@ -123,15 +128,16 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
-| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
-| `feature problem add --title <t> --sev <high\|med\|low>` | Add a problem sub-issue (it blocks the gate until closed, at any severity). |
+| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t> [--review-only]` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. Holds the session to fixing (`hold.py`) unless `--review-only`: the user asked for the review alone. |
+| `feature problem add --title <t> --sev <high\|med\|low> [--repeats <number>]` | Add a problem sub-issue (it blocks the gate until closed, at any severity). `--repeats` names a fixed problem a root-cause fix of which would have prevented this one: a round that finds it recommends a redesign. |
 | `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue as fixed, recording its fix commits: one that fixed only low problems needs no review. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: hand an open problem to a separate fix PR, or keep it as an issue. Labels it `handed-off`; it stays open, outside the feature, and stops holding the close-out. |
 | `feature problem block <number> --reason <why>` | Reopen a closed problem (a regression, or a `wontfix` overturned) so it blocks again. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking, handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto]` | Show or override the review-round budget. |
-| `feature escalate --reason <t>` | Park at `needs-decision` with your recommendation for a human. |
+| `feature escalate --reason <t> [--problem <#> …]` | Park at `needs-decision` with your recommendation for a human, ending the session's hold. Every open problem must be closed first, or named with `--problem` as needing the user's call, unless the gate recommends a redesign. |
+| `feature release --reason <t>` | Let this session end its turn with the gate still shut (the user stopped the run, or the review can't run), with the reason on the tracking issue. |
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |
 | `feature gate [--branch <b>]` | Exit 0 = OPEN, 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION, 30 = MERGED (1 and 2 stay "the command failed"). |
@@ -167,15 +173,25 @@ re-proposed under a new PR; that feature is alive, so the sweep hands it back wi
 branch was deleted months ago. `feature status` also flags a merged PR whose feature never closed
 out, which puts the reminder in front of the next session on that branch.
 
-## SessionStart hook
+## Hooks
 
-The plugin's `hooks/hooks.json` runs `feature-session-context` at session start, so every Claude
-session on a tracked branch gets its context injected.
+The plugin's `hooks/hooks.json` runs three:
 
-## Claude skill
+- SessionStart, `feature-session-context`: every Claude session on a tracked branch gets its
+  context injected.
+- Stop, `feature-stop-hook`: a session that recorded a review or closed a problem can't end its
+  turn until the gate is `OPEN` or `MERGED`, short of `feature escalate` or `feature release`.
+- PreToolUse on Bash, `feature-merge-guard`: `gh pr merge` of a tracked PR is refused while its
+  gate is shut. A user who has been told and still wants it gets it with
+  `SHIP_PAST_GATE="<their reason>"` before `gh`, and the reason goes on the tracking issue.
 
-`skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (Sol review at a sized depth,
-triage, gate); `skills/close/SKILL.md` closes it out after the merge. Keep them in sync with the
+See "Driving the loop to the end" and "The merge guard" in [docs/design.md](docs/design.md).
+
+## Claude skills
+
+`skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (review, fix, review
+again, to the gate); `skills/review/SKILL.md` is one round of that (Sol review at a sized depth,
+triage, filing, in a fork); `skills/close/SKILL.md` closes it out after the merge. Keep them in sync with the
 CLI: when you add or change a command, update the SKILL.md files in the same commit.
 
 ## Development

@@ -108,3 +108,34 @@ def test_the_legacy_inline_marker_is_not_an_opening_tag():
     # line opens the block.
     old = "Why.\n\nCloses #7 <!-- ship -->\n\n<!-- ship:assessment -->\n> old\n<!-- /ship:assessment -->\n"
     assert prbody.with_block(old, CONTENT, 7) == f"Why.\n\n{_block()}\n"
+
+
+def test_tracking_issue_is_read_from_ships_block():
+    tracking_issue, with_description = prbody.tracking_issue, prbody.with_description
+    body = with_description("Why.\n\n🤖 sig", "> **Tracking issue:** closes #39\n> **Review round 1** (low).")
+    assert tracking_issue(body) == 39
+
+
+def test_a_pr_without_ships_block_is_not_tracked():
+    tracking_issue = prbody.tracking_issue
+    # An author's own `Closes #…` line is theirs, not ship's link to a feature issue.
+    assert tracking_issue("Why.\n\nCloses #12") is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Why.\n\n<!-- ship -->\n> Feature tracking issue: closes #39\n<!-- /ship -->\n",
+        "Why.\n\nCloses #39 <!-- ship -->\n\n<!-- ship:assessment -->\n> reviewed\n<!-- /ship:assessment -->\n",
+        "Why.\n\nCloses #39 <!-- feature-workflow -->\n",
+    ],
+)
+def test_tracking_issue_reads_the_formats_open_prs_still_carry(body):
+    """#139: an in-flight PR whose body ship wrote before the current block was taken for untracked."""
+    assert prbody.tracking_issue(body) == 39
+
+
+def test_an_unmarked_part_of_line_is_left_to_the_caller_to_check():
+    body = "Why.\n\nPart of #39\nCloses #12\n"
+    assert prbody.tracking_issue(body) is None
+    assert prbody.part_of_references(body) == [39]

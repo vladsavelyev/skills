@@ -49,7 +49,7 @@ _NEXT_DECISION = (
 )
 # A bug back after its fix means the design keeps producing it, so another fix-and-review round only
 # finds the next one, and patching the open problems first is work a redesign throws away. Why:
-# docs/motivation.md #14.
+# docs/motivation.md #15.
 _NEXT_REDESIGN = (
     "STOP patching: the same kind of bug came back after its fix, so the design keeps producing it, "
     "and another round of fixes and review will find the next one. Don't fix the open problems yet. "
@@ -82,6 +82,9 @@ class GateDecision:
     next_step: str
     rounds_used: int
     budget: int
+    # NEEDS_DECISION because a kind of bug came back after its fix (`recurrence_reason`): the gate
+    # recommends a redesign, and the open problems wait for the human's call on it.
+    redesign: bool = False
 
     @property
     def open(self) -> bool:
@@ -90,6 +93,12 @@ class GateDecision:
     @property
     def exit_code(self) -> int:
         return EXIT_CODES[self.verdict]
+
+    @property
+    def settled(self) -> bool:
+        """Whether a ship run may end here: the PR is safe to merge, or already in. Anything else
+        leaves work in the loop (fixes, a review), and a held session keeps going (`hold.py`)."""
+        return self.verdict in (Verdict.OPEN, Verdict.MERGED)
 
     def __str__(self) -> str:
         used = f"reviews {self.rounds_used}/{self.budget}"
@@ -142,7 +151,8 @@ def recurrence_reason(rounds: list[dict]) -> str | None:
         back.append(f"found {len(repeats)} new high/med problem(s) of a kind already fixed ({pairs})")
     if not back:
         return None
-    return f"run {last['run']} {' and '.join(back)}: the fixes patch instances, not the cause, so redesign"
+    cause = "the fixes patch instances, not the cause, so redesign rather than review again"
+    return f"run {last['run']} {' and '.join(back)}: {cause}"
 
 
 def rising_reason(rounds: list[dict]) -> str | None:
@@ -193,6 +203,35 @@ def needs_review(changes: list[tuple[str, list[str]]], *, low_fixes: set[str], s
         and paths
         and assess.path_risk(paths, budget.sensitive_matches(paths, sensitive)) != "low"
     ]
+
+
+def escalation_refusal(decision: GateDecision, *, open_problems: list[int], named: list[int]) -> str | None:
+    """Why `feature escalate` must not hand this feature to a human yet, or None if it may.
+
+    Escalating ends a held ship run (`hold.py`), so it is only for what a human really has to decide:
+    whether to review the fixes again once the budget is spent (every problem closed first: the budget
+    limits reviews, not fixes), a problem that needs the user's call, named with `--problem`, or
+    whether to redesign, when a kind of bug came back after its fix. That last call covers every open
+    problem, since fixing them first is the work a redesign throws away. Everything else stays in the
+    loop, or escalating would be the way around fixing.
+    """
+    if decision.verdict is Verdict.OPEN:
+        return "the gate is OPEN: there is nothing to decide. Tell the user it's safe to merge."
+    if decision.verdict is Verdict.MERGED:
+        return "the PR has merged: close the feature out with `Skill(ship:close)` instead."
+    if stray := sorted(set(named) - set(open_problems)):
+        return f"{', '.join(f'#{n}' for n in stray)} is not an open problem of this feature."
+    if decision.redesign:
+        return None
+    if unnamed := sorted(set(open_problems) - set(named)):
+        return (
+            f"{', '.join(f'#{n}' for n in unnamed)} still open. Fix each (`feature problem resolve <#> --commit "
+            f"<sha>`) or close it as not relevant (`feature problem wontfix <#> --reason '<why>'`) first; the "
+            f"budget limits reviews, not fixes. Name with `--problem` only a problem that needs the user's call."
+        )
+    if decision.verdict is Verdict.REVIEW_AGAIN and not named:
+        return "review budget remains: review the fixes again (`Skill(ship:ship)`) instead of escalating."
+    return None
 
 
 def evaluate(
@@ -249,7 +288,9 @@ def evaluate(
         # The recurrence goes first, ahead of a spent budget too: it is the one signal that says what
         # to do instead of another round.
         if recurring := recurrence_reason(rounds):
-            return GateDecision(Verdict.NEEDS_DECISION, [*reasons, recurring], _NEXT_REDESIGN, used, budget)
+            return GateDecision(
+                Verdict.NEEDS_DECISION, [*reasons, recurring], _NEXT_REDESIGN, used, budget, redesign=True
+            )
         if rising := rising_reason(rounds):
             return GateDecision(Verdict.NEEDS_DECISION, [*reasons, rising], _NEXT_DECISION, used, budget)
     if used >= budget:
@@ -262,9 +303,9 @@ def evaluate(
         )
     next_step = (
         "Close every open problem: fix it (`feature problem resolve <#> --commit <sha>…`), or "
-        "`feature problem wontfix <#> --reason '<why>'` if it isn't relevant. Then review and "
-        "`feature review record` if the gate still asks for it."
+        "`feature problem wontfix <#> --reason '<why>'` if it isn't relevant. Then a fresh review "
+        "round (`Skill(ship:review)`) if the gate still asks for it."
         if blocking_open > 0
-        else "Review the PR and `feature review record` the run."
+        else "Run a fresh review round (`Skill(ship:review)`)."
     )
     return GateDecision(Verdict.REVIEW_AGAIN, reasons, next_step, used, budget)

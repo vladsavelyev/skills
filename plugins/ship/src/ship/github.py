@@ -9,6 +9,7 @@ import os
 import re
 
 from . import prbody
+from .errors import Refusal
 from .shell import run
 
 LABELS = [
@@ -85,7 +86,7 @@ def personal_account(accounts: list[dict]) -> str:
     resolve, so it aborts instead of guessing which account a push should go out as."""
     others = [a["login"] for a in accounts if not a["active"] and a["state"] == "success"]
     if len(others) != 1:
-        raise SystemExit(
+        raise Refusal(
             f"This repo isn't owned by the active gh account or one of its orgs, so it needs the personal "
             f"account: the one other logged-in gh account. Found {len(others)}: {others}. "
             f"Fix it with `gh auth login`/`gh auth logout`, or export GH_TOKEN for this run."
@@ -242,6 +243,21 @@ def pr_state(number: int) -> str:
     return pr_states([number])[number]
 
 
+def pr_view(target: str | None, *, repo: str | None) -> dict:
+    """The PR `gh pr merge` would merge: `target` is its number, URL or branch, None for the current
+    branch's PR, in `repo` (`OWNER/NAME`) or the current one. Returns `number`, `url`, `body`,
+    `headRefName`, `headRefOid`, `state`, and `repo` as `OWNER/NAME`."""
+    args = ["gh", "pr", "view", *([target] if target else []), *(["--repo", repo] if repo else [])]
+    pr = json.loads(run([*args, "--json", "number,url,body,headRefName,headRefOid,state"]))
+    owner, name = re.fullmatch(r"https://[^/]+/([^/]+)/([^/]+)/pull/\d+", pr["url"]).groups()
+    return {**pr, "repo": f"{owner}/{name}"}
+
+
+def current_repo() -> str:
+    """`OWNER/NAME` of the repo the current directory is a checkout of."""
+    return "/".join(_owner_repo())
+
+
 def pr_head_sha(number: int) -> str:
     """The commit a PR's head points at (`headRefOid`): for a merged PR, the code that went in."""
     out = run(["gh", "pr", "view", str(number), "--json", "headRefOid", "--jq", ".headRefOid"])
@@ -312,6 +328,10 @@ def remove_label(number: int, label: str) -> None:
 
 def get_issue_body(number: int) -> str:
     return run(["gh", "issue", "view", str(number), "--json", "body", "--jq", ".body"])
+
+
+def issue_labels(number: int) -> list[str]:
+    return run(["gh", "issue", "view", str(number), "--json", "labels", "--jq", ".labels[].name"]).splitlines()
 
 
 def get_issue(number: int) -> dict:

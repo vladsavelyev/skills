@@ -1,11 +1,15 @@
 """Tests for the merge-gate decision logic — the tri-state verdict, coverage, and churn signals."""
 
+import pytest
+
 from ship.gate import (
     _NEXT_DECISION,
     _NEXT_REDESIGN,
     EXIT_CODES,
+    GateDecision,
     Verdict,
     covers_head,
+    escalation_refusal,
     evaluate,
     needs_review,
     recurrence_reason,
@@ -332,3 +336,47 @@ def test_a_clean_merge_reports_nothing_outstanding():
     d = gate(blocking_open=0, last_review=CLEAN, history=[DIRTY, CLEAN], merged=True)
     assert d.verdict is Verdict.MERGED
     assert d.reasons == []
+
+
+@pytest.mark.parametrize(
+    ("verdict", "settled"),
+    [(Verdict.OPEN, True), (Verdict.MERGED, True), (Verdict.REVIEW_AGAIN, False), (Verdict.NEEDS_DECISION, False)],
+)
+def test_a_ship_run_settles_only_once_the_pr_may_merge_or_has(verdict, settled):
+    decision = GateDecision(verdict=verdict, reasons=[], next_step="", rounds_used=1, budget=2)
+    assert decision.settled is settled
+
+
+def _refusal(verdict, open_problems, named):
+    decision = GateDecision(verdict=verdict, reasons=[], next_step="", rounds_used=2, budget=2)
+    return escalation_refusal(decision, open_problems=open_problems, named=named)
+
+
+def test_escalation_waits_until_every_problem_nobody_asked_about_is_closed():
+    assert "#7 still open" in _refusal(Verdict.NEEDS_DECISION, [7, 8], [8])
+    assert _refusal(Verdict.NEEDS_DECISION, [7, 8], [7, 8]) is None
+    assert _refusal(Verdict.NEEDS_DECISION, [], []) is None
+
+
+def test_escalation_refuses_a_number_that_is_not_an_open_problem():
+    assert "#9 is not an open problem" in _refusal(Verdict.NEEDS_DECISION, [7], [7, 9])
+
+
+def test_escalation_with_budget_left_is_only_for_a_problem_that_needs_the_user():
+    assert "review budget remains" in _refusal(Verdict.REVIEW_AGAIN, [], [])
+    assert _refusal(Verdict.REVIEW_AGAIN, [7], [7]) is None
+
+
+def test_there_is_nothing_to_escalate_once_the_gate_is_open_or_the_pr_merged():
+    assert "OPEN" in _refusal(Verdict.OPEN, [], [])
+    assert "ship:close" in _refusal(Verdict.MERGED, [], [])
+
+
+def test_a_redesign_is_the_users_call_so_it_escalates_with_its_problems_still_open():
+    """Fixing them first is the work a redesign throws away; any other escalation still waits for fixes."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history)
+    assert escalation_refusal(d, open_problems=[12], named=[]) is None
+    rising = [run(1, blocking=1), run(2, blocking=2)]
+    d = gate(blocking_open=2, last_review=rising[-1], history=rising)
+    assert "still open" in escalation_refusal(d, open_problems=[12, 13], named=[])
