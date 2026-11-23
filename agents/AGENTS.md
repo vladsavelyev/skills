@@ -75,6 +75,8 @@ NEVER run `git reset --hard`. It destroys staged changes irreversibly. If you ne
 
 PR descriptions are minimal and have no headers. Open with the motivation, brief and informal, then the evidence (see "Prove the PR works"). Ship adds its own block when it reviews the PR. No "Generated with <tool>" attribution lines.
 
+To ask a colleague of mine at AstraZeneca to review a PR, take their GitHub login from `docs/project_management/people.md` in `azu-oncology-rd/cra_agent` (`~/git/cra_agent`, else `gh api repos/azu-oncology-rd/cra_agent/contents/docs/project_management/people.md`), not from a search of the org's members. Their names and logins stay there: this repo is public.
+
 ### Issue tracker
 
 In every project, Matt Pocock's engineering skills (wayfinder, to-tickets, to-spec, triage) track work in the GitHub Issues of the project's own repo, with its triage labels, following `~/.claude/plugins/marketplaces/vlad-skills/agents/issue-tracker.md`; no per-repo `/setup-matt-pocock-skills` is needed. A project whose `CLAUDE.md` or `AGENTS.md` has its own `## Agent skills` block follows that block instead.
