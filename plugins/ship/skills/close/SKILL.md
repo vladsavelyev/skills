@@ -53,8 +53,9 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
      ignored path, with your recommendation, and pass each one they OK deleting as
      `--accept <path>`. A folder you can't empty was made by something running as root, a
      container usually: fix where it's made so it's made as the user, and never reach for sudo.
-     When the branch is checked out in the main checkout, tidy leaves it there: check out the
-     base branch and pull it.
+     When the branch is checked out in the main checkout, tidy leaves the checkout: check out the
+     base branch there, pull it, then run `feature tidy --branch <branch>` again, which deletes the
+     branch.
 6. **Report** in two or three lines: the feature closed, what shipped outstanding, what happened to
    each open problem (handed off to a fix PR, kept as an issue, or wontfix), any fix PR you
    started, and what you removed or left.

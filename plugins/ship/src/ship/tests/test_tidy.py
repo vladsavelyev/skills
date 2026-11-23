@@ -147,3 +147,14 @@ def test_refuses_before_the_merge(repo, monkeypatch):
     monkeypatch.setattr(feature, "gate_for", lambda branch: (7, state, [], open_))
     assert "hasn't merged" in _refused()
     _kept(main, checkout)
+
+
+def test_a_branch_in_the_main_checkout_goes_once_the_main_checkout_is_back_on_the_base(repo):
+    main, checkout = repo
+    _git("worktree", "remove", "--force", str(checkout), cwd=main)
+    _git("checkout", "-q", "feat", cwd=main)
+    assert "run `feature tidy --branch feat` again" in _refused()
+    assert "feat" in _branches(main)
+    _git("checkout", "-q", "main", cwd=main)
+    cli.main(["tidy", "--branch", "feat"])
+    assert "feat" not in _branches(main)

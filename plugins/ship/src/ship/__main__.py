@@ -793,7 +793,8 @@ def cmd_tidy(args: argparse.Namespace) -> None:
     checkout = worktree_for_branch(branch, cwd=main)
     if checkout == main:
         sys.exit(
-            f"{branch} is checked out in the main checkout, which stays: check out the base branch there and pull it."
+            f"{branch} is checked out in the main checkout, which stays: check out {state['base']} there and pull it, "
+            f"then run `feature tidy --branch {branch}` again to delete the branch."
         )
     if checkout:
         found = tidy.check(checkout, main, head, set(args.accept))
