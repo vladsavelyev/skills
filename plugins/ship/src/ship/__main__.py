@@ -35,6 +35,7 @@ from .gitwiring import (
 from .state import (
     SCHEMA,
     TERMINAL_STATUS,
+    found_before,
     migrate,
     new_state,
     parse_block_raw,
@@ -326,6 +327,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
             f"Refusing to record a review for #{issue}: --regressions {args.regressions} is more than "
             f"the {new_serious} high/med problem(s) in --found, and a regression is one of those."
         )
+    earlier = found_before(state["review_history"])
     entry = record_review(
         state,
         sha=args.sha,
@@ -336,7 +338,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     )
     run_num = entry["run"]
     entry["found"] = found
-    entry["repeats"] = problems.recurring(found, repeats(state))
+    entry["repeats"] = problems.recurring(found, repeats(state), earlier=earlier)
     entry["depth"] = args.depth
     entry["grade"] = {
         "risk": args.risk,

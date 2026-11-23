@@ -140,6 +140,13 @@ def record_repeat(state: dict, problem: int, repeated: int) -> None:
     state.setdefault("repeats", {})[str(problem)] = repeated
 
 
+def found_before(history: list[dict]) -> set[int]:
+    """Every problem a recorded round found (its `found`). Rounds from before `found` existed, and
+    placeholders and markers, name none: kept ON PURPOSE, as they are in the feature issues of PRs
+    in flight."""
+    return {n for entry in history for nums in entry.get("found", {}).values() for n in nums}
+
+
 def review_entry(*, run: int, sha: str, new_blocking: int, new_low: int, regressions: int, summary: str) -> dict:
     """One review run's record, as stored in `review_history` and `last_review`.
 

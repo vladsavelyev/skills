@@ -63,6 +63,12 @@ def test_recurring_keeps_a_rounds_high_and_med_finds_that_repeat_a_fixed_problem
     """A low find repeating a fixed one is a nit back again, not evidence the design is wrong."""
     found = {"med": [42, 41], "low": [40], "?": [43]}
     repeats = {"40": 30, "41": 31, "43": 33, "50": 35}
-    # #50 repeats a fixed problem too, but an earlier round found it.
-    assert recurring(found, repeats) == {"41": 31, "43": 33}
-    assert recurring({}, repeats) == {}
+    # #50 repeats a fixed problem too, but this round didn't find it.
+    assert recurring(found, repeats, earlier=set()) == {"41": 31, "43": 33}
+    assert recurring({}, repeats, earlier=set()) == {}
+
+
+def test_a_repeat_counts_in_the_round_that_filed_it_and_a_re_find_is_a_regression():
+    """navari #5176: #5279 was filed in round 3 as like #5216, then rediscovered in round 4, where it
+    counts as a regression, not as a new problem of a kind already fixed."""
+    assert recurring({"med": [5279, 5301]}, {"5279": 5216, "5301": 5216}, earlier={5279}) == {"5301": 5216}

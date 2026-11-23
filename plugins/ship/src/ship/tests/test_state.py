@@ -8,6 +8,7 @@ from ship.state import (
     END,
     SCHEMA,
     fixes,
+    found_before,
     migrate,
     new_state,
     parse_block,
@@ -192,3 +193,15 @@ def test_record_repeat_links_a_problem_to_the_fixed_one_and_a_block_from_before_
     older = new_state(branch="feat-x", base="main", updated="t0")
     del older["repeats"]
     assert repeats(older) == {}
+
+
+def test_found_before_is_every_problem_a_recorded_round_found():
+    """Rounds from before `found`, placeholders and base-change markers found nothing it can name."""
+    history = [
+        {"run": 1, "placeholder": True},
+        {"run": 2, "new_blocking": 1},
+        {"event": "base-advanced", "sha": "abc"},
+        {"run": 3, "found": {"high": [5], "low": [6]}},
+        {"run": 4, "found": {"med": [5, 7]}},
+    ]
+    assert found_before(history) == {5, 6, 7}

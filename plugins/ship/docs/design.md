@@ -95,8 +95,8 @@ evidence, and is nulled on invalidation, which is why it duplicates the last his
 `fixes` maps each commit `feature problem resolve --commit` recorded (full sha) to the problems it
 fixed; a block from before `fixes` has none. `repeats` maps each problem `feature problem add
 --repeats` filed as the same kind of bug as a fixed one to that problem (`{"52": 46}`), and each
-round written since keeps its own high/med finds that do, under the same key; blocks and rounds
-from before `repeats` have none.
+round written since keeps, under the same key, the high/med finds it filed that do (a later re-find
+is a regression, counted apart); blocks and rounds from before `repeats` have none.
 
 Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
 than read with guessed-at defaults.
