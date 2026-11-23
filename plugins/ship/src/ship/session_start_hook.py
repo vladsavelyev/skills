@@ -62,8 +62,8 @@ def main() -> None:
     # makes the routing deterministic regardless of skill auto-matching.
     print(
         "This branch is a TRACKED FEATURE. A request to ship it, or to fix what its review "
-        "found, MUST go through `Skill(ship:ship)`: one run reviews in a fork, you fix every "
-        "problem it files, and it reviews again until the gate settles. A request only to "
+        "found, MUST go through `Skill(ship:ship)`: one run reviews in a fork, fixes every "
+        "problem it files in another, and reviews again until the gate settles. A request only to "
         "review it, without fixing, is `Skill(ship:review)`, NOT a standalone code reviewer. "
         "Checking its merge gate or its status is `feature gate` or `feature status`."
     )

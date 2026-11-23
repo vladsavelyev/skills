@@ -234,6 +234,21 @@ high/med find, or a regression, gets a next step that says to stop patching and 
 arena over another round. `feature escalate` takes it with the problems still open, since fixing
 them first is the work a redesign throws away. On #5176 that is round 2, not after round 5.
 
+**16. Fixing in the caller's thread → in a fixer fork.** #14 kept the fixes inline, so the user saw
+them and the agent that knew the code made them. Measured on navari's first two inline runs (#5172
+and #5266, from the API's own token counts), a run grew the caller's context by 69k and 53k tokens,
+and ship's own text (the skill, the round reports, the Stop hook's reasons, `feature`'s output) was
+13–15% of it. The rest was fixing: reading code (a third), edits whose scripts stay in context,
+test runs, and thinking. Both threads were already long (339k and 771k) before the run began, and
+the fixes pushed them toward compaction. Now each round's fixes run in `Skill(ship:fix)`, a fork
+like the review's, and the caller keeps its report: a line per problem. That gives up two things
+#14 wanted. The user watches the reports, not the edits, and the fixer starts cold, so the caller
+hands it what the code and the issues don't say, and the fixer spends more tokens re-reading than
+the caller would have. #14's third reason doesn't apply: the fixer is a separate fork from the
+triager, so round 2's triage is still not the fixer's. The Stop hook's reason shrank with it: it
+restated the skill's fixing steps on every block; now it gives the gate, the open problems, the
+gate's next step and a pointer back to the run.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

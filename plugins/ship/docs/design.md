@@ -404,9 +404,10 @@ One call of the `ship` skill is a whole run, and it runs inline, in the agent's 
 ```
 Skill(ship:ship), in the caller's session
   ┌─▶ Skill(ship:review) ─▶ one round in a fresh fork (below) ─▶ report: gate + open problems
-  │   fix each open problem at its root cause, in the feature worktree:
+  │   Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
   │     commit (apart from other work), push, `feature problem resolve <#> --commit <sha>`
   │     (or `feature problem wontfix` if it isn't relevant; a choice only the user can make waits)
+  │     ─▶ report: a line per problem (fixed with its commits, won't fix, question, not done)
   │   `feature gate`
   └── REVIEW_AGAIN
       OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; the human merges
@@ -418,9 +419,13 @@ Skill(ship:ship), in the caller's session
 
 It ends only at an end state: `OPEN`, `MERGED`, `NEEDS_DECISION` escalated, a problem escalated
 for the user's call, or a run released on the record (`feature release`: the user stopped it, or
-Sol can't run). The fixer is the caller: the agent that wrote the code, in the conversation the
-user is watching. The finder and the triager are not: Sol starts each round in a new thread with
-the PR number, and a fresh fork dedups and files its findings with no memory of the fixes.
+Sol can't run). The caller drives the loop and the forks do the heavy work, so the caller's
+thread keeps their reports, not their reading. The finder, the triager and the fixer are three
+separate agents: Sol starts each round in a new thread with the PR number, a fresh fork dedups and
+files its findings with no memory of the fixes, and another fork fixes them. The fixer starts with
+none of the caller's conversation, so the caller hands it what the code and the issues don't say
+(what the user asked of the change, a constraint they set, a fix they turned down). Why the fixes
+left the caller's thread: motivation.md #16.
 
 ### Driving the loop to the end
 
@@ -435,8 +440,9 @@ the plugin holds the session instead (`hold.py`):
   sessions never share one.
 - The Stop hook (`stop_hook.py`) runs whenever the agent is about to end its turn. For each branch
   the session holds it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
-  the stop, and Claude Code hands the agent the reason: the gate, the open problems, and the ways
-  on. A hold on a branch that is no longer a tracked feature is dropped with a message to the
+  the stop, and Claude Code hands the agent the reason: the gate, the open problems, the gate's
+  next step, and a pointer back to the run with its two ways out (`hold.work`). It stays that short
+  because it lands in the agent's context each time it fires, and the skill already holds the loop. A hold on a branch that is no longer a tracked feature is dropped with a message to the
   user, and the others are still judged. Its shell wrapper looks for any hold before starting Python, so a session holding nothing
   pays one `ls`.
 - The two ways out short of `OPEN` both write to the tracking issue and drop the hold.

@@ -6,10 +6,11 @@ description: Use when the user asks to ship a PR.
 # ship
 
 One call of this skill is a whole ship run: review the PR, fix every problem the review files,
-review again, until the gate settles. It runs here, in your session, so the user sees every fix
-and the agent that knows the code makes it. Each review round runs in its own fork
-(`Skill(ship:review)`), where Sol finds blind and a fresh agent triages, so the review stays
-independent of you, the fixer.
+review again, until the gate settles. It runs here, in your session, and drives the loop; the
+heavy work runs in forks, so your thread keeps only their reports. Each review round runs in its own
+fork (`Skill(ship:review)`), where Sol finds blind and a fresh agent triages, so the review stays
+independent of the fixes. Each round's fixes run in another (`Skill(ship:fix)`): the reading, edits
+and test runs of fixing are most of what a run costs, and they would otherwise fill your thread.
 
 The run ends only at one of these **end states**, and your reply names which:
 
@@ -51,21 +52,17 @@ the active account for a repo owned by it or one of its orgs, else prefix
    - `Gate: NEEDS_DECISION` with no round run (the budget was already spent): go on; step 3
      escalates once the fixes are in.
    - Any other gate: go on.
-2. **Fix.** `EnterWorktree` with `path: <worktree>` from the report (never `name:`), unless you're
-   in it: editing from the main checkout edits the base branch. Then take every open problem
-   (`feature problem list --open`), highest severity first, and close each:
-   - Read it (`gh issue view <#>`): the repro, its evidence, the suggested fix.
-   - Fix it at its root cause, not the symptom. Prefer deleting or narrowing over new code, and
-     keep the diff to what the problem needs. Show the fix works: the repro or a test that fails
-     before it and passes after.
-   - Commit the fix apart from other work (a commit that fixes only `low` problems needs no
-     review), push, then `feature problem resolve <#> --commit <sha>…` with every commit of the fix.
-   - Not relevant (wrong, by design, out of this PR's scope): `feature problem wontfix <#> --reason
-     "<evidence>"`, changing no code.
-   - A choice only the user can make, which neither the code nor their request settles: leave it
-     open and write down the question, the options and your recommendation.
+2. **Fix.** `Skill(ship:fix)`, with `args` naming the worktree from the report and the PR, and
+   what you know that the code and the issues don't say: what the user asked of the change, a
+   constraint they set, a fix they turned down. It fixes each open problem at its root cause,
+   commits, pushes and resolves it, or closes it as `wontfix`, and reports a line per problem.
+   - `Question:` a choice only the user can make: step 3 escalates it.
+   - `Not done:` call it again for those problems, with what stopped it. If only the user can
+     unblock it (access, a secret), `feature release --reason "<what stopped it>"` and end
+     `STOPPED`.
+   - `Worktree:` changes left uncommitted that aren't the fixer's: tell the user in your reply.
 
-   Done when each open problem is resolved, `wontfix`, or has its question written.
+   Done when each open problem is resolved, `wontfix`, or has its question.
 3. **Gate.** `feature gate`:
    - A problem left for the user: `feature escalate --problem <#>… --reason "<question, options,
      recommendation>"`, and end `YOUR CALL`. The CLI refuses while any other problem is open.
@@ -93,7 +90,8 @@ If the user tells you to stop mid-run, `feature release --reason "<their words>"
 ## Rules
 
 - Never lower a severity, or Sol's grade, to buy a cheaper review. Never review a round yourself:
-  every round is `Skill(ship:review)`.
+  every round is `Skill(ship:review)`. Never fix in this thread either: every fix is
+  `Skill(ship:fix)`.
 - `wontfix` is only for a problem that isn't relevant, never for a real one nobody has fixed yet.
 - Close fixed problems with `feature problem resolve`, not a `Closes #a, #b` PR line (GitHub links
   only the first number).
@@ -112,7 +110,7 @@ filled-in form. Open with the end state and, in a sentence, why the run ended th
 each applies:
 
 - what the run fixed or closed as won't-fix: each problem's number and title, with its commit or
-  the reason;
+  the reason, from the fixer's reports;
 - at `YOUR CALL`, each question with its options and your recommendation; at a redesign, which
   problems came back after their fix;
 - the pre-existing bugs the review found, each with the choice the Rules give the user;
