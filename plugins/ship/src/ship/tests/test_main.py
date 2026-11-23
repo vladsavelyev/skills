@@ -589,3 +589,31 @@ def test_escalating_a_recurring_bug_recommends_a_redesign_with_its_problems_stil
     assert "#12 like #10" in comment
     assert "redesign over another round" in comment and "critiqued blind" in comment
     assert hold.held("s1") == []
+
+
+def _round(run: int, repeats: dict) -> dict:
+    return {"run": run, "sha": f"sha{run}", "new_blocking": 1, "new_low": 0, "regressions": 0, "summary": "", "repeats": repeats}
+
+
+def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypatch):
+    """#151: `budget --set` used to switch the redesign signal off for every later round."""
+    state = _merged_state()
+    state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
+    state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
+    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
+    monkeypatch.setattr(github, "comment", lambda issue, text: None)
+    cli.main(["budget", "--branch", "add-oauth", "--set", "4"])
+    subs = [_problem(12, "sev:high")]
+
+    def decide():
+        return feature.decide("add-oauth", state, subs, False, head=state["last_review"]["sha"])
+
+    assert decide().verdict is cli.gate.Verdict.REVIEW_AGAIN
+    state["review_history"].append(_round(3, {"20": 12}))
+    state["review_runs"], state["last_review"] = 3, state["review_history"][-1]
+    assert decide().redesign
+
+    monkeypatch.setattr(feature, "resolve_budget", lambda state: (3, False, []))
+    cli.main(["budget", "--branch", "add-oauth", "--auto"])
+    assert state["review_budget_run"] is None

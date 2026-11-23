@@ -241,7 +241,7 @@ def evaluate(
     history: list[dict],
     budget: int,
     unreviewed: list[str],
-    budget_is_explicit: bool = False,
+    budget_answers: int | None = None,
     pr_merged: bool = False,
 ) -> GateDecision:
     """Decide the gate from the open problems and whether a review covers the current code.
@@ -258,6 +258,9 @@ def evaluate(
     review still stands. Counts remain in `review_history` for the convergence trend.
 
     `unreviewed` is `needs_review`'s list, ignored when there is no last review.
+
+    `budget_answers` is the run an explicit budget was set after (`feature budget --set`), or None
+    when the budget is auto-sized.
 
     `pr_merged` short-circuits to MERGED but keeps the reasons: the loop is over either way, and the
     close-out record names what was still outstanding when the PR went in.
@@ -281,10 +284,12 @@ def evaluate(
     if not reasons:
         return GateDecision(Verdict.OPEN, [], _NEXT_OPEN, used, budget)
 
-    # An explicitly raised budget outranks both churn signals. They exist to escalate *early*, so a
-    # human who has already seen that escalation and chosen to spend another round has answered it;
-    # re-deriving them from the same unchanged history would make `budget --set` a silent no-op.
-    if not (budget_is_explicit and used < budget):
+    # A budget raised after a round outranks that round's churn signals. They exist to escalate
+    # *early*, so a human who saw that escalation and chose to spend another round has answered it;
+    # re-deriving them from the same unchanged history would make `budget --set` a silent no-op. A
+    # round recorded after it is new evidence the human hasn't seen, judged on its own: a pinned
+    # budget once hid every later recurrence.
+    if not (rounds and rounds[-1]["run"] == budget_answers):
         # The recurrence goes first, ahead of a spent budget too: it is the one signal that says what
         # to do instead of another round.
         if recurring := recurrence_reason(rounds):

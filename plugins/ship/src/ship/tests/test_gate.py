@@ -37,14 +37,15 @@ def run(
     return entry
 
 
-def gate(*, blocking_open, last_review, history, budget=3, unreviewed=(), pinned=False, merged=False):
+def gate(*, blocking_open, last_review, history, budget=3, unreviewed=(), answered=None, merged=False):
+    """`answered` is the run a `feature budget --set` came after (None: the budget is auto-sized)."""
     return evaluate(
         blocking_open=blocking_open,
         last_review=last_review,
         history=history,
         budget=budget,
         unreviewed=list(unreviewed),
-        budget_is_explicit=pinned,
+        budget_answers=answered,
         pr_merged=merged,
     )
 
@@ -146,13 +147,13 @@ def test_buying_a_round_overrides_the_churn_escalation():
     history = [run(1, blocking=2), run(2, blocking=3)]
     stuck = gate(blocking_open=3, last_review=history[-1], history=history, budget=4)
     assert stuck.verdict is Verdict.NEEDS_DECISION
-    bought = gate(blocking_open=3, last_review=history[-1], history=history, budget=4, pinned=True)
+    bought = gate(blocking_open=3, last_review=history[-1], history=history, budget=4, answered=2)
     assert bought.verdict is Verdict.REVIEW_AGAIN
 
 
 def test_a_pinned_budget_that_is_spent_still_needs_a_decision():
     history = [run(1, blocking=2), run(2, blocking=3)]
-    d = gate(blocking_open=3, last_review=history[-1], history=history, budget=2, pinned=True)
+    d = gate(blocking_open=3, last_review=history[-1], history=history, budget=2, answered=2)
     assert d.verdict is Verdict.NEEDS_DECISION
 
 
@@ -204,8 +205,22 @@ def test_a_recurrence_outranks_a_spent_budget():
 def test_buying_a_round_after_a_recurrence_reviews_again():
     """The human chose: the redesign (or the patches) gets its review round."""
     history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
-    d = gate(blocking_open=0, last_review=history[-1], history=history, budget=3, unreviewed=["redesign"], pinned=True)
+    d = gate(blocking_open=0, last_review=history[-1], history=history, budget=3, unreviewed=["redesign"], answered=2)
     assert d.verdict is Verdict.REVIEW_AGAIN
+
+
+def test_a_round_after_the_bought_one_is_judged_on_its_own():
+    """The human answered round 2's recurrence; round 3's repeat is new evidence they haven't seen."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"20": 12})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=5, answered=2)
+    assert d.next_step == _NEXT_REDESIGN
+    assert any("#20 like #12" in r for r in d.reasons)
+
+
+def test_a_budget_pinned_before_any_round_answers_no_recurrence():
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4, answered=0)
+    assert d.next_step == _NEXT_REDESIGN
 
 
 def test_a_recurrence_with_nothing_outstanding_still_opens_the_gate():

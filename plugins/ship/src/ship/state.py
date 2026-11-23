@@ -99,6 +99,9 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         # None = auto-size the review budget from the PR diff at query time, so it tracks the
         # diff as it grows instead of freezing a guess made when the branch was empty.
         "review_budget": None,
+        # The run `review_budget` was set after: the override answers that round's escalation, not
+        # a later round's (`gate.evaluate`).
+        "review_budget_run": None,
         "review_runs": 0,
         # Every review run ever, plus `{"event": ...}` markers when a base sync invalidates the
         # runs before it. The gate reads the trend from here; `last_review` is only the currently
@@ -112,6 +115,19 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         "repeats": {},
         "updated": updated,
     }
+
+
+def budget_run(state: dict) -> int | None:
+    """The run the explicit review budget was set after (`feature budget --set`). A block without the
+    key answers none, so the gate judges every round on its own: kept ON PURPOSE, as blocks from
+    before `review_budget_run` are in the feature issues of PRs in flight."""
+    return state.get("review_budget_run")
+
+
+def set_budget(state: dict, rounds: int | None) -> None:
+    """Pin the review budget at `rounds`, answering the last recorded run, or (None) auto-size it."""
+    state["review_budget"] = rounds
+    state["review_budget_run"] = None if rounds is None else state["review_runs"]
 
 
 def fixes(state: dict) -> dict[str, list[int]]:

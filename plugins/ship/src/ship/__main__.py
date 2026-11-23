@@ -45,6 +45,7 @@ from .state import (
     record_repeat,
     record_review,
     repeats,
+    set_budget,
     set_status,
 )
 
@@ -644,11 +645,11 @@ def cmd_budget(args: argparse.Namespace) -> None:
                 f"A budget of {args.set} is at or below the {used} round(s) already spent, which pins "
                 f"the gate at NEEDS_DECISION. Pass {used + 1} or more to buy another round."
             )
-        state["review_budget"] = args.set
+        set_budget(state, args.set)
         _save_state(issue, body, state)
         github.comment(issue, f"🎚 Review budget set to {args.set} round(s).")
     elif args.auto:
-        state["review_budget"] = None
+        set_budget(state, None)
         _save_state(issue, body, state)
         github.comment(issue, "🎚 Review budget back to auto-sizing from the PR diff.")
 

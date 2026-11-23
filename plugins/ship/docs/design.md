@@ -60,6 +60,7 @@ git config (per branch, local wiring):
   "pr": 123,
   "status": "in-review",
   "review_budget": null,
+  "review_budget_run": null,
   "review_runs": 2,
   "review_history": [
     {"run": 1, "sha": "9fe0011", "new_blocking": 2, "new_low": 3, "regressions": 0, "summary": "…"},
@@ -87,7 +88,7 @@ idempotently no matter what humans add around it. Never blind-string-replace.
 
 `review_budget` is `null` for "auto-size from the PR diff at query time" (so a growing branch earns
 its extra round without anyone re-running a command) or an integer a human pinned with
-`feature budget --set`. `review_history` is the append-only audit log the gate reads the
+`feature budget --set`, and `review_budget_run` is the run it was set after. `review_history` is the append-only audit log the gate reads the
 convergence trend from; `feature sync` appends an `{"event": "base-advanced", …}` marker to it
 when its merge resolved code by hand, and everything before the newest marker is excluded from both
 the trend and the budget count. `last_review` is only the *currently valid* clean-pass
@@ -245,9 +246,11 @@ sensitive). Its own change is its diff from its parent, or for a merge of the ba
 `git merge-tree` makes of its parents: only what was resolved by hand. The base includes a
 squash-merged former parent's PR head, whose commits that PR reviewed. Why: motivation.md #12.
 
-An explicitly pinned budget (`feature budget --set`) also outranks the churn signal while rounds
-remain, because churn exists to escalate *early* — a human who has seen that escalation and chosen to
-spend another round has already answered it.
+A budget pinned after a round (`feature budget --set`) outranks that round's churn signals, because
+churn exists to escalate *early* — a human who has seen that escalation and chosen to spend another
+round has already answered it. A round recorded after it is new evidence and is judged on its own:
+when the override held for every round until the budget ran out, a bug that came back in the
+bought round never recommended the redesign.
 
 **Why a budget.** A review round is the most expensive thing this workflow does (a full independent
 sweep by a subagent). `budget.py` sizes it from the diff: base 2 rounds, +1 for a large diff
