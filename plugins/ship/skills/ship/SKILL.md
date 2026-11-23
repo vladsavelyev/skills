@@ -115,7 +115,8 @@ Feature: <name>  Branch: <branch>  PR: <url>  Worktree: <abs path>
 Rounds: <n> this run, Sol at <depth per round>; graded risk <…> (<door> door, blast radius <…>), complexity <…>
 Fixed: #<n> [sev] <title> — <sha>   (one per line; or none)
 Won't fix: #<n> [sev] <title> — <reason>   (one per line; or none)
-Open: #<n> [sev] <title> — <the question for the user>   (only at YOUR CALL; else none)
+Open: #<n> [sev] <title> — <the question for the user, or at a redesign the fixed #<n> it repeats>
+      (one per line, at YOUR CALL or a redesign NEEDS_DECISION; else none)
 Pre-existing: [sev] <title> — <file:line>, fix: <root-cause fix>   (or none)
 Next: <what the user decides or does: merge, answer the question, pick the escalation's option>
 ```
