@@ -48,7 +48,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
 | Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
-| Problems | `feature problem list [--open]`, `add`, `resolve <#> --commit <sha>…`, `wontfix\|block <#> --reason "…"` |
+| Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `resolve <#> --commit <sha>…`, `wontfix\|block <#> --reason "…"` |
 | Review budget | `feature budget [--set <n> \| --auto]` |
 | Stuck loop | `feature escalate --reason "<findings + recommendation>"` |
 | Sync with base | `feature sync [--stack]` |
@@ -179,6 +179,10 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Same as a CLOSED fixed problem → regression. `feature problem block <#> --reason
      "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, count it in `--regressions`).
      Never `gh issue reopen`.
+   - A new bug, but the same mistake as a CLOSED fixed problem in a new place: a fix at the root of
+     that problem's cause would have prevented this one too → file it with `--repeats <#>`. It tells
+     the gate the fix patched an instance, not the cause. A shared category isn't enough: two
+     unrelated missing null checks don't repeat each other.
    - Same as a WONTFIX problem (closed as not relevant; older ones are labelled `rejected`) → skip,
      unless the new repro answers the reason. Then `block` it. A problem disputed twice goes to the
      human: escalate with both sides.
@@ -192,7 +196,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      any other problem. Their evidence is a citation, not a trace: drop a spec gap whose quoted
      intent doesn't say what Sol claims, a rule breach the cited rule doesn't cover, and a smell
      outside the PR's own code. Title them `Spec: …` or `Design: …`.
-7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
+7. **File new ones**: `feature problem add --title "…" --sev … [--repeats <#>] --body-file - <<'EOF' … EOF`, with
    the repro, its evidence (traced or ran, with the script if ran; for a spec gap, the quoted
    intent; for a design finding, the rule or smell and the code), `file:line` and the suggested
    root-cause fix.
@@ -225,8 +229,12 @@ be followed up later: an open problem means the PR isn't ready.
   fixes: every open problem still gets closed, exactly as for `REVIEW_AGAIN`. `feature escalate`
   with one recommendation for after the fixes: review them in one more round (`feature budget
   --set`), merge with them unreviewed (close-out records that), split the PR, or redesign it.
-  When the gate names churn (fixes re-opening old bugs, findings rising), say so: splitting or
-  redesigning may beat another fix.
+  When the gate names rising findings, say so: splitting may beat another round.
+  - When the gate says a kind of bug came back after its fix (a problem re-opened, or new ones
+    like fixed ones), the design keeps producing it. Don't fix the open problems yet: `feature
+    escalate` naming what the recurring bugs have in common, and recommend a redesign over another
+    round: a few competing designs, each critiqued blind by a separate agent, then one settled from
+    the critiques. Name the shared cause, not a design of your own; the human decides.
 
 ## Rules
 
@@ -273,8 +281,14 @@ Always include these caller rules in `Next` when they apply:
   whether to fix it in a separate PR (`Skill(ship:start)` off the base branch) or just file an
   issue for it (`gh issue create`, with the failure scenario, `file:line` and the root-cause fix).
   Don't decide for them, and don't fix it in this PR."
-- With `NEEDS_DECISION`: "Close every open problem as for `REVIEW_AGAIN` (fix, commit, push,
-  `feature problem resolve`, or `wontfix` if it isn't relevant); the budget limits review rounds,
-  not fixes, and nothing ships as debt. Then stop and present the recommendation to the user:
-  another review round of the fixes (`feature budget --set <n>`, then `Skill(ship:ship)`), or
-  merge with them unreviewed."
+- With `NEEDS_DECISION` for a bug that came back after its fix: "Don't fix the open problems
+  yet. Present the recommendation to the user: redesign rather than review again. If they agree,
+  have a few agents each write a competing design, a separate agent critique each one blind, and
+  settle on one from the critiques; build it, close each open problem with its commits (`feature
+  problem resolve`), then `feature budget --set <n>` and `Skill(ship:ship)` to review it. They may
+  choose instead to fix the problems one by one and buy a round, or to split the PR."
+- With `NEEDS_DECISION` for any other reason: "Close every open problem as for `REVIEW_AGAIN`
+  (fix, commit, push, `feature problem resolve`, or `wontfix` if it isn't relevant); the budget
+  limits review rounds, not fixes, and nothing ships as debt. Then stop and present the
+  recommendation to the user: another review round of the fixes (`feature budget --set <n>`, then
+  `Skill(ship:ship)`), or merge with them unreviewed."

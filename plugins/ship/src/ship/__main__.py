@@ -47,7 +47,9 @@ from .state import (
     replace_block,
     fixes,
     record_fix,
+    record_repeat,
     record_review,
+    repeats,
     set_status,
 )
 
@@ -434,6 +436,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     )
     run_num = entry["run"]
     entry["found"] = found
+    entry["repeats"] = problems.recurring(found, repeats(state))
     entry["depth"] = args.depth
     entry["grade"] = {
         "risk": args.risk,
@@ -474,6 +477,21 @@ def _add_problem(parent: int, title: str, sev: str, detail: str) -> int:
     return child
 
 
+def _require_fixed(branch: str, number: int) -> None:
+    """Abort unless `number` is a problem of this feature that was fixed, so a new one can repeat it."""
+    sub = _require_problem(branch, number)
+    if sub["state"] == "OPEN":
+        sys.exit(
+            f"#{number} is still open, so nothing came back after a fix. If the finding means the same "
+            f"as #{number}, skip it; if it's only the same kind, file it without --repeats."
+        )
+    if problems.is_wontfix(sub):
+        sys.exit(
+            f"#{number} was closed as wontfix, not fixed. If the finding answers its reason, `feature "
+            f"problem block {number} --reason '…'` instead; otherwise file it without --repeats."
+        )
+
+
 def cmd_problem_add(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
     parent = _resolve_issue(branch)
@@ -484,7 +502,15 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
         detail = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     else:
         detail = args.body or f"Found during review of feature #{parent}."
+    if args.repeats is not None:
+        _require_fixed(branch, args.repeats)
+        # Said in the issue for a human (GitHub cross-links the two); recorded in the state for the gate.
+        detail += f"\n\nRepeats #{args.repeats}: the same kind of bug, back after its fix."
     child = _add_problem(parent, args.title, args.sev, detail)
+    if args.repeats is not None:
+        issue, state, body = _load_state(branch)
+        record_repeat(state, child, args.repeats)
+        _save_state(issue, body, state)
     print(f"Added problem #{child} ({args.sev}) under feature #{parent}")
 
 
@@ -1133,6 +1159,12 @@ def build_parser() -> argparse.ArgumentParser:
     body_src.add_argument("--body", help="Problem detail as an inline string")
     body_src.add_argument(
         "--body-file", help="Read problem detail from a file, or '-' for stdin (for multi-line detail)"
+    )
+    pa.add_argument(
+        "--repeats",
+        type=int,
+        metavar="PROBLEM",
+        help="A fixed problem this one repeats: a root-cause fix of it would have prevented this one too",
     )
     pa.add_argument("--branch")
     pa.set_defaults(func=cmd_problem_add)

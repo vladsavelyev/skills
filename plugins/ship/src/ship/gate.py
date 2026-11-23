@@ -8,9 +8,9 @@ The gate has **three** outcomes, because a review loop has three real endings:
   REVIEW_AGAIN    — open problems or unreviewed code are outstanding and there is review budget
                     left to spend.
   NEEDS_DECISION  — the loop is not converging on its own: the budget is spent, or the trend
-                    says another round won't help. The open problems still get fixed; a human
-                    decides whether to buy another round, merge the fixes unreviewed, split the
-                    PR, or redesign.
+                    says another round won't help. A human decides whether to buy another round,
+                    merge the fixes unreviewed, split the PR, or redesign. When a kind of bug came
+                    back after its fix, the gate recommends the redesign.
 
 Once the PR has merged none of them applies, so a fourth verdict ends the loop for good:
 
@@ -46,6 +46,18 @@ _NEXT_DECISION = (
     "ships as debt. Then `feature escalate --reason '<what you recommend>'`, and a human decides "
     "whether to review the fixes in another round (`feature budget --set <n>`), merge with them "
     "unreviewed, or split/redesign the PR."
+)
+# A bug back after its fix means the design keeps producing it, so another fix-and-review round only
+# finds the next one, and patching the open problems first is work a redesign throws away. Why:
+# docs/motivation.md #14.
+_NEXT_REDESIGN = (
+    "STOP patching: the same kind of bug came back after its fix, so the design keeps producing it, "
+    "and another round of fixes and review will find the next one. Don't fix the open problems yet. "
+    "`feature escalate --reason '<what the recurring bugs have in common>'`, recommending a redesign "
+    "over another round: a few competing designs, each critiqued blind by a separate agent, then one "
+    "settled from the critiques. A human decides: redesign, fix the problems one by one, or split the "
+    "PR. Either way every open problem is closed before the PR ships, and `feature budget --set <n>` "
+    "buys the round that reviews the result."
 )
 
 
@@ -105,35 +117,52 @@ def rounds_since_invalidation(history: list[dict]) -> list[dict]:
     return list(reversed(runs))
 
 
-def churn_reason(rounds: list[dict]) -> str | None:
-    """Why spending another review round looks futile, or None if the loop is converging.
+def recurrence_reason(rounds: list[dict]) -> str | None:
+    """Why the last round says the fixes aren't holding, or None.
 
-    Two signals, both cheap and explainable:
-      * the last round re-opened previously-closed *blocking* problems — the fixes are
-        reintroducing known bugs, which is a design smell, not a review-more smell;
-      * blocking findings stopped decreasing round over round — the loop is treading water.
+    It found again what an earlier fix should have ruled out: the very problem, re-opened (a
+    regression), or a new problem of the same kind, which the review filed as repeating the fixed
+    one (`problem add --repeats`, kept per round as `repeats`). Either way a fix patched an instance
+    and the design still produces the bug, so the gate recommends a redesign over another round.
 
-    Both key off high/med counts only. Low-severity problems block the gate like any other, but a
-    re-opened or rising count of nits is not evidence that the design is wrong.
+    Only the last round counts: a human who saw an earlier recurrence and bought more rounds answered
+    it. Like the trend, it reads high/med finds only: a nit back again is not evidence the design is
+    wrong.
     """
     if not rounds or rounds[-1].get("placeholder"):
         return None
     last = rounds[-1]
+    back = []
     if last["regressions"]:
-        return (
-            f"run {last['run']} re-opened {last['regressions']} previously-closed high/med "
-            f"problem(s) — the fixes are reintroducing known bugs"
-        )
+        back.append(f"re-opened {last['regressions']} fixed high/med problem(s)")
+    # Rounds recorded before `repeats` existed carry no links. Kept ON PURPOSE: they are already
+    # written into feature issues of PRs in flight.
+    if repeats := last.get("repeats"):
+        pairs = ", ".join(f"#{problem} like #{repeated}" for problem, repeated in repeats.items())
+        back.append(f"found {len(repeats)} new high/med problem(s) of a kind already fixed ({pairs})")
+    if not back:
+        return None
+    return f"run {last['run']} {' and '.join(back)}: the fixes patch instances, not the cause, so redesign"
+
+
+def rising_reason(rounds: list[dict]) -> str | None:
+    """Why the trend says another round won't converge, or None: high/med findings stopped
+    decreasing round over round, so the loop is treading water.
+
+    It keys off high/med counts only. Low-severity problems block the gate like any other, but a
+    rising count of nits is not evidence that the design is wrong.
+    """
     # Placeholder rounds carry no counts (see `state.migrate`), so a trend through one is
-    # meaningless — the budget check below is what catches those features.
-    if len(rounds) >= 2 and not any(r.get("placeholder") for r in rounds[-2:]):
-        previous, current = rounds[-2]["new_blocking"], last["new_blocking"]
-        # Strictly increasing, and both nonzero. One flat round (1 then 1) is the most common shape
-        # of a converging review, and firing on it made the auto-sized 3rd and 4th rounds nearly
-        # unreachable — the advertised 2-4 budget was effectively always 2. A rising count is the
-        # real "getting worse" signal; a plateau is left to the budget to bound.
-        if current and previous and current > previous:
-            return f"high/med findings are rising ({previous} then {current}) — another round is unlikely to converge"
+    # meaningless — the budget check in `evaluate` is what catches those features.
+    if len(rounds) < 2 or any(r.get("placeholder") for r in rounds[-2:]):
+        return None
+    previous, current = rounds[-2]["new_blocking"], rounds[-1]["new_blocking"]
+    # Strictly increasing, and both nonzero. One flat round (1 then 1) is the most common shape of a
+    # converging review, and firing on it made the auto-sized 3rd and 4th rounds nearly unreachable —
+    # the advertised 2-4 budget was effectively always 2. A rising count is the real "getting worse"
+    # signal; a plateau is left to the budget to bound.
+    if current and previous and current > previous:
+        return f"high/med findings are rising ({previous} then {current}) — another round is unlikely to converge"
     return None
 
 
@@ -213,12 +242,16 @@ def evaluate(
     if not reasons:
         return GateDecision(Verdict.OPEN, [], _NEXT_OPEN, used, budget)
 
-    # An explicitly raised budget outranks the churn heuristic. Churn exists to escalate *early*, so
-    # a human who has already seen that escalation and chosen to spend another round has answered it;
-    # re-deriving churn from the same unchanged history would make `budget --set` a silent no-op.
-    churn = None if (budget_is_explicit and used < budget) else churn_reason(rounds)
-    if churn:
-        return GateDecision(Verdict.NEEDS_DECISION, [*reasons, churn], _NEXT_DECISION, used, budget)
+    # An explicitly raised budget outranks both churn signals. They exist to escalate *early*, so a
+    # human who has already seen that escalation and chosen to spend another round has answered it;
+    # re-deriving them from the same unchanged history would make `budget --set` a silent no-op.
+    if not (budget_is_explicit and used < budget):
+        # The recurrence goes first, ahead of a spent budget too: it is the one signal that says what
+        # to do instead of another round.
+        if recurring := recurrence_reason(rounds):
+            return GateDecision(Verdict.NEEDS_DECISION, [*reasons, recurring], _NEXT_REDESIGN, used, budget)
+        if rising := rising_reason(rounds):
+            return GateDecision(Verdict.NEEDS_DECISION, [*reasons, rising], _NEXT_DECISION, used, budget)
     if used >= budget:
         return GateDecision(
             Verdict.NEEDS_DECISION,

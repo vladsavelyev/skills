@@ -1,6 +1,6 @@
 """Tests for problem classification — what does and doesn't hold the merge gate."""
 
-from ship.problems import HANDED_OFF, blocking, handed_off, is_blocking, severity, undecided
+from ship.problems import HANDED_OFF, blocking, handed_off, is_blocking, recurring, severity, undecided
 
 
 def sub(number: int, *, sev: str = "sev:high", state: str = "OPEN", extra: list[str] | None = None) -> dict:
@@ -57,3 +57,12 @@ def test_an_old_follow_up_counts_as_handed_off_but_an_old_deferral_does_not():
     """`follow-up` was the old CLI's close-out decision on a merged PR; `deferred` was pre-merge debt."""
     subs = [sub(1, sev="sev:low", extra=["follow-up"]), sub(2, sev="sev:low", extra=["deferred"])]
     assert [s["number"] for s in undecided(subs)] == [2]
+
+
+def test_recurring_keeps_a_rounds_high_and_med_finds_that_repeat_a_fixed_problem():
+    """A low find repeating a fixed one is a nit back again, not evidence the design is wrong."""
+    found = {"med": [42, 41], "low": [40], "?": [43]}
+    repeats = {"40": 30, "41": 31, "43": 33, "50": 35}
+    # #50 repeats a fixed problem too, but an earlier round found it.
+    assert recurring(found, repeats) == {"41": 31, "43": 33}
+    assert recurring({}, repeats) == {}

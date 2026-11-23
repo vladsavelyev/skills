@@ -379,3 +379,123 @@ def test_resolve_without_a_commit_records_no_fix(monkeypatch):
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(note))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=[]))
     assert did == ["Resolved."]
+
+
+def _add_args(repeats: int | None = None):
+    return cli.argparse.Namespace(
+        branch="add-oauth",
+        title="Says checked of what it didn't read",
+        sev="high",
+        body="repro",
+        body_file=None,
+        repeats=repeats,
+    )
+
+
+def _stub_problem_add(monkeypatch, repeated: dict | None) -> dict:
+    did: dict = {"filed": [], "saved": []}
+    state = _merged_state()
+    monkeypatch.setattr(cli, "_resolve_issue", lambda branch: 7)
+    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: repeated)
+    monkeypatch.setattr(cli, "_load_state", lambda branch: (7, state, "body"))
+    monkeypatch.setattr(cli, "_save_state", lambda issue, body, s: did["saved"].append(dict(s["repeats"])))
+
+    def add(parent, title, sev, detail):
+        did["filed"].append(detail)
+        return 12
+
+    monkeypatch.setattr(cli, "_add_problem", add)
+    return did
+
+
+def test_problem_add_links_a_repeat_of_a_fixed_problem_in_the_issue_and_the_state(monkeypatch):
+    did = _stub_problem_add(monkeypatch, _problem(10, "sev:high", state="CLOSED"))
+    cli.cmd_problem_add(_add_args(repeats=10))
+    # The issue says so for a human (GitHub cross-links #10), the state for the gate.
+    assert did["filed"] == ["repro\n\nRepeats #10: the same kind of bug, back after its fix."]
+    assert did["saved"] == [{"12": 10}]
+
+
+def test_problem_add_without_repeats_leaves_the_state_alone(monkeypatch):
+    did = _stub_problem_add(monkeypatch, None)
+    monkeypatch.setattr(cli, "_load_state", lambda branch: pytest.fail("touched the state"))
+    cli.cmd_problem_add(_add_args())
+    assert did["filed"] == ["repro"]
+
+
+@pytest.mark.parametrize(
+    ("repeated", "refusal"),
+    [
+        (_problem(10, "sev:high"), "#10 is still open"),
+        (_problem(10, "sev:high", state="CLOSED", extra=(problems.WONTFIX,)), "#10 was closed as wontfix"),
+        (_problem(10, "sev:high", state="CLOSED", extra=(problems.LEGACY_WONTFIX,)), "#10 was closed as wontfix"),
+    ],
+)
+def test_problem_add_refuses_to_repeat_a_problem_that_was_never_fixed(monkeypatch, repeated, refusal):
+    """Only a fix that didn't hold says the design keeps producing the bug. A finding like an open
+    problem is more of the same before any fix; one like a wontfix answers a reason or isn't a bug."""
+    did = _stub_problem_add(monkeypatch, repeated)
+    with pytest.raises(SystemExit, match=refusal):
+        cli.cmd_problem_add(_add_args(repeats=10))
+    assert did == {"filed": [], "saved": []}
+
+
+def _record_args(found: list[int]):
+    return cli.argparse.Namespace(
+        branch="add-oauth",
+        sha="abc1234",
+        found=found,
+        regressions=0,
+        summary="Reviewed it.",
+        depth="high",
+        risk="med",
+        door="two-way",
+        blast_radius="one page",
+        complexity="high",
+        why="Many parts.",
+    )
+
+
+def test_review_record_keeps_the_rounds_high_and_med_finds_that_repeat_a_fixed_problem(monkeypatch):
+    state = _merged_state()
+    # #40 is low; #50 repeats a fixed problem too, but an earlier round found it.
+    state["repeats"] = {"40": 30, "41": 31, "50": 35}
+    monkeypatch.setattr(cli, "_load_state", lambda branch: (7, state, ""))
+    monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
+    monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
+    monkeypatch.setattr(
+        github, "sub_issues", lambda issue: [_problem(40, "sev:low"), _problem(41, "sev:high"), _problem(42, "sev:med")]
+    )
+    monkeypatch.setattr(cli, "_write_block", lambda state, issue: True)
+    monkeypatch.setattr(cli, "_pr_merged", lambda state: False)
+    monkeypatch.setattr(cli, "_decide", lambda *args: _decision(cli.gate.Verdict.NEEDS_DECISION))
+    monkeypatch.setattr(github, "comment", lambda number, body: None)
+    monkeypatch.setattr(github, "get_issue_body", lambda number: "")
+    monkeypatch.setattr(cli, "_save_state", lambda issue, body, s: None)
+    cli.cmd_review_record(_record_args([40, 41, 42]))
+    assert state["review_history"][-1]["repeats"] == {"41": 31}
+
+
+def test_escalating_a_recurring_bug_recommends_a_redesign_over_another_round(monkeypatch):
+    """navari #5176: each escalation recommended fixing everything and one more round, five rounds running."""
+    history = [
+        {"run": 1, "sha": "a1", "new_blocking": 1, "new_low": 0, "regressions": 0, "summary": "", "repeats": {}},
+        {
+            "run": 2,
+            "sha": "b2",
+            "new_blocking": 1,
+            "new_low": 0,
+            "regressions": 0,
+            "summary": "",
+            "repeats": {"12": 10},
+        },
+    ]
+    decision = cli.gate.evaluate(blocking_open=1, last_review=history[-1], history=history, budget=3, unreviewed=[])
+    posted: list[str] = []
+    monkeypatch.setattr(cli, "_gate_for", lambda branch: (7, _merged_state(), [_problem(12, "sev:high")], decision))
+    monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
+    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
+    monkeypatch.setattr(github, "comment", lambda number, body: posted.append(body))
+    cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="Both say checked of what wasn't read."))
+    assert "#12 like #10" in posted[0]
+    assert "redesign over another round" in posted[0] and "critiqued blind" in posted[0]

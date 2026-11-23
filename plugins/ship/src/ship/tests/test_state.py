@@ -12,8 +12,10 @@ from ship.state import (
     new_state,
     parse_block,
     record_fix,
+    record_repeat,
     record_review,
     render_block,
+    repeats,
     replace_block,
     set_status,
 )
@@ -180,3 +182,13 @@ def test_record_fix_is_idempotent_and_a_block_from_before_fixes_has_none():
     older = new_state(branch="feat-x", base="main", updated="t0")
     del older["fixes"]
     assert fixes(older) == {}
+
+
+def test_record_repeat_links_a_problem_to_the_fixed_one_and_a_block_from_before_repeats_has_none():
+    state = new_state(branch="feat-x", base="main", updated="t0")
+    record_repeat(state, 12, 10)
+    # A JSON object's keys are strings, so the link is keyed the way it reads back from the issue.
+    assert parse_block(render_block(state))["repeats"] == repeats(state) == {"12": 10}
+    older = new_state(branch="feat-x", base="main", updated="t0")
+    del older["repeats"]
+    assert repeats(older) == {}

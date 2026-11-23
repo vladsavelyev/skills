@@ -70,3 +70,11 @@ def low_fix_commits(fixes: dict[str, list[int]], subs: list[dict]) -> set[str]:
     """The fix commits (`state.fixes`) whose every problem is `low`."""
     sev = {s["number"]: severity(s) for s in subs}
     return {sha for sha, fixed in fixes.items() if all(sev[n] == LOW_SEV for n in fixed)}
+
+
+def recurring(found: dict[str, list[int]], repeats: dict[str, int]) -> dict[str, int]:
+    """A round's high/med finds (`found`, by severity) that repeat a fixed problem (`state.repeats`),
+    each with the problem it repeats, in number order. A low one doesn't count, as in the trend: a
+    nit back again is not evidence that the design keeps producing the bug."""
+    serious = sorted(n for sev, nums in found.items() if f"sev:{sev}" != LOW_SEV for n in nums)
+    return {str(n): repeats[str(n)] for n in serious if str(n) in repeats}
