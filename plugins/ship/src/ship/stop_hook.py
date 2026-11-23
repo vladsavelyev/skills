@@ -50,8 +50,13 @@ def main() -> None:
         if not own_token:
             # Holds may be in repos of different accounts; each picks its own (`use_owner_account`).
             os.environ.pop("GH_TOKEN", None)
-        github.use_owner_account()
-        issue, state, blocking, decision = feature.gate_for(branch)
+        try:
+            github.use_owner_account()
+            issue, state, blocking, decision = feature.gate_for(branch)
+        except Exception as exc:  # one hold that can't be judged must not keep the others from being checked
+            hold.release(session, branch)
+            gone.append(f"ship: stopped holding `{branch}`: its gate can't be judged: {exc}")
+            continue
         if decision.settled:
             hold.release(session, branch)
             continue
