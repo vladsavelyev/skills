@@ -409,16 +409,18 @@ the plugin holds the session instead (`hold.py`):
 - The Stop hook (`stop_hook.py`) runs whenever the agent is about to end its turn. For each branch
   the session holds it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
   the stop, and Claude Code hands the agent the reason: the gate, the open problems, and the ways
-  on. A hold whose gate can't be judged (its branch no longer tracked) is dropped with a message
-  to the user, and the others are still judged. Its shell wrapper looks for any hold before starting Python, so a session holding nothing
+  on. A hold on a branch that is no longer a tracked feature is dropped with a message to the
+  user, and the others are still judged. Its shell wrapper looks for any hold before starting Python, so a session holding nothing
   pays one `ls`.
 - The two ways out short of `OPEN` both write to the tracking issue and drop the hold.
   `feature escalate` refuses while an open problem isn't named with `--problem` (asked of the user)
   and, with budget left, unless one is: escalating is for what a human must decide, never a way
   around a fix. `feature release` takes any reason, on the record.
 
-A hook failure (a `gh` outage) lets the stop through: a stuck session is worse than a missed
-reminder, and the merge guard below still holds the line.
+A gate the hook can't judge (a `gh` outage) blocks the stop once, with the error, and keeps the
+hold; the next stop in a row (`stop_hook_active`) goes through with the error shown, since a session
+trapped by an outage is worse than a missed reminder, and the merge guard below still holds the
+line. Once the gate can be judged again, the hold holds as before.
 
 ### The merge guard
 

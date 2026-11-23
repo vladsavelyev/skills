@@ -18,6 +18,7 @@ def _run(monkeypatch, capsys, tmp_path, verdict: Verdict, *, checkout: str | Non
     monkeypatch.setattr(stop_hook.os, "chdir", lambda path: None)
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.setattr(stop_hook.feature, "gate_for", lambda branch: (39, {"pr": 5355}, blocking, decision))
+    monkeypatch.setattr(stop_hook, "feature_issue", lambda branch: 39)
     monkeypatch.setattr(stop_hook, "worktree_for_branch", lambda branch: "/repo/.claude/worktrees/fix-it")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s1", "stop_hook_active": False})))
     stop_hook.main()
@@ -58,25 +59,50 @@ def test_a_session_holding_nothing_stops(monkeypatch, capsys, tmp_path):
     assert capsys.readouterr().out == ""
 
 
-def test_a_hold_whose_gate_cant_be_judged_is_reported_and_the_others_still_hold(monkeypatch, capsys, tmp_path):
-    """#137: a stray hold on an untracked branch ended the hook before it checked the real one."""
+def _two_holds(monkeypatch, tmp_path, *, feat_error: Exception | None, stop_hook_active: bool = False):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     hold.hold("s1", branch="feat", checkout=str(tmp_path))
     hold.hold("s1", branch="fix-it", checkout=str(tmp_path))
     decision = GateDecision(verdict=Verdict.REVIEW_AGAIN, reasons=[], next_step="", rounds_used=1, budget=2)
 
     def gate_for(branch):
-        if branch == "feat":
-            raise Refusal("No feature issue wired for branch 'feat'.")
+        if branch == "feat" and feat_error:
+            raise feat_error
         return 39, {"pr": 5355}, [], decision
 
     monkeypatch.setattr(stop_hook.os, "chdir", lambda path: None)
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
+    monkeypatch.setattr(stop_hook, "feature_issue", lambda branch: None if branch == "untracked" else 39)
     monkeypatch.setattr(stop_hook.feature, "gate_for", gate_for)
     monkeypatch.setattr(stop_hook, "worktree_for_branch", lambda branch: None)
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s1"})))
+    payload = {"session_id": "s1", "stop_hook_active": stop_hook_active}
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+
+
+def test_a_hold_whose_branch_isnt_tracked_is_dropped_and_the_others_still_hold(monkeypatch, capsys, tmp_path):
+    """#137: a stray hold on an untracked branch ended the hook before it checked the real one."""
+    _two_holds(monkeypatch, tmp_path, feat_error=None)
+    hold.hold("s1", branch="untracked", checkout=str(tmp_path))
     stop_hook.main()
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "block" and "`fix-it`" in out["reason"]
-    assert "No feature issue wired for branch 'feat'" in out["systemMessage"]
-    assert [h["branch"] for h in hold.held("s1")] == ["fix-it"]
+    assert "`untracked`: it isn't a tracked feature" in out["systemMessage"]
+    assert [h["branch"] for h in hold.held("s1")] == ["feat", "fix-it"]
+
+
+def test_a_gate_github_cant_answer_keeps_the_hold_and_holds_the_stop_once(monkeypatch, capsys, tmp_path):
+    """#147: a 503 used to drop the hold, ending the run with its problems open."""
+    _two_holds(monkeypatch, tmp_path, feat_error=Refusal("gh: HTTP 503"))
+    stop_hook.main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "HTTP 503" in out["reason"]
+    assert [h["branch"] for h in hold.held("s1")] == ["feat", "fix-it"]
+
+
+def test_a_second_stop_in_a_row_with_github_down_goes_through_with_the_error_shown(monkeypatch, capsys, tmp_path):
+    _two_holds(monkeypatch, tmp_path, feat_error=Refusal("gh: HTTP 503"), stop_hook_active=True)
+    hold.release("s1", branch="fix-it", checkout=str(tmp_path))
+    stop_hook.main()
+    out = json.loads(capsys.readouterr().out)
+    assert "decision" not in out and "HTTP 503" in out["systemMessage"]
+    assert [h["branch"] for h in hold.held("s1")] == ["feat"]
