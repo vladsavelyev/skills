@@ -369,6 +369,7 @@ def _stub_escalate(monkeypatch, tmp_path, verdict, blocking: list[dict]) -> list
     monkeypatch.setattr(github, "comment", lambda number, body: posted.append((number, body)))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setenv(hold.SESSION_ENV, "s1")
+    monkeypatch.setattr(cli, "main_checkout_root", lambda: "/repo")
     hold.hold("s1", branch="add-oauth", checkout="/repo")
     return posted
 

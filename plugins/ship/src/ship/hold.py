@@ -8,8 +8,9 @@ or MERGED. A held session leaves the loop early in two recorded ways only: `feat
 budget is spent with every problem closed, or a problem needs the user's call) and `feature release`
 (the user stopped the run, or the review can't run).
 
-One file per Claude session, under the user's state dir, listing the branches it holds and the
-checkout each was held from. Keyed by session rather than by branch, so parallel sessions on other
+One file per Claude session, under the user's state dir, listing the branches it holds, each with
+its repo's main checkout (a branch name alone could be in two repos; the main checkout outlives
+the feature's worktree). Keyed by session rather than by branch, so parallel sessions on other
 features in the same repo never inherit each other's holds; kept outside the repo, so the Stop hook
 finds it from whatever directory the session ends in, with one file check when nothing is held.
 `bin/feature-stop-hook` reads the same directory before it starts Python.
@@ -58,14 +59,26 @@ def _write(session: str, holds: list[dict]) -> None:
     tmp.replace(path)
 
 
+def _same(h: dict, branch: str, checkout: str) -> bool:
+    # A branch name alone isn't a feature: two repos can each have a `fix-tests`.
+    return h["branch"] == branch and h["checkout"] == checkout
+
+
 def hold(session: str, *, branch: str, checkout: str) -> None:
-    """Hold `branch` for `session`; holding it again moves it to the checkout named now."""
-    _write(session, [*(h for h in held(session) if h["branch"] != branch), {"branch": branch, "checkout": checkout}])
+    """Hold `branch` of the repo whose main checkout is `checkout`, for `session`."""
+    _write(
+        session,
+        [*(h for h in held(session) if not _same(h, branch, checkout)), {"branch": branch, "checkout": checkout}],
+    )
 
 
-def release(session: str, branch: str) -> bool:
-    """Drop `session`'s hold on `branch`. Returns whether there was one."""
-    holds = held(session)
-    kept = [h for h in holds if h["branch"] != branch]
+def holds(session: str, *, branch: str, checkout: str) -> bool:
+    return any(_same(h, branch, checkout) for h in held(session))
+
+
+def release(session: str, *, branch: str, checkout: str) -> bool:
+    """Drop `session`'s hold on `branch` of `checkout`'s repo. Returns whether there was one."""
+    before = held(session)
+    kept = [h for h in before if not _same(h, branch, checkout)]
     _write(session, kept)
-    return len(kept) != len(holds)
+    return len(kept) != len(before)

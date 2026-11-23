@@ -43,7 +43,7 @@ def main() -> None:
     for held in holds:
         branch, checkout = held["branch"], held["checkout"]
         if not Path(checkout).is_dir():
-            hold.release(session, branch)
+            hold.release(session, branch=branch, checkout=checkout)
             gone.append(f"ship: stopped holding `{branch}`: its checkout {checkout} is gone.")
             continue
         os.chdir(checkout)
@@ -54,11 +54,11 @@ def main() -> None:
             github.use_owner_account()
             issue, state, blocking, decision = feature.gate_for(branch)
         except Exception as exc:  # one hold that can't be judged must not keep the others from being checked
-            hold.release(session, branch)
+            hold.release(session, branch=branch, checkout=checkout)
             gone.append(f"ship: stopped holding `{branch}`: its gate can't be judged: {exc}")
             continue
         if decision.settled:
-            hold.release(session, branch)
+            hold.release(session, branch=branch, checkout=checkout)
             continue
         blocks.append(_why(branch, worktree_for_branch(branch), issue, state, blocking, decision))
     out: dict = {}

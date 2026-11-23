@@ -654,7 +654,7 @@ def cmd_escalate(args: argparse.Namespace) -> None:
         f"Next: {decision.next_step}",
     )
     if (session := hold.current_session()) is not None:
-        hold.release(session, branch)
+        hold.release(session, branch=branch, checkout=main_checkout_root())
     print(f"Escalated #{issue} for a human decision; status is now needs-decision.")
 
 
@@ -667,7 +667,7 @@ def cmd_release(args: argparse.Namespace) -> None:
     """
     branch = args.branch or current_branch()
     session = hold.current_session()
-    if session is None or not any(h["branch"] == branch for h in hold.held(session)):
+    if session is None or not hold.holds(session, branch=branch, checkout=main_checkout_root()):
         sys.exit(f"Nothing to release: this session doesn't hold '{branch}'.")
     issue, _, blocking, decision = feature.gate_for(branch)
     github.comment(
@@ -676,7 +676,7 @@ def cmd_release(args: argparse.Namespace) -> None:
         f"Gate: {decision}\n\n"
         f"Open problems, every one blocking: {len(blocking)} — {feature.blocking_refs(blocking)}",
     )
-    hold.release(session, branch)
+    hold.release(session, branch=branch, checkout=main_checkout_root())
     print(f"Released '{branch}': this session may end its turn. The gate is still {decision.verdict}.")
 
 
