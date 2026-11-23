@@ -12,8 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import github, hold, problems
-from .__main__ import gate_for
+from . import feature, github, hold, problems
 from .gitwiring import worktree_for_branch
 
 
@@ -52,7 +51,7 @@ def main() -> None:
             # Holds may be in repos of different accounts; each picks its own (`use_owner_account`).
             os.environ.pop("GH_TOKEN", None)
         github.use_owner_account()
-        issue, state, blocking, decision = gate_for(branch)
+        issue, state, blocking, decision = feature.gate_for(branch)
         if decision.settled:
             hold.release(session, branch)
             continue

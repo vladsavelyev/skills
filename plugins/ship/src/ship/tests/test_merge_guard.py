@@ -6,6 +6,7 @@ import json
 import pytest
 
 from ship import github, merge_guard
+from ship.errors import Refusal
 from ship.gate import GateDecision, Verdict
 from ship.merge_guard import MergeCall, merge_calls
 
@@ -58,7 +59,7 @@ def _stub_pr(monkeypatch, *, verdict: Verdict, body: str = "> **Tracking issue:*
         "sub_issues",
         lambda n: [{"number": 5400, "title": "stale cache", "state": "OPEN", "labels": ["sev:med"]}],
     )
-    monkeypatch.setattr(merge_guard, "decide", lambda branch, state, subs, merged, head: decision)
+    monkeypatch.setattr(merge_guard.feature, "decide", lambda branch, state, subs, merged, head: decision)
     monkeypatch.setattr(github, "comment", lambda n, text: posted.append((n, text)))
     return posted
 
@@ -117,3 +118,16 @@ def test_an_error_checking_a_merge_denies_it(monkeypatch, capsys):
 def test_other_commands_pass_without_a_word(monkeypatch, capsys):
     monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("checked a non-merge"))
     assert _run_hook(monkeypatch, capsys, "git merge origin/main") == ""
+
+
+def test_a_refusal_from_the_account_check_denies_the_merge(monkeypatch, capsys):
+    """#136: `personal_account` used to end the process with SystemExit, which `except Exception`
+    let through, so the hook exited quietly and the merge ran unchecked."""
+
+    def two_personal_accounts():
+        raise Refusal("Found 2 personal accounts")
+
+    monkeypatch.setattr(merge_guard.os, "chdir", lambda path: None)
+    monkeypatch.setattr(github, "use_owner_account", two_personal_accounts)
+    out = json.loads(_run_hook(monkeypatch, capsys, "gh pr merge 5355 --admin"))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "Found 2 personal accounts" in out["permissionDecisionReason"]

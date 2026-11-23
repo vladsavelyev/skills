@@ -9,6 +9,7 @@ import os
 import re
 
 from . import prbody
+from .errors import Refusal
 from .shell import run
 
 LABELS = [
@@ -85,7 +86,7 @@ def personal_account(accounts: list[dict]) -> str:
     resolve, so it aborts instead of guessing which account a push should go out as."""
     others = [a["login"] for a in accounts if not a["active"] and a["state"] == "success"]
     if len(others) != 1:
-        raise SystemExit(
+        raise Refusal(
             f"This repo isn't owned by the active gh account or one of its orgs, so it needs the personal "
             f"account: the one other logged-in gh account. Found {len(others)}: {others}. "
             f"Fix it with `gh auth login`/`gh auth logout`, or export GH_TOKEN for this run."

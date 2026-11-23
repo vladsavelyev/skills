@@ -22,8 +22,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import github, prbody, problems
-from .__main__ import blocking_refs, decide
+from . import feature, github, prbody, problems
 from .gitwiring import fetch_pr_head, has_object
 from .state import parse_block
 
@@ -124,7 +123,7 @@ def check(call: MergeCall) -> str | None:
         fetch_pr_head(pr["number"])
     state = parse_block(github.get_issue_body(issue))
     subs = github.sub_issues(issue)
-    decision = decide(pr["headRefName"], state, subs, False, head=head)
+    decision = feature.decide(pr["headRefName"], state, subs, False, head=head)
     if decision.settled:
         return None
     blocking = problems.blocking(subs)
@@ -134,7 +133,7 @@ def check(call: MergeCall) -> str | None:
         issue,
         f"⚠️ **Merging PR #{pr['number']} past the gate**, at the user's request: {call.override}\n\n"
         f"Gate: {decision}\n\n"
-        f"Open problems, every one blocking: {len(blocking)} — {blocking_refs(blocking)}",
+        f"Open problems, every one blocking: {len(blocking)} — {feature.blocking_refs(blocking)}",
     )
     return None
 

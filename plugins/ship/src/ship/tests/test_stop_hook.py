@@ -16,7 +16,7 @@ def _run(monkeypatch, capsys, tmp_path, verdict: Verdict, *, checkout: str | Non
     blocking = [{"number": 5400, "title": "stale cache", "state": "OPEN", "labels": ["sev:med"]}]
     monkeypatch.setattr(stop_hook.os, "chdir", lambda path: None)
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
-    monkeypatch.setattr(stop_hook, "gate_for", lambda branch: (39, {"pr": 5355}, blocking, decision))
+    monkeypatch.setattr(stop_hook.feature, "gate_for", lambda branch: (39, {"pr": 5355}, blocking, decision))
     monkeypatch.setattr(stop_hook, "worktree_for_branch", lambda branch: "/repo/.claude/worktrees/fix-it")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s1", "stop_hook_active": False})))
     stop_hook.main()
@@ -49,7 +49,9 @@ def test_a_hold_whose_checkout_is_gone_is_dropped_out_loud(monkeypatch, capsys, 
 
 def test_a_session_holding_nothing_stops(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    monkeypatch.setattr(stop_hook, "gate_for", lambda branch: (_ for _ in ()).throw(AssertionError("judged a gate")))
+    monkeypatch.setattr(
+        stop_hook.feature, "gate_for", lambda branch: (_ for _ in ()).throw(AssertionError("judged a gate"))
+    )
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s2"})))
     stop_hook.main()
     assert capsys.readouterr().out == ""

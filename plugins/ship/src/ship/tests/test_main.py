@@ -3,7 +3,7 @@
 import pytest
 
 from ship import __main__ as cli
-from ship import github, hold, problems
+from ship import feature, github, hold, problems
 from ship.shell import CommandFailed
 from ship.state import SCHEMA, new_state, render_block
 
@@ -102,7 +102,7 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
         return 7
 
     monkeypatch.setattr(cli, "_open_feature_issue", open_issue)
-    monkeypatch.setattr(cli, "_load_state", lambda name: (7, new_state(branch=name, base="x", updated="t"), ""))
+    monkeypatch.setattr(feature, "load_state", lambda name: (7, new_state(branch=name, base="x", updated="t"), ""))
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
     monkeypatch.setattr(github, "open_pr_for_branch", lambda name: pr)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
@@ -149,7 +149,7 @@ def test_merge_refuses_while_any_problem_is_open(monkeypatch):
             _problem(8, "sev:low", state="CLOSED", extra=(problems.WONTFIX,)),
         ]
     )
-    monkeypatch.setattr(cli, "gate_for", lambda branch: (7, state, blocking, _decision(cli.gate.Verdict.MERGED)))
+    monkeypatch.setattr(feature, "gate_for", lambda branch: (7, state, blocking, _decision(cli.gate.Verdict.MERGED)))
     with pytest.raises(SystemExit) as exc:
         cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
     refusal = str(exc.value)
@@ -164,7 +164,7 @@ def _decision(verdict, reasons: list[str] | None = None) -> "cli.gate.GateDecisi
 
 def _stub_close_out(monkeypatch, decision, blocking: list[dict]) -> list[str]:
     notes: list[str] = []
-    monkeypatch.setattr(cli, "gate_for", lambda branch: (7, _merged_state(), blocking, decision))
+    monkeypatch.setattr(feature, "gate_for", lambda branch: (7, _merged_state(), blocking, decision))
     monkeypatch.setattr(github, "pr_state", lambda number: "OPEN")
     monkeypatch.setattr(github, "get_issue", lambda number: {"state": "OPEN"})
     monkeypatch.setattr(cli, "_record_outcome", lambda issue, state, note, **kw: notes.append(note))
@@ -224,29 +224,29 @@ def _stub_gate_inputs(
     state = _merged_state()
     state["last_review"] = {"run": 1, "sha": reviewed, "new_blocking": 0, "new_low": 0, "regressions": 0, "summary": ""}
     state["review_history"] = [state["last_review"]]
-    monkeypatch.setattr(cli, "_load_state", lambda branch: (7, state, ""))
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, ""))
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [])
-    monkeypatch.setattr(cli, "_resolve_budget", lambda state: (2, False, []))
+    monkeypatch.setattr(feature, "resolve_budget", lambda state: (2, False, []))
     monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
     monkeypatch.setattr(github, "pr_head_sha", lambda number: pr_head)
-    monkeypatch.setattr(cli, "branch_head_sha", lambda branch: branch_tip)
+    monkeypatch.setattr(feature, "branch_head_sha", lambda branch: branch_tip)
 
 
 def test_a_merged_pr_is_judged_by_what_merged_not_by_a_stale_local_branch(monkeypatch):
     """The fix was pushed from another checkout and reviewed; this checkout's branch still sits behind."""
     _stub_gate_inputs(monkeypatch, pr_state="MERGED", reviewed="fff666", branch_tip="aaa111", pr_head="fff666aaaa")
-    _, _, _, decision = cli.gate_for("add-oauth")
+    _, _, _, decision = feature.gate_for("add-oauth")
     assert decision.verdict is cli.gate.Verdict.MERGED
     assert decision.reasons == []
 
 
 def test_an_open_pr_is_still_judged_by_the_branch_tip(monkeypatch):
     _stub_gate_inputs(monkeypatch, pr_state="OPEN", reviewed="fff666", branch_tip="aaa111", pr_head="fff666aaaa")
-    monkeypatch.setattr(cli, "has_object", lambda sha: True)
-    monkeypatch.setattr(cli, "commits_since", lambda since, head: [("aaa111", ["fff666"])])
-    monkeypatch.setattr(cli, "changed_paths", lambda old, new: ["src/app.py"])
-    monkeypatch.setattr(cli, "sensitive_patterns", lambda: [])
-    _, _, _, decision = cli.gate_for("add-oauth")
+    monkeypatch.setattr(feature, "has_object", lambda sha: True)
+    monkeypatch.setattr(feature, "commits_since", lambda since, head: [("aaa111", ["fff666"])])
+    monkeypatch.setattr(feature, "changed_paths", lambda old, new: ["src/app.py"])
+    monkeypatch.setattr(feature, "sensitive_patterns", lambda: [])
+    _, _, _, decision = feature.gate_for("add-oauth")
     assert decision.verdict is cli.gate.Verdict.REVIEW_AGAIN
 
 
@@ -261,7 +261,7 @@ def test_a_low_problem_left_open_keeps_the_gate_shut(monkeypatch):
         pr_head="fff666",
         subs=[_problem(4623, "sev:low"), _problem(4624, "sev:low", state="CLOSED", extra=(problems.WONTFIX,))],
     )
-    _, _, blocking, decision = cli.gate_for("add-oauth")
+    _, _, blocking, decision = feature.gate_for("add-oauth")
     assert decision.verdict is not cli.gate.Verdict.OPEN
     assert [s["number"] for s in blocking] == [4623]
     assert "1 problem(s) open, every one blocking" in decision.reasons
@@ -296,7 +296,7 @@ def test_wontfix_refuses_a_closed_problem(monkeypatch):
 
 
 def _stub_pr(monkeypatch, pr_state: str) -> None:
-    monkeypatch.setattr(cli, "_load_state", lambda branch: (7, _merged_state(), ""))
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
     monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
 
 
@@ -350,7 +350,7 @@ def test_escalate_offers_what_the_gate_says_next(monkeypatch):
     decision = cli.gate.GateDecision(
         verdict=cli.gate.Verdict.NEEDS_DECISION, reasons=[], next_step=cli.gate._NEXT_DECISION, rounds_used=2, budget=2
     )
-    monkeypatch.setattr(cli, "gate_for", lambda branch: (7, _merged_state(), [], decision))
+    monkeypatch.setattr(feature, "gate_for", lambda branch: (7, _merged_state(), [], decision))
     monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
     monkeypatch.setattr(github, "comment", lambda number, body: posted.append(body))
@@ -361,7 +361,7 @@ def test_escalate_offers_what_the_gate_says_next(monkeypatch):
 def _stub_escalate(monkeypatch, tmp_path, verdict, blocking: list[dict]) -> list[tuple[int, str]]:
     posted: list[tuple[int, str]] = []
     decision = cli.gate.GateDecision(verdict=verdict, reasons=[], next_step="next", rounds_used=2, budget=2)
-    monkeypatch.setattr(cli, "gate_for", lambda branch: (7, _merged_state(), blocking, decision))
+    monkeypatch.setattr(feature, "gate_for", lambda branch: (7, _merged_state(), blocking, decision))
     monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
     monkeypatch.setattr(
         cli, "_save_state", lambda issue, body, state: posted.append((issue, f"saved {state['status']}"))
@@ -437,7 +437,7 @@ def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
     state = _merged_state()
     monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:low"))
     monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
-    monkeypatch.setattr(cli, "_load_state", lambda branch: (7, state, "body"))
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, "body"))
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, s: did.append(f"save {s['fixes']}"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(f"close {note}"))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=["abc12", "def34"]))
@@ -448,7 +448,7 @@ def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
 def test_resolve_without_a_commit_records_no_fix(monkeypatch):
     did: list[str] = []
     monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:low"))
-    monkeypatch.setattr(cli, "_load_state", lambda branch: pytest.fail("touched the state"))
+    monkeypatch.setattr(feature, "load_state", lambda branch: pytest.fail("touched the state"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(note))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=[]))
     assert did == ["Resolved."]
