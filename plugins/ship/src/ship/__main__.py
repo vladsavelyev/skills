@@ -35,6 +35,7 @@ from .gitwiring import (
 from .state import (
     SCHEMA,
     TERMINAL_STATUS,
+    found_before,
     migrate,
     new_state,
     parse_block_raw,
@@ -42,6 +43,7 @@ from .state import (
     replace_block,
     record_fix,
     record_review,
+    set_budget,
     set_status,
 )
 
@@ -324,6 +326,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
             f"Refusing to record a review for #{issue}: --regressions {args.regressions} is more than "
             f"the {new_serious} high/med problem(s) in --found, and a regression is one of those."
         )
+    earlier = found_before(state["review_history"])
     entry = record_review(
         state,
         sha=args.sha,
@@ -334,6 +337,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     )
     run_num = entry["run"]
     entry["found"] = found
+    entry["repeats"] = problems.recurring(found, earlier=earlier, body=github.get_issue_body)
     entry["depth"] = args.depth
     entry["grade"] = {
         "risk": args.risk,
@@ -369,8 +373,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     print(f"  → {decision.next_step}")
     if held:
         print(
-            "  This session is held: it can't end its turn until the gate is OPEN. Fix every open problem; "
-            "`feature escalate` only for what the user must decide, `feature release` only if they stop the run."
+            f"  This session is held: it can't end its turn until the gate settles. {hold.work(decision, worktree_for_branch(branch))}"
         )
 
 
@@ -380,6 +383,21 @@ def _add_problem(parent: int, title: str, sev: str, detail: str) -> int:
     child = github.create_issue(title, detail, labels=["problem", SEV_LABELS[sev]])
     github.link_sub_issue(parent, child)
     return child
+
+
+def _require_fixed(branch: str, number: int) -> None:
+    """Abort unless `number` is a problem of this feature that was fixed, so a new one can repeat it."""
+    sub = _require_problem(branch, number)
+    if sub["state"] == "OPEN":
+        sys.exit(
+            f"#{number} is still open, so nothing came back after a fix. If the finding means the same "
+            f"as #{number}, skip it; if it's only the same kind, file it without --repeats."
+        )
+    if problems.is_wontfix(sub):
+        sys.exit(
+            f"#{number} was closed as wontfix, not fixed. If the finding answers its reason, `feature "
+            f"problem block {number} --reason '…'` instead; otherwise file it without --repeats."
+        )
 
 
 def cmd_problem_add(args: argparse.Namespace) -> None:
@@ -392,6 +410,9 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
         detail = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     else:
         detail = args.body or f"Found during review of feature #{parent}."
+    if args.repeats is not None:
+        _require_fixed(branch, args.repeats)
+        detail = problems.with_repeat(detail, args.repeats)
     child = _add_problem(parent, args.title, args.sev, detail)
     print(f"Added problem #{child} ({args.sev}) under feature #{parent}")
 
@@ -616,11 +637,11 @@ def cmd_budget(args: argparse.Namespace) -> None:
                 f"A budget of {args.set} is at or below the {used} round(s) already spent, which pins "
                 f"the gate at NEEDS_DECISION. Pass {used + 1} or more to buy another round."
             )
-        state["review_budget"] = args.set
+        set_budget(state, args.set)
         _save_state(issue, body, state)
         github.comment(issue, f"🎚 Review budget set to {args.set} round(s).")
     elif args.auto:
-        state["review_budget"] = None
+        set_budget(state, None)
         _save_state(issue, body, state)
         github.comment(issue, "🎚 Review budget back to auto-sizing from the PR diff.")
 
@@ -1071,6 +1092,12 @@ def build_parser() -> argparse.ArgumentParser:
     body_src.add_argument("--body", help="Problem detail as an inline string")
     body_src.add_argument(
         "--body-file", help="Read problem detail from a file, or '-' for stdin (for multi-line detail)"
+    )
+    pa.add_argument(
+        "--repeats",
+        type=int,
+        metavar="PROBLEM",
+        help="A fixed problem this one repeats: a root-cause fix of it would have prevented this one too",
     )
     pa.add_argument("--branch")
     pa.set_defaults(func=cmd_problem_add)

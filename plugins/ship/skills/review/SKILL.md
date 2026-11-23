@@ -52,7 +52,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
 | Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] [--review-only] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
-| Problems | `feature problem list [--open]`, `add`, `block <#> --reason "…"` |
+| Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
 | Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
 
@@ -181,6 +181,10 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - Same as a CLOSED fixed problem → regression. `feature problem block <#> --reason
      "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, count it in `--regressions`).
      Never `gh issue reopen`.
+   - A new bug, but the same mistake as a CLOSED fixed problem in a new place: a fix at the root of
+     that problem's cause would have prevented this one too → file it with `--repeats <#>`. It tells
+     the gate the fix patched an instance, not the cause. A shared category isn't enough: two
+     unrelated missing null checks don't repeat each other.
    - Same as a WONTFIX problem (closed as not relevant; older ones are labelled `rejected`) → skip,
      unless the new repro answers the reason. Then `block` it. A problem disputed twice goes to the
      human: escalate with both sides.
@@ -194,7 +198,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      any other problem. Their evidence is a citation, not a trace: drop a spec gap whose quoted
      intent doesn't say what Sol claims, a rule breach the cited rule doesn't cover, and a smell
      outside the PR's own code. Title them `Spec: …` or `Design: …`.
-7. **File new ones**: `feature problem add --title "…" --sev … --body-file - <<'EOF' … EOF`, with
+7. **File new ones**: `feature problem add --title "…" --sev … [--repeats <#>] --body-file - <<'EOF' … EOF`, with
    the repro, its evidence (traced or ran, with the script if ran; for a spec gap, the quoted
    intent; for a design finding, the rule or smell and the code), `file:line` and the suggested
    root-cause fix.
@@ -232,7 +236,7 @@ End with only this, filled in:
 Feature: <name>  Branch: <branch>  PR: <url or none>  Worktree: <abs path>
 Did: <one line>
 Review: Sol <model> at <depth>; graded risk <…> (<door> door, blast radius <…>), complexity <…>; next round at <depth>   (or not run: <why>, with Sol's error verbatim if it failed)
-Gate: <verdict from `feature review record` or `feature gate`, or not run>
+Gate: <the gate line from `feature review record` or `feature gate`, its reasons included, or not run>
 Open: #<n> [sev] <title> — <file:line>, fix: <root-cause fix>   (every open problem, low included, one per line; or none)
 Pre-existing: [sev] <title> — <file:line>, <failure scenario>, fix: <root-cause fix>   (bugs this PR didn't cause, one per line; or none)
 Blocked: <only when the round couldn't run: no PR, the PR's base isn't the tracked parent, Sol unavailable or failed; what it needs>

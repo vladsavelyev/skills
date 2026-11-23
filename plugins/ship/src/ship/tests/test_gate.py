@@ -3,22 +3,27 @@
 import pytest
 
 from ship.gate import (
+    _NEXT_DECISION,
+    _NEXT_REDESIGN,
     EXIT_CODES,
     GateDecision,
     Verdict,
-    churn_reason,
     covers_head,
     escalation_refusal,
     evaluate,
     needs_review,
+    recurrence_reason,
+    rising_reason,
     rounds_since_invalidation,
 )
 
 HEAD = "head99"
 
 
-def run(n: int, *, blocking: int = 0, low: int = 0, regressions: int = 0, sha: str = HEAD) -> dict:
-    return {
+def run(
+    n: int, *, blocking: int = 0, low: int = 0, regressions: int = 0, repeats: dict | None = None, sha: str = HEAD
+) -> dict:
+    entry = {
         "run": n,
         "sha": sha,
         "new_blocking": blocking,
@@ -26,16 +31,21 @@ def run(n: int, *, blocking: int = 0, low: int = 0, regressions: int = 0, sha: s
         "regressions": regressions,
         "summary": f"run {n}",
     }
+    # Rounds recorded before `repeats` existed have no such key, as most of these do.
+    if repeats is not None:
+        entry["repeats"] = repeats
+    return entry
 
 
-def gate(*, blocking_open, last_review, history, budget=3, unreviewed=(), pinned=False, merged=False):
+def gate(*, blocking_open, last_review, history, budget=3, unreviewed=(), answered=None, merged=False):
+    """`answered` is the run a `feature budget --set` came after (None: the budget is auto-sized)."""
     return evaluate(
         blocking_open=blocking_open,
         last_review=last_review,
         history=history,
         budget=budget,
         unreviewed=list(unreviewed),
-        budget_is_explicit=pinned,
+        budget_answers=answered,
         pr_merged=merged,
     )
 
@@ -115,6 +125,7 @@ def test_needs_decision_when_budget_spent():
     d = gate(blocking_open=1, last_review=history[-1], history=history, budget=2)
     assert d.verdict is Verdict.NEEDS_DECISION
     assert any("budget spent (2/2)" in r for r in d.reasons)
+    assert d.next_step == _NEXT_DECISION
 
 
 def test_needs_decision_on_churn_before_budget_is_spent():
@@ -123,6 +134,8 @@ def test_needs_decision_on_churn_before_budget_is_spent():
     d = gate(blocking_open=3, last_review=history[-1], history=history, budget=4)
     assert d.verdict is Verdict.NEEDS_DECISION
     assert any("rising" in r for r in d.reasons)
+    # More findings may only mean a bigger PR than one round covers, so the choice stays open.
+    assert d.next_step == _NEXT_DECISION
 
 
 def test_buying_a_round_overrides_the_churn_escalation():
@@ -134,34 +147,122 @@ def test_buying_a_round_overrides_the_churn_escalation():
     history = [run(1, blocking=2), run(2, blocking=3)]
     stuck = gate(blocking_open=3, last_review=history[-1], history=history, budget=4)
     assert stuck.verdict is Verdict.NEEDS_DECISION
-    bought = gate(blocking_open=3, last_review=history[-1], history=history, budget=4, pinned=True)
+    bought = gate(blocking_open=3, last_review=history[-1], history=history, budget=4, answered=2)
     assert bought.verdict is Verdict.REVIEW_AGAIN
 
 
 def test_a_pinned_budget_that_is_spent_still_needs_a_decision():
     history = [run(1, blocking=2), run(2, blocking=3)]
-    d = gate(blocking_open=3, last_review=history[-1], history=history, budget=2, pinned=True)
+    d = gate(blocking_open=3, last_review=history[-1], history=history, budget=2, answered=2)
     assert d.verdict is Verdict.NEEDS_DECISION
 
 
-def test_regression_is_immediate_churn():
+def test_a_regression_is_a_fix_that_didnt_hold_so_it_asks_for_a_redesign():
+    """The same bug back after its fix is the narrowest case of a kind of bug coming back."""
     history = [run(1, blocking=2), run(2, blocking=1, regressions=1)]
     d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4)
     assert d.verdict is Verdict.NEEDS_DECISION
-    assert any("re-opened 1 previously-closed" in r for r in d.reasons)
+    assert any("re-opened 1 fixed high/med problem(s)" in r for r in d.reasons)
+    assert d.next_step == _NEXT_REDESIGN
+
+
+def test_a_new_bug_of_a_kind_already_fixed_asks_for_a_redesign_not_another_round():
+    """The fix patched one instance; the design still produces the kind, so the next round finds the next."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4)
+    assert d.verdict is Verdict.NEEDS_DECISION
+    assert any("#12 like #10" in r and "redesign" in r for r in d.reasons)
+    assert d.next_step == _NEXT_REDESIGN
+
+
+def test_the_redesign_step_points_to_an_arena_and_leaves_the_call_to_a_human():
+    assert "competing designs" in _NEXT_REDESIGN and "critiqued blind" in _NEXT_REDESIGN
+    assert "human decides" in _NEXT_REDESIGN and "feature escalate" in _NEXT_REDESIGN
+    # Patching the open problems before the human picks is the work a redesign would throw away.
+    assert "Don't fix the open problems yet" in _NEXT_REDESIGN
+
+
+def test_a_round_whose_finds_repeat_nothing_is_not_a_recurrence():
+    assert recurrence_reason([run(1, blocking=2), run(2, blocking=2, repeats={})]) is None
+    # Rounds recorded before `repeats` existed have no links, so nothing recurs in them.
+    assert recurrence_reason([run(1, blocking=2), run(2, blocking=2)]) is None
+
+
+def test_only_the_last_round_decides_a_recurrence():
+    """A human who saw an earlier recurrence and bought rounds answered it; a later clean round stands."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={})]
+    assert recurrence_reason(history) is None
+
+
+def test_a_recurrence_outranks_a_spent_budget():
+    """navari #5176 round 5: the budget said "spent", and the agent recommended one more round."""
+    history = [run(1, blocking=2), run(2, blocking=2, repeats={"14": 10})]
+    d = gate(blocking_open=2, last_review=history[-1], history=history, budget=2)
+    assert d.next_step == _NEXT_REDESIGN
+    assert not any("budget spent" in r for r in d.reasons)
+
+
+def test_buying_a_round_after_a_recurrence_reviews_again():
+    """The human chose: the redesign (or the patches) gets its review round."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    d = gate(blocking_open=0, last_review=history[-1], history=history, budget=3, unreviewed=["redesign"], answered=2)
+    assert d.verdict is Verdict.REVIEW_AGAIN
+
+
+def test_a_round_after_the_bought_one_is_judged_on_its_own():
+    """The human answered round 2's recurrence; round 3's repeat is new evidence they haven't seen."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"20": 12})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=5, answered=2)
+    assert d.next_step == _NEXT_REDESIGN
+    assert any("#20 like #12" in r for r in d.reasons)
+
+
+def test_a_budget_pinned_before_any_round_answers_no_recurrence():
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4, answered=0)
+    assert d.next_step == _NEXT_REDESIGN
+
+
+def test_a_recurrence_with_nothing_outstanding_still_opens_the_gate():
+    """The recurring finds were closed as not relevant: nothing is left to redesign."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    assert gate(blocking_open=0, last_review=history[-1], history=history).verdict is Verdict.OPEN
+
+
+# navari #5176 ("checked or not"), rounds 1 and 2 as recorded, with the links the dedup step would have
+# made: round 2's four high/med finds each say "checked, nothing found" of data the run didn't check,
+# which is what round 1's three said too; #5218 is a low design finding and repeats nothing.
+NAVARI_5176 = [
+    {**run(1, blocking=3, sha="26a92daa2"), "found": {"high": [5201], "med": [5202, 5203]}},
+    {
+        **run(2, blocking=4, low=1, sha="cc507393", repeats={"5214": 5201, "5215": 5201, "5216": 5202, "5217": 5203}),
+        "found": {"high": [5214], "med": [5215, 5216, 5217], "low": [5218]},
+    },
+]
+
+
+def test_navari_5176_asks_for_a_redesign_at_round_2():
+    """Every one of its five rounds found the same kind of bug somewhere new, and each time the gate's
+    next step was to fix them all and buy another round. Round 2 is when the kind first came back."""
+    d = gate(blocking_open=5, last_review=NAVARI_5176[-1], history=NAVARI_5176, budget=3)
+    assert d.verdict is Verdict.NEEDS_DECISION
+    assert d.next_step == _NEXT_REDESIGN
+    assert any("#5214 like #5201, #5215 like #5201, #5216 like #5202, #5217 like #5203" in r for r in d.reasons)
+    # Rising too (3 then 4), but the recurrence is the specific diagnosis, so it's the one named.
+    assert not any("rising" in r for r in d.reasons)
 
 
 def test_one_flat_round_is_not_churn():
     """1-then-1 is the commonest shape of a converging review; firing on it wasted the budget."""
     history = [run(1, blocking=1), run(2, blocking=1)]
-    assert churn_reason(history) is None
+    assert rising_reason(history) is None
     d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4)
     assert d.verdict is Verdict.REVIEW_AGAIN
 
 
 def test_a_clean_round_followed_by_a_dirty_one_is_not_churn():
     history = [run(1, blocking=0), run(2, blocking=1)]
-    assert churn_reason(history) is None
+    assert rising_reason(history) is None
 
 
 def test_exit_codes_never_collide_with_command_failure_codes():
@@ -176,7 +277,7 @@ def test_a_placeholder_round_spends_budget_but_not_the_trend():
     """Migrated features carry counted-but-detail-free rounds; the trend must ignore them."""
     placeholder = {"run": 1, "placeholder": True, "summary": "(pre-upgrade)"}
     history = [placeholder, run(2, blocking=3)]
-    assert churn_reason(history) is None
+    assert rising_reason(history) is None
     d = gate(blocking_open=3, last_review=history[-1], history=history, budget=2)
     # Two rounds are spent (the placeholder counts), so the budget check — not churn — escalates.
     assert d.rounds_used == 2
@@ -215,7 +316,7 @@ def test_rounds_reset_after_a_base_change():
 
 def test_churn_trend_ignores_rounds_before_a_base_change():
     history = [run(1, blocking=2), run(2, blocking=3), {"event": "base-advanced", "sha": "abc"}, run(3, blocking=3)]
-    assert churn_reason(rounds_since_invalidation(history)) is None
+    assert rising_reason(rounds_since_invalidation(history)) is None
 
 
 def test_both_reasons_reported_together():
@@ -284,3 +385,13 @@ def test_escalation_with_budget_left_is_only_for_a_problem_that_needs_the_user()
 def test_there_is_nothing_to_escalate_once_the_gate_is_open_or_the_pr_merged():
     assert "OPEN" in _refusal(Verdict.OPEN, [], [])
     assert "ship:close" in _refusal(Verdict.MERGED, [], [])
+
+
+def test_a_redesign_is_the_users_call_so_it_escalates_with_its_problems_still_open():
+    """Fixing them first is the work a redesign throws away; any other escalation still waits for fixes."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history)
+    assert escalation_refusal(d, open_problems=[12], named=[]) is None
+    rising = [run(1, blocking=1), run(2, blocking=2)]
+    d = gate(blocking_open=2, last_review=rising[-1], history=rising)
+    assert "still open" in escalation_refusal(d, open_problems=[12, 13], named=[])

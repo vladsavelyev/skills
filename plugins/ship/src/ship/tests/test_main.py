@@ -358,9 +358,11 @@ def test_escalate_offers_what_the_gate_says_next(monkeypatch):
     assert "not fixes" in posted[0] and "ship the rest as debt" not in posted[0]
 
 
-def _stub_escalate(monkeypatch, tmp_path, verdict, blocking: list[dict]) -> list[tuple[int, str]]:
+def _stub_escalate(
+    monkeypatch, tmp_path, verdict, blocking: list[dict], decision: "cli.gate.GateDecision | None" = None
+) -> list[tuple[int, str]]:
     posted: list[tuple[int, str]] = []
-    decision = cli.gate.GateDecision(verdict=verdict, reasons=[], next_step="next", rounds_used=2, budget=2)
+    decision = decision or cli.gate.GateDecision(verdict=verdict, reasons=[], next_step="next", rounds_used=2, budget=2)
     monkeypatch.setattr(feature, "gate_for", lambda branch: (7, _merged_state(), blocking, decision))
     monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
     monkeypatch.setattr(
@@ -461,19 +463,20 @@ _RECORD = (
 ).split()
 
 
-def _stub_review_record(monkeypatch) -> list[str]:
+def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict] | None = None) -> list[str]:
     did: list[str] = []
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
-    state = _merged_state()
+    state = state or _merged_state()
     monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, ""))
     monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
     monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
-    monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(8, "sev:med")])
+    monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [_problem(8, "sev:med")])
     monkeypatch.setattr(cli, "_write_block", lambda state, issue: did.append("block"))
     decision = cli.gate.GateDecision(cli.gate.Verdict.REVIEW_AGAIN, ["open"], "fix", 1, 2)
     monkeypatch.setattr(feature, "decide", lambda *a, **k: decision)
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
     monkeypatch.setattr(cli, "_hold", lambda branch: did.append("hold") or True)
+    monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment"))
     monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: did.append("save"))
@@ -493,3 +496,147 @@ def test_a_review_the_user_asked_for_alone_holds_nobody_to_fixing(monkeypatch):
     did = _stub_review_record(monkeypatch)
     cli.main([*_RECORD, "--review-only"])
     assert "hold" not in did and "save" in did
+
+
+def _add_args(repeats: int | None = None):
+    return cli.argparse.Namespace(
+        branch="add-oauth",
+        title="Says checked of what it didn't read",
+        sev="high",
+        body="repro",
+        body_file=None,
+        repeats=repeats,
+    )
+
+
+def _stub_problem_add(monkeypatch, repeated: dict | None) -> list[str]:
+    filed: list[str] = []
+    monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
+    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: repeated)
+    monkeypatch.setattr(feature, "load_state", lambda branch: pytest.fail("touched the state"))
+
+    def add(parent, title, sev, detail):
+        filed.append(detail)
+        return 12
+
+    monkeypatch.setattr(cli, "_add_problem", add)
+    return filed
+
+
+def test_problem_add_links_a_repeat_of_a_fixed_problem_in_the_issue_alone(monkeypatch):
+    """#152: a second write to the state could fail after the issue was filed, losing the link."""
+    filed = _stub_problem_add(monkeypatch, _problem(10, "sev:high", state="CLOSED"))
+    cli.cmd_problem_add(_add_args(repeats=10))
+    assert filed == [problems.with_repeat("repro", 10)]
+
+
+def test_problem_add_without_repeats_files_the_body_as_given(monkeypatch):
+    filed = _stub_problem_add(monkeypatch, None)
+    cli.cmd_problem_add(_add_args())
+    assert filed == ["repro"]
+
+
+@pytest.mark.parametrize(
+    ("repeated", "refusal"),
+    [
+        (_problem(10, "sev:high"), "#10 is still open"),
+        (_problem(10, "sev:high", state="CLOSED", extra=(problems.WONTFIX,)), "#10 was closed as wontfix"),
+        (_problem(10, "sev:high", state="CLOSED", extra=(problems.LEGACY_WONTFIX,)), "#10 was closed as wontfix"),
+    ],
+)
+def test_problem_add_refuses_to_repeat_a_problem_that_was_never_fixed(monkeypatch, repeated, refusal):
+    """Only a fix that didn't hold says the design keeps producing the bug. A finding like an open
+    problem is more of the same before any fix; one like a wontfix answers a reason or isn't a bug."""
+    filed = _stub_problem_add(monkeypatch, repeated)
+    with pytest.raises(SystemExit, match=refusal):
+        cli.cmd_problem_add(_add_args(repeats=10))
+    assert filed == []
+
+
+def test_review_record_keeps_the_rounds_high_and_med_finds_filed_as_repeating_a_fixed_problem(monkeypatch):
+    state = _merged_state()
+    # #50 repeats a fixed problem too, but an earlier round found it: it's back as a regression.
+    state["review_history"] = [{"run": 1, "sha": "a1", "found": {"med": [50]}}]
+    state["review_runs"] = 1
+    subs = [_problem(40, "sev:low"), _problem(41, "sev:high"), _problem(42, "sev:med"), _problem(50, "sev:med")]
+    _stub_review_record(monkeypatch, state, subs)
+    bodies = {7: "", 41: problems.with_repeat("repro", 31), 42: "repro"}
+    monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
+    found = _RECORD.index("8")
+    cli.main([*_RECORD[:found], "40", "41", "42", "50", *_RECORD[found + 1 :], "--regressions", "1"])
+    assert state["review_history"][-1]["repeats"] == {"41": 31}
+
+
+def test_escalating_a_recurring_bug_recommends_a_redesign_with_its_problems_still_open(monkeypatch, tmp_path):
+    """navari #5176: each escalation recommended fixing them all and one more round, five rounds
+    running. Patching first is the work a redesign throws away, so the problems wait for the call."""
+    history = [
+        {"run": 1, "sha": "a1", "new_blocking": 1, "new_low": 0, "regressions": 0, "summary": "", "repeats": {}},
+        {
+            "run": 2,
+            "sha": "b2",
+            "new_blocking": 1,
+            "new_low": 0,
+            "regressions": 0,
+            "summary": "",
+            "repeats": {"12": 10},
+        },
+    ]
+    decision = cli.gate.evaluate(blocking_open=1, last_review=history[-1], history=history, budget=3, unreviewed=[])
+    posted = _stub_escalate(monkeypatch, tmp_path, decision.verdict, [_problem(12, "sev:high")], decision=decision)
+    cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="Both say checked of unread data.", problem=[]))
+    comment = posted[-1][1]
+    assert "#12 like #10" in comment
+    assert "redesign over another round" in comment and "critiqued blind" in comment
+    assert hold.held("s1") == []
+
+
+def _round(run: int, repeats: dict) -> dict:
+    return {
+        "run": run,
+        "sha": f"sha{run}",
+        "new_blocking": 1,
+        "new_low": 0,
+        "regressions": 0,
+        "summary": "",
+        "repeats": repeats,
+    }
+
+
+def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypatch):
+    """#151: `budget --set` used to switch the redesign signal off for every later round."""
+    state = _merged_state()
+    state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
+    state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
+    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
+    monkeypatch.setattr(github, "comment", lambda issue, text: None)
+    cli.main(["budget", "--branch", "add-oauth", "--set", "4"])
+    subs = [_problem(12, "sev:high")]
+
+    def decide():
+        return feature.decide("add-oauth", state, subs, False, head=state["last_review"]["sha"])
+
+    assert decide().verdict is cli.gate.Verdict.REVIEW_AGAIN
+    state["review_history"].append(_round(3, {"20": 12}))
+    state["review_runs"], state["last_review"] = 3, state["review_history"][-1]
+    assert decide().redesign
+
+    monkeypatch.setattr(feature, "resolve_budget", lambda state: (3, False, []))
+    cli.main(["budget", "--branch", "add-oauth", "--auto"])
+    assert state["review_budget_run"] is None
+
+
+def test_review_record_tells_a_held_session_the_same_as_the_stop_hook(monkeypatch, capsys):
+    """#153: after the gate said not to fix the problems before the user's call on a redesign, the
+    held line said "Fix every open problem"."""
+    _stub_review_record(monkeypatch)
+    redesign = cli.gate.GateDecision(
+        cli.gate.Verdict.NEEDS_DECISION, ["back"], cli.gate._NEXT_REDESIGN, 2, 4, redesign=True
+    )
+    monkeypatch.setattr(feature, "decide", lambda *a, **k: redesign)
+    monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: "/wt")
+    cli.main(_RECORD)
+    out = capsys.readouterr().out
+    assert hold.work(redesign, "/wt") in out
+    assert "Fix every open problem" not in out and "Fixing is part of the run" not in out

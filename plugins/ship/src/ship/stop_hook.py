@@ -23,13 +23,7 @@ def _why(branch: str, worktree: str | None, issue: int, state: dict, blocking: l
         f"{decision}. The ship run isn't over, so don't end the turn here.\n"
         f"Open problems, every one blocking:\n{listed}\n"
         f"Next: {decision.next_step}\n"
-        f"Fixing is part of the run: fix each problem at its root cause in {worktree or 'the feature worktree'}, "
-        f"commit and push, `feature problem resolve <#> --commit <sha>` (or `feature problem wontfix <#> "
-        f"--reason '<why>'` if it isn't relevant), and while the gate says REVIEW_AGAIN, review again with "
-        f"`Skill(ship:ship)`.\n"
-        f"Only two ways out short of OPEN, both on the record: `feature escalate --reason '<…>' [--problem <#> …]` "
-        f"when the user must decide (the budget is spent with every problem closed, or a problem needs their "
-        f"call), and `feature release --reason '<…>'` when the user stopped the run or the review can't run."
+        f"{hold.work(decision, worktree)}"
     )
 
 

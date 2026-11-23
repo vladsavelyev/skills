@@ -15,7 +15,8 @@ The run ends only at one of these **end states**, and the report names which:
 
 - `OPEN`: every problem closed, and a review covers the code. Safe to merge.
 - `NEEDS_DECISION`: the review budget is spent or the loop churns; every problem is closed and
-  the recommendation escalated.
+  the recommendation escalated. When a kind of bug came back after its fix, the problems stay open
+  instead, for the user's call on a redesign.
 - `YOUR CALL`: a problem only the user can decide, escalated with the question; every other
   problem closed.
 - `MERGED`: the PR is already in; closing it out is `Skill(ship:close)`.
@@ -45,6 +46,8 @@ the active account for a repo owned by it or one of its orgs, else prefix
      holds the branch, `feature release --reason "<Sol's error>"` first.
    - `Gate: MERGED`: end `MERGED`; call `Skill(ship:close)`.
    - `Gate: OPEN`: go to step 4.
+   - `Gate: NEEDS_DECISION` recommending a redesign (a problem re-opened, or new ones like fixed
+     ones): go to step 3 without fixing.
    - `Gate: NEEDS_DECISION` with no round run (the budget was already spent): go on; step 3
      escalates once the fixes are in.
    - Any other gate: go on.
@@ -67,10 +70,17 @@ the active account for a repo owned by it or one of its orgs, else prefix
    - A problem left for the user: `feature escalate --problem <#>… --reason "<question, options,
      recommendation>"`, and end `YOUR CALL`. The CLI refuses while any other problem is open.
    - `REVIEW_AGAIN`: back to step 1, a fresh round over the whole PR.
-   - `NEEDS_DECISION`: `feature escalate --reason "<recommendation>"`: review the fixes in one more
-     round (`feature budget --set <n>`), merge them unreviewed, split the PR, or redesign it. When
-     the gate names churn (fixes reopening old bugs, findings rising), say so: splitting or
-     redesigning may beat another round. End `NEEDS_DECISION`.
+   - `NEEDS_DECISION` recommending a redesign (a kind of bug came back after its fix): the design
+     keeps producing it, so the open problems wait. `feature escalate --reason "<what the recurring
+     bugs have in common>"`, recommending a redesign over another round: a few competing designs,
+     each critiqued blind by a separate agent, then one settled from the critiques. Name the shared
+     cause, not a design of your own, and end `NEEDS_DECISION`. If the user picks the redesign, run
+     that arena with agents, build the design it settles on, close each open problem with its
+     commits, then `feature budget --set <n>` and ship again.
+   - Any other `NEEDS_DECISION`: `feature escalate --reason "<recommendation>"`: review the fixes in
+     one more round (`feature budget --set <n>`), merge them unreviewed, split the PR, or redesign
+     it. When the gate names rising findings, say so: splitting may beat another round. End
+     `NEEDS_DECISION`.
    - `OPEN`: step 4.
 4. **Finish at `OPEN`.** When the change can be run or seen and the description shows no proof it
    was, run it and add its before and after (`feature describe`); the gate doesn't move for a
@@ -105,7 +115,8 @@ Feature: <name>  Branch: <branch>  PR: <url>  Worktree: <abs path>
 Rounds: <n> this run, Sol at <depth per round>; graded risk <…> (<door> door, blast radius <…>), complexity <…>
 Fixed: #<n> [sev] <title> — <sha>   (one per line; or none)
 Won't fix: #<n> [sev] <title> — <reason>   (one per line; or none)
-Open: #<n> [sev] <title> — <the question for the user>   (only at YOUR CALL; else none)
+Open: #<n> [sev] <title> — <at YOUR CALL: the question for the user; at a redesign: repeats #<n>,
+      re-opened after its fix, or waits on the redesign>   (one per line; else none)
 Pre-existing: [sev] <title> — <file:line>, fix: <root-cause fix>   (or none)
 Next: <what the user decides or does: merge, answer the question, pick the escalation's option>
 ```

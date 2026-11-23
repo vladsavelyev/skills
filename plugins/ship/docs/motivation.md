@@ -219,6 +219,21 @@ merge` of a tracked PR is refused while the gate is shut unless the user's reaso
 tracking issue. `feature escalate` refuses while a problem nobody asked the user about is open, so
 escalating isn't a way around fixing.
 
+**15. A bug back after its fix → recommend a redesign, not another round.** On navari #5176 every
+one of five rounds filed new high/med problems, mostly graded right, and nearly all of them were one
+kind of bug in a new place: the page said "Checked by RIO, nothing found" about data the run hadn't
+checked. The PR made a blanket "checked" claim over an open-ended set of data setups, so each round
+looked at more setups and found the next gap. The gate escalated from round 2 on (findings rising,
+then a regression, then a spent budget), but its next step was always to fix every problem first,
+and its options put another round ahead of a redesign. So each escalation recommended fixing them
+all and one more round, and each redesign one agent built in between turned up the next gap.
+What settled it, by hand, was several competing designs, each critiqued blind by a separate agent,
+and one approach settled from the critiques. Now the review files a problem with `--repeats` when
+a root-cause fix of an already-fixed one would have prevented it, and a round with such a
+high/med find, or a regression, gets a next step that says to stop patching and recommends that
+arena over another round. `feature escalate` takes it with the problems still open, since fixing
+them first is the work a redesign throws away. On #5176 that is round 2, not after round 5.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

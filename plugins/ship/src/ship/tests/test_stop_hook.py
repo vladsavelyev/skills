@@ -8,11 +8,18 @@ from ship.errors import Refusal
 from ship.gate import GateDecision, Verdict
 
 
-def _run(monkeypatch, capsys, tmp_path, verdict: Verdict, *, checkout: str | None = None) -> str:
+def _run(
+    monkeypatch, capsys, tmp_path, verdict: Verdict, *, checkout: str | None = None, redesign: bool = False
+) -> str:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     hold.hold("s1", branch="fix-it", checkout=checkout or str(tmp_path))
     decision = GateDecision(
-        verdict=verdict, reasons=["1 problem(s) open, every one blocking"], next_step="Fix it.", rounds_used=1, budget=2
+        verdict=verdict,
+        reasons=["1 problem(s) open, every one blocking"],
+        next_step="Fix it.",
+        rounds_used=1,
+        budget=2,
+        redesign=redesign,
     )
     blocking = [{"number": 5400, "title": "stale cache", "state": "OPEN", "labels": ["sev:med"]}]
     monkeypatch.setattr(stop_hook.os, "chdir", lambda path: None)
@@ -41,6 +48,15 @@ def test_a_settled_gate_lets_the_session_stop_and_drops_the_hold(monkeypatch, ca
 def test_a_spent_budget_still_holds_until_it_is_escalated(monkeypatch, capsys, tmp_path):
     out = json.loads(_run(monkeypatch, capsys, tmp_path, Verdict.NEEDS_DECISION))
     assert out["decision"] == "block" and "feature escalate" in out["reason"]
+
+
+def test_a_gate_recommending_a_redesign_holds_until_it_is_escalated_without_sending_it_to_fix(
+    monkeypatch, capsys, tmp_path
+):
+    """Fixing the problems first is the work a redesign throws away, and the patching that kept failing."""
+    out = json.loads(_run(monkeypatch, capsys, tmp_path, Verdict.NEEDS_DECISION, redesign=True))
+    assert out["decision"] == "block" and "feature escalate" in out["reason"]
+    assert "Fixing is part of the run" not in out["reason"] and "don't fix the open problems" in out["reason"]
 
 
 def test_a_hold_whose_checkout_is_gone_is_dropped_out_loud(monkeypatch, capsys, tmp_path):

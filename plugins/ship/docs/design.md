@@ -60,6 +60,7 @@ git config (per branch, local wiring):
   "pr": 123,
   "status": "in-review",
   "review_budget": null,
+  "review_budget_run": null,
   "review_runs": 2,
   "review_history": [
     {"run": 1, "sha": "9fe0011", "new_blocking": 2, "new_low": 3, "regressions": 0, "summary": "…"},
@@ -86,13 +87,18 @@ idempotently no matter what humans add around it. Never blind-string-replace.
 
 `review_budget` is `null` for "auto-size from the PR diff at query time" (so a growing branch earns
 its extra round without anyone re-running a command) or an integer a human pinned with
-`feature budget --set`. `review_history` is the append-only audit log the gate reads the
+`feature budget --set`, and `review_budget_run` is the run it was set after. `review_history` is the append-only audit log the gate reads the
 convergence trend from; `feature sync` appends an `{"event": "base-advanced", …}` marker to it
 when its merge resolved code by hand, and everything before the newest marker is excluded from both
 the trend and the budget count. `last_review` is only the *currently valid* clean-pass
 evidence, and is nulled on invalidation, which is why it duplicates the last history entry.
 `fixes` maps each commit `feature problem resolve --commit` recorded (full sha) to the problems it
-fixed; a block from before `fixes` has none.
+fixed; a block from before `fixes` has none. Each round written since `repeats` existed keeps, under
+that key, the high/med finds it filed as the same kind of bug as a fixed problem, each with that
+problem (`{"52": 46}`); a later re-find is a regression, counted apart. The link itself lives only
+in the problem's issue body, the line `feature problem add --repeats` writes (`problems.with_repeat`),
+which `review record` reads back before its one state write: a copy in the state took a second
+write after the issue was filed, and a failed one lost the link for good.
 
 Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
 than read with guessed-at defaults.
@@ -187,7 +193,7 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
 | --- | --- | --- |
 | `OPEN` | 0 | Zero problems open, at any severity, and nothing since the last valid review needs one. |
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code outstanding, review budget remains, and the trend is converging. |
-| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human, but the open problems still get closed: the budget limits reviews, not fixes. |
+| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human. When a kind of bug came back after its fix, the gate recommends a redesign and the open problems wait for the human's call; otherwise they still get closed, since the budget limits reviews, not fixes. |
 | `MERGED` | 30 | The PR has merged. Checked first, so it outranks the other three; its reasons still name what was outstanding when it went in. |
 
 The codes skip 1 and 2 deliberately: those already mean "the command failed" (`sys.exit(message)`
@@ -199,7 +205,7 @@ at every severity, `low` included. It leaves the gate one of two ways: fixed (`f
 resolve`, with the commit) or not relevant (`feature problem wontfix`: a false positive, by design,
 or outside this PR's scope), which labels it `wontfix`, posts the reason and closes it as not
 planned. There is no third way: no "open but non-blocking" state, and no follow-up kept open for
-later. Severity still matters (it orders the work, and the high/med counts drive the churn signal),
+later. Severity still matters (it orders the work, and the high/med finds drive the churn signals),
 but it doesn't decide what blocks.
 
 This replaced a design where only high/med problems blocked, and `sev:low` problems, `deferred`
@@ -241,9 +247,11 @@ sensitive). Its own change is its diff from its parent, or for a merge of the ba
 `git merge-tree` makes of its parents: only what was resolved by hand. The base includes a
 squash-merged former parent's PR head, whose commits that PR reviewed. Why: motivation.md #12.
 
-An explicitly pinned budget (`feature budget --set`) also outranks the churn signal while rounds
-remain, because churn exists to escalate *early* — a human who has seen that escalation and chosen to
-spend another round has already answered it.
+A budget pinned after a round (`feature budget --set`) outranks that round's churn signals, because
+churn exists to escalate *early* — a human who has seen that escalation and chosen to spend another
+round has already answered it. A round recorded after it is new evidence and is judged on its own:
+when the override held for every round until the budget ran out, a bug that came back in the
+bought round never recommended the redesign.
 
 **Why a budget.** A review round is the most expensive thing this workflow does (a full independent
 sweep by a subagent). `budget.py` sizes it from the diff: base 2 rounds, +1 for a large diff
@@ -253,11 +261,29 @@ sweep by a subagent). `budget.py` sizes it from the diff: base 2 rounds, +1 for 
 can infer.
 
 **Why churn detection.** Waiting for the budget to run out wastes rounds on a loop that is clearly
-stuck, so the gate escalates early on either of two signals: the last round re-opened
-previously-closed problems (the fixes are reintroducing known bugs — a design problem, not a
-review-more problem), or high/med findings are rising round over round. Both read high/med counts
-only: low problems block like any other, but a rising count of nits is not evidence the design is
-wrong.
+stuck, so the gate escalates early on either of two signals. Both read high/med finds only: low
+problems block like any other, but a nit back again, or a rising count of them, is not evidence the
+design is wrong.
+
+- **A kind of bug came back after its fix** (`gate.recurrence_reason`): the last round re-opened a
+  fixed problem (a regression), or filed a new one as repeating a fixed one (`problem add
+  --repeats`: a fix at the root of that one's cause would have prevented it too). The fix patched an
+  instance and the design still produces the bug, so another round of fixes and review only finds
+  the next one. The next step says to stop patching and recommends a redesign over another round:
+  a few competing designs, each critiqued blind by a separate agent, then one settled from the
+  critiques. The human still decides. This outranks a spent budget, being the one signal that says
+  what to do instead of another round. Why: motivation.md #15.
+- **High/med findings are rising** round over round (`gate.rising_reason`). More findings can also
+  mean a PR too big for one round to cover, so the next step leaves the choice open.
+
+The link between problems comes from the review fork's dedup, not from Sol. Sol finds blind, so it
+can't name a tracked problem, and a class name it made up would be worded differently every round,
+the way titles were when dedup tried to match them by fingerprint. The fork already reads each
+finding against the closed problems by meaning to catch regressions; whether a root-cause fix of
+one would have prevented the other is the same question one step up, and its answer is a pointer
+anyone can check. `problem add --repeats` refuses a problem that was never fixed: a finding like an
+open one is more of the same before any fix, and one like a `wontfix` either answers its reason
+(`problem block`) or isn't a bug.
 
 When `feature sync`'s merge resolved code by hand, it clears `last_review` and appends an
 invalidation marker to `review_history`: the gate reopens, and the round count resets to the runs
@@ -356,14 +382,14 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
 | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text> [--review-only]` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Unless `--review-only` (the user asked for the review alone), holds the Claude session running it until the gate settles. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
-| `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. |
+| `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->] [--repeats <number>]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. `--repeats` names a fixed problem this one is the same kind of bug as: its body says so, and a round that finds it (high/med) tells the gate to recommend a redesign. Refuses a problem that is open or `wontfix`. |
 | `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses until then: that would be shipping debt. Old `follow-up` labels count as `handed-off`, and old `rejected` ones as `wontfix`. |
 | `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. Refuses an open problem, which already blocks. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
-| `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), while the gate is `REVIEW_AGAIN` and no problem is named, and at `OPEN` or `MERGED`. |
+| `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), unless the gate recommends a redesign; while the gate is `REVIEW_AGAIN` and no problem is named; and at `OPEN` or `MERGED`. |
 | `feature release --reason <text> [--branch <b>]` | Let this session end its turn with the gate still shut: posts the reason and the gate on the tracking issue, then drops the hold. For a user who stopped the run, or a review that can't run. Refuses a branch the session doesn't hold. |
 | `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`wontfix` is newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
 | `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION`, 30 = `MERGED` (1 and 2 stay "the command itself failed"). |
@@ -385,6 +411,7 @@ Skill(ship:ship), in the caller's session
   └── REVIEW_AGAIN
       OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; the human merges
       NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
+      NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
       a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
       MERGED ─▶ Skill(ship:close)
 ```
@@ -415,7 +442,8 @@ the plugin holds the session instead (`hold.py`):
 - The two ways out short of `OPEN` both write to the tracking issue and drop the hold.
   `feature escalate` refuses while an open problem isn't named with `--problem` (asked of the user)
   and, with budget left, unless one is: escalating is for what a human must decide, never a way
-  around a fix. `feature release` takes any reason, on the record.
+  around a fix. A gate recommending a redesign is the exception: that call covers every open
+  problem, and fixing them first is the work a redesign throws away. `feature release` takes any reason, on the record.
 
 A gate the hook can't judge (a `gh` outage) blocks the stop once, with the error, and keeps the
 hold; the next stop in a row (`stop_hook_active`) goes through with the error shown, since a session
@@ -472,6 +500,8 @@ Skill(ship:ship) ─▶ Skill(ship:review) ─▶ forked subagent, fresh context
        └─ duplicate of a tracked problem? (judged by MEANING)
               ├─ matches an OPEN issue      ─▶ skip (already tracked)
               ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
+              ├─ new, but a root-cause fix of a CLOSED fixed one would have prevented it
+              │                             ─▶ `feature problem add --repeats <that one>`
               ├─ matches a WONTFIX one      ─▶ skip, unless the repro answers its reason
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
                                                     (spec gaps and design smells: always low)
@@ -479,7 +509,8 @@ Skill(ship:ship) ─▶ Skill(ship:review) ─▶ forked subagent, fresh context
                              --regressions <high/med reopened> --depth --risk --door --blast-radius --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
    7. report ─▶ the ship run: the verdict and every open problem, which it fixes before the next round
-      (a merged PR stops at step 1: the ship run hands it to Skill(ship:close))
+      (when the gate recommends a redesign, it escalates without fixing; a merged PR stops at step 1:
+      the ship run hands it to Skill(ship:close))
 ```
 
 **Why scope the review through the PR.** The finder is handed the **PR number**, not a diff
@@ -576,8 +607,8 @@ regressions, and counts them by their severity labels: the high/med ones are the
 already written into feature issues), the low ones its `new_low` count. A clean pass is a bare
 `--found`, which (with zero open sub-issues) opens the gate. Every find blocks until it is closed;
 the round's line in the PR body lists them by severity. `--regressions` counts re-opened high/med
-problems only, and feeds the churn signal: a re-opened low-severity nit is not evidence the design
-is wrong.
+problems only, and the round keeps its high/med finds filed with `--repeats` as `repeats`; both feed
+the recurrence signal, where a low-severity nit back again is not evidence the design is wrong.
 
 **Closing a problem without a fix is auditable.** An agent could open the gate by closing every
 problem as `wontfix`, so the defense is a record: `wontfix` demands a reason posted on the issue,

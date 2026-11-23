@@ -1,6 +1,16 @@
 """Tests for problem classification — what does and doesn't hold the merge gate."""
 
-from ship.problems import HANDED_OFF, blocking, handed_off, is_blocking, severity, undecided
+from ship.problems import (
+    HANDED_OFF,
+    blocking,
+    handed_off,
+    is_blocking,
+    recurring,
+    repeated,
+    severity,
+    undecided,
+    with_repeat,
+)
 
 
 def sub(number: int, *, sev: str = "sev:high", state: str = "OPEN", extra: list[str] | None = None) -> dict:
@@ -57,3 +67,28 @@ def test_an_old_follow_up_counts_as_handed_off_but_an_old_deferral_does_not():
     """`follow-up` was the old CLI's close-out decision on a merged PR; `deferred` was pre-merge debt."""
     subs = [sub(1, sev="sev:low", extra=["follow-up"]), sub(2, sev="sev:low", extra=["deferred"])]
     assert [s["number"] for s in undecided(subs)] == [2]
+
+
+def test_recurring_keeps_a_rounds_high_and_med_finds_filed_as_repeating_a_fixed_problem():
+    """A low find repeating a fixed one is a nit back again, not evidence the design is wrong."""
+    found = {"med": [42, 41], "low": [40], "?": [43]}
+    # #40's body is never read: a low find can't recur.
+    bodies = {41: with_repeat("repro", 31), 42: "repro", 43: with_repeat("repro", 33)}
+    assert recurring(found, earlier=set(), body=bodies.__getitem__) == {"41": 31, "43": 33}
+    assert recurring({}, earlier=set(), body=bodies.__getitem__) == {}
+
+
+def test_a_repeat_counts_in_the_round_that_filed_it_and_a_re_find_is_a_regression():
+    """navari #5176: #5279 was filed in round 3 as like #5216, then rediscovered in round 4, where it
+    counts as a regression, not as a new problem of a kind already fixed."""
+    bodies = {5301: with_repeat("repro", 5216)}
+    assert recurring({"med": [5279, 5301]}, earlier={5279}, body=bodies.__getitem__) == {"5301": 5216}
+
+
+def test_the_issue_body_carries_the_link():
+    """#152: kept in the state too, a failed second write lost it for good. The issue is its one home."""
+    assert repeated(with_repeat("repro", 10)) == 10
+    assert with_repeat("repro", 10) == "repro\n\nRepeats #10: the same kind of bug, back after its fix."
+    # Prose that mentions a repeat is not the link the CLI wrote.
+    assert repeated("Repeats #10 maybe, but I'm not sure") is None
+    assert repeated("repro") is None

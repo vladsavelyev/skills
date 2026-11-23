@@ -99,6 +99,9 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         # None = auto-size the review budget from the PR diff at query time, so it tracks the
         # diff as it grows instead of freezing a guess made when the branch was empty.
         "review_budget": None,
+        # The run `review_budget` was set after: the override answers that round's escalation, not
+        # a later round's (`gate.evaluate`).
+        "review_budget_run": None,
         "review_runs": 0,
         # Every review run ever, plus `{"event": ...}` markers when a base sync invalidates the
         # runs before it. The gate reads the trend from here; `last_review` is only the currently
@@ -110,6 +113,19 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         "fixes": {},
         "updated": updated,
     }
+
+
+def budget_run(state: dict) -> int | None:
+    """The run the explicit review budget was set after (`feature budget --set`). A block without the
+    key answers none, so the gate judges every round on its own: kept ON PURPOSE, as blocks from
+    before `review_budget_run` are in the feature issues of PRs in flight."""
+    return state.get("review_budget_run")
+
+
+def set_budget(state: dict, rounds: int | None) -> None:
+    """Pin the review budget at `rounds`, answering the last recorded run, or (None) auto-size it."""
+    state["review_budget"] = rounds
+    state["review_budget_run"] = None if rounds is None else state["review_runs"]
 
 
 def fixes(state: dict) -> dict[str, list[int]]:
@@ -124,6 +140,13 @@ def record_fix(state: dict, problem: int, commits: list[str]) -> None:
     for sha in commits:
         if problem not in recorded.setdefault(sha, []):
             recorded[sha].append(problem)
+
+
+def found_before(history: list[dict]) -> set[int]:
+    """Every problem a recorded round found (its `found`). Rounds from before `found` existed, and
+    placeholders and markers, name none: kept ON PURPOSE, as they are in the feature issues of PRs
+    in flight."""
+    return {n for entry in history for nums in entry.get("found", {}).values() for n in nums}
 
 
 def review_entry(*, run: int, sha: str, new_blocking: int, new_low: int, regressions: int, summary: str) -> dict:
@@ -171,7 +194,7 @@ def record_review(state: dict, *, sha: str, new_blocking: int, new_low: int, reg
 
 
 # A round that happened before the schema-2 upgrade: it spends budget (schema 1 counted it) but
-# carries no counts, so `gate.churn_reason` skips any trend that runs through one.
+# carries no counts, so `gate.rising_reason` skips any trend that runs through one.
 def _placeholder_rounds(count: int) -> list[dict]:
     return [
         {
