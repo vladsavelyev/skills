@@ -45,6 +45,8 @@ the active account for a repo owned by it or one of its orgs, else prefix
      holds the branch, `feature release --reason "<Sol's error>"` first.
    - `Gate: MERGED`: end `MERGED`; call `Skill(ship:close)`.
    - `Gate: OPEN`: go to step 4.
+   - `Gate: NEEDS_DECISION` with no round run (the budget was already spent): go on; step 3
+     escalates once the fixes are in.
    - Any other gate: go on.
 2. **Fix.** `EnterWorktree` with `path: <worktree>` from the report (never `name:`), unless you're
    in it: editing from the main checkout edits the base branch. Then take every open problem

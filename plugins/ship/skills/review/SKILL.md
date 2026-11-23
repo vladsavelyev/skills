@@ -70,7 +70,8 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
    - The PR's base isn't the tracked parent: don't review. Report the mismatch.
    - Unpushed commits in the worktree: push them first. The review reads the PR, not the disk.
    - Then `feature gate`. `OPEN`: don't review; report it, unless your arguments ask for a fresh
-     review.
+     review. `NEEDS_DECISION`: don't review either; the budget is spent or the loop churns, and only
+     the user buys another round (`feature budget --set`, which reopens the gate). Report it.
 2. **Describe the PR.** A branch from `feature start` got its title and description before any
    code existed. When they no longer fit what the branch does (always on its first ship), rewrite
    them. It runs in this order, with no headers:
