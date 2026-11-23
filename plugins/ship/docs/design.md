@@ -403,12 +403,14 @@ the plugin holds the session instead (`hold.py`):
 - `feature review record`, `feature problem resolve` and `feature problem wontfix` hold the branch
   for the Claude session that ran them (`CLAUDE_CODE_SESSION_ID`, which Claude Code gives every
   Bash command of a session, its subagents and forked skills included). The hold is a file per
-  session under `$XDG_STATE_HOME/ship/holds/`, naming the branch and the main checkout, so it
-  survives the worktree's removal and parallel sessions never share one.
+  session under `$XDG_STATE_HOME/ship/holds/`, naming each branch with its repo's main checkout:
+  it survives the worktree's removal, the same branch name in two repos is two holds, and parallel
+  sessions never share one.
 - The Stop hook (`stop_hook.py`) runs whenever the agent is about to end its turn. For each branch
   the session holds it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
   the stop, and Claude Code hands the agent the reason: the gate, the open problems, and the ways
-  on. Its shell wrapper looks for any hold before starting Python, so a session holding nothing
+  on. A hold whose gate can't be judged (its branch no longer tracked) is dropped with a message
+  to the user, and the others are still judged. Its shell wrapper looks for any hold before starting Python, so a session holding nothing
   pays one `ls`.
 - The two ways out short of `OPEN` both write to the tracking issue and drop the hold.
   `feature escalate` refuses while an open problem isn't named with `--problem` (asked of the user)
@@ -422,17 +424,23 @@ reminder, and the merge guard below still holds the line.
 
 The gate decides whether the PR may merge, but nothing between the gate and the merge looked at
 it: on navari #5355 the agent admin-merged at the user's word with a filed problem open. A
-PreToolUse hook on Bash (`merge_guard.py`) now parses every command that mentions a merge (its
-wrapper skips the rest without Python), finds each `gh pr merge`, with the `cd`s before it, the
-PR it names (number, URL, branch, or the current branch's) and its `--repo`. A PR whose ship block
-names a tracking issue (`prbody.tracking_issue`, read from the PR, so it works without this clone's
-wiring) is judged at its head, the commit the merge would land, and refused unless the gate is
-`OPEN`, with the open problems listed.
+PreToolUse hook on Bash (`merge_guard.py`) now reads every command that mentions a merge (its
+wrapper skips the rest without Python). `shellscan.py` finds the simple commands the line runs:
+past wrappers (`command`, `env`, `sudo`), reserved words (`if … then`, `{ … }`), inside `$(…)`,
+backticks and expanding heredocs, with heredoc data skipped and quoted text left as arguments. For
+each `gh pr merge` the guard takes the `cd`s before it, the PR it names (number, URL, branch, or
+the current branch's) and its `--repo`. A PR whose body names a tracking issue in any format ship
+has written (`prbody.tracking_issue`; an unmarked `Part of #N` only if that issue is labelled
+`feature`), read from the PR so it works without this clone's wiring, is judged at its head, the
+commit the merge would land, and refused unless the gate is `OPEN`, with the open problems listed.
+A command it can't read (an unclosed quote) that mentions `gh … pr merge` is refused too.
 
 The user decides to merge past the gate, not the agent: told what's open, a user who still wants it
 merged gets `SHIP_PAST_GATE="<their reason>" gh pr merge …`, and the hook posts that reason and the
 gate on the tracking issue before letting it through. It fails closed: an error while checking a
-merge denies the merge with the error. It sees only `gh pr merge`; a merge in GitHub's UI is the
+merge denies the merge with the error. The gate query the hooks and the CLI share lives in
+`feature.py` and raises `Refusal` (`errors.py`) for an expected condition rather than exiting the
+process, so no failure leaves the guard by a path its error handling doesn't see. It sees only `gh pr merge`; a merge in GitHub's UI is the
 human's own.
 
 ## The review round
