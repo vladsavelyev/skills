@@ -453,3 +453,50 @@ def test_resolve_without_a_commit_records_no_fix(monkeypatch):
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(note))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=[]))
     assert did == ["Resolved."]
+
+
+def test_review_record_takes_the_hold_before_its_one_state_write(monkeypatch):
+    """#140: the hold came after the write, so a failed hold left the round recorded and a retry
+    spent another one."""
+    did: list[str] = []
+    state = _merged_state()
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, ""))
+    monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
+    monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
+    monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(8, "sev:med")])
+    monkeypatch.setattr(cli, "_write_block", lambda state, issue: did.append("block"))
+    decision = cli.gate.GateDecision(cli.gate.Verdict.REVIEW_AGAIN, ["open"], "fix", 1, 2)
+    monkeypatch.setattr(feature, "decide", lambda *a, **k: decision)
+    monkeypatch.setattr(feature, "pr_merged", lambda state: False)
+    monkeypatch.setattr(cli, "_hold", lambda branch: did.append("hold") or True)
+    monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment"))
+    monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
+    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: did.append("save"))
+    args = cli.build_parser().parse_args(
+        [
+            "review",
+            "record",
+            "--sha",
+            "abc",
+            "--found",
+            "8",
+            "--summary",
+            "s",
+            "--depth",
+            "low",
+            "--risk",
+            "low",
+            "--door",
+            "two-way",
+            "--blast-radius",
+            "b",
+            "--complexity",
+            "low",
+            "--why",
+            "w",
+            "--branch",
+            "add-oauth",
+        ]
+    )
+    args.func(args)
+    assert did.index("hold") < did.index("save")

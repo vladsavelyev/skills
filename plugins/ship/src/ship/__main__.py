@@ -351,6 +351,8 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     blocking = problems.blocking(subs)
     _write_block(state, issue)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
+    # The hold is a fallible write too (a file), and taking it twice is harmless, so it goes before.
+    held = not decision.settled and _hold(branch)
     github.comment(
         issue,
         f"🔍 Review run {run_num} ({args.sha}): {new_serious} new high/med, {new_low} new low, "
@@ -364,7 +366,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     print(f"Recorded review run {run_num} for #{issue}")
     print(f"GATE {decision}")
     print(f"  → {decision.next_step}")
-    if not decision.settled and _hold(branch):
+    if held:
         print(
             "  This session is held: it can't end its turn until the gate is OPEN. Fix every open problem; "
             "`feature escalate` only for what the user must decide, `feature release` only if they stop the run."
