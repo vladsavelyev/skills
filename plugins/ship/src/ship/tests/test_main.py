@@ -638,5 +638,5 @@ def test_review_record_tells_a_held_session_the_same_as_the_stop_hook(monkeypatc
     monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: "/wt")
     cli.main(_RECORD)
     out = capsys.readouterr().out
-    assert hold.work(redesign, "/wt") in out
+    assert hold.work() in out and cli.gate._NEXT_REDESIGN in out
     assert "Fix every open problem" not in out and "Fixing is part of the run" not in out

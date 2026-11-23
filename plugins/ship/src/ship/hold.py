@@ -84,25 +84,14 @@ def release(session: str, *, branch: str, checkout: str) -> bool:
     return len(kept) != len(before)
 
 
-def work(decision, worktree: str | None) -> str:
-    """What a held session does until the gate `decision` settles, and its two ways out on the record.
-    The Stop hook and `review record` both print this one text: kept apart, they drifted, and a
-    redesign round was told to fix every open problem."""
-    if decision.redesign:
-        # Fixing first is the work a redesign throws away (`gate.escalation_refusal` lets it through).
-        todo = (
-            "The gate recommends a redesign over another round, so don't fix the open problems: the user decides first."
-        )
-    else:
-        todo = (
-            f"Fixing is part of the run: fix each problem at its root cause in {worktree or 'the feature worktree'}, "
-            f"commit and push, `feature problem resolve <#> --commit <sha>` (or `feature problem wontfix <#> "
-            f"--reason '<why>'` if it isn't relevant), and while the gate says REVIEW_AGAIN, review again with "
-            f"`Skill(ship:ship)`."
-        )
+def work() -> str:
+    """What keeps a held session going, for the Stop hook and `review record` alike: the ship run, and
+    its two ways out on the record. The gate's own next step (`GateDecision.next_step`, printed beside
+    it) says what this gate asks for; a second, gate-specific text here drifted from it once (#153:
+    a redesign round was told to fix every open problem), and repeated the skill's loop each time the
+    hook fired."""
     return (
-        f"{todo}\nOnly two ways out short of OPEN, both on the record: `feature escalate --reason '<…>' [--problem "
-        f"<#> …]` when the user must decide (the budget is spent with every problem closed, a problem needs their "
-        f"call, or the gate recommends a redesign), and `feature release --reason '<…>'` when the user stopped "
-        f"the run or the review can't run."
+        "Go on with the ship run (`Skill(ship:ship)`). Short of OPEN, leave only on the record: `feature escalate "
+        "--reason '<…>' [--problem <#> …]` when the user must decide, `feature release --reason '<…>'` when they "
+        "stopped the run or the review can't run."
     )

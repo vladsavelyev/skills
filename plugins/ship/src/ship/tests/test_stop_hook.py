@@ -5,6 +5,7 @@ import json
 
 from ship import github, hold, stop_hook
 from ship.errors import Refusal
+from ship import gate
 from ship.gate import GateDecision, Verdict
 
 
@@ -16,7 +17,7 @@ def _run(
     decision = GateDecision(
         verdict=verdict,
         reasons=["1 problem(s) open, every one blocking"],
-        next_step="Fix it.",
+        next_step=gate._NEXT_REDESIGN if redesign else "Fix it.",
         rounds_used=1,
         budget=2,
         redesign=redesign,
@@ -26,7 +27,6 @@ def _run(
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.setattr(stop_hook.feature, "gate_for", lambda branch: (39, {"pr": 5355}, blocking, decision))
     monkeypatch.setattr(stop_hook, "feature_issue", lambda branch: 39)
-    monkeypatch.setattr(stop_hook, "worktree_for_branch", lambda branch: "/repo/.claude/worktrees/fix-it")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s1", "stop_hook_active": False})))
     stop_hook.main()
     return capsys.readouterr().out
@@ -36,8 +36,14 @@ def test_a_held_session_with_a_problem_open_is_sent_back_to_fix_it(monkeypatch, 
     """navari #5355: the round filed #5400 and the run ended. Now ending the turn there is refused."""
     out = json.loads(_run(monkeypatch, capsys, tmp_path, Verdict.REVIEW_AGAIN))
     assert out["decision"] == "block"
-    assert "#5400 [sev:med] stale cache" in out["reason"] and "feature problem resolve" in out["reason"]
+    assert "#5400 [sev:med] stale cache" in out["reason"] and "Next: Fix it." in out["reason"]
     assert hold.held("s1") != []
+
+
+def test_the_reason_points_back_to_the_ship_run_instead_of_repeating_its_loop(monkeypatch, capsys, tmp_path):
+    """It lands in the agent's context each time it fires; it used to restate the skill's fixing steps."""
+    reason = json.loads(_run(monkeypatch, capsys, tmp_path, Verdict.REVIEW_AGAIN))["reason"]
+    assert "`Skill(ship:ship)`" in reason and "root cause" not in reason
 
 
 def test_a_settled_gate_lets_the_session_stop_and_drops_the_hold(monkeypatch, capsys, tmp_path):
@@ -56,7 +62,7 @@ def test_a_gate_recommending_a_redesign_holds_until_it_is_escalated_without_send
     """Fixing the problems first is the work a redesign throws away, and the patching that kept failing."""
     out = json.loads(_run(monkeypatch, capsys, tmp_path, Verdict.NEEDS_DECISION, redesign=True))
     assert out["decision"] == "block" and "feature escalate" in out["reason"]
-    assert "Fixing is part of the run" not in out["reason"] and "don't fix the open problems" in out["reason"]
+    assert "Don't fix the open problems yet" in out["reason"] and "Skill(ship:fix)" not in out["reason"]
 
 
 def test_a_hold_whose_checkout_is_gone_is_dropped_out_loud(monkeypatch, capsys, tmp_path):
@@ -90,7 +96,6 @@ def _two_holds(monkeypatch, tmp_path, *, feat_error: Exception | None, stop_hook
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.setattr(stop_hook, "feature_issue", lambda branch: None if branch == "untracked" else 39)
     monkeypatch.setattr(stop_hook.feature, "gate_for", gate_for)
-    monkeypatch.setattr(stop_hook, "worktree_for_branch", lambda branch: None)
     payload = {"session_id": "s1", "stop_hook_active": stop_hook_active}
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
 

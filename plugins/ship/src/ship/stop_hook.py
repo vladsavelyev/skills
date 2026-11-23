@@ -13,17 +13,19 @@ import sys
 from pathlib import Path
 
 from . import feature, github, hold, problems
-from .gitwiring import feature_issue, worktree_for_branch
+from .gitwiring import feature_issue
 
 
-def _why(branch: str, worktree: str | None, issue: int, state: dict, blocking: list[dict], decision) -> str:
+def _why(branch: str, issue: int, state: dict, blocking: list[dict], decision) -> str:
+    # Short: it lands in the agent's context each time the hook fires, and the ship skill already
+    # holds the loop. What this gate asks for is `next_step`; the rest is the skill's.
     listed = "\n".join(f"  #{s['number']} [{problems.severity(s)}] {s['title']}" for s in blocking) or "  none"
     return (
         f"ship: this session is shipping `{branch}` (PR #{state['pr']}, feature #{issue}), and its gate is "
-        f"{decision}. The ship run isn't over, so don't end the turn here.\n"
-        f"Open problems, every one blocking:\n{listed}\n"
+        f"{decision}. Don't end the turn here.\n"
+        f"Open problems:\n{listed}\n"
         f"Next: {decision.next_step}\n"
-        f"{hold.work(decision, worktree)}"
+        f"{hold.work()}"
     )
 
 
@@ -59,7 +61,7 @@ def main() -> None:
         if decision.settled:
             hold.release(session, branch=branch, checkout=checkout)
             continue
-        blocks.append(_why(branch, worktree_for_branch(branch), issue, state, blocking, decision))
+        blocks.append(_why(branch, issue, state, blocking, decision))
     # A gate that can't be judged (GitHub down) holds the stop once, so the agent retries; the next
     # stop in a row goes through, with the error shown, so an outage can't trap the session. The
     # hold stays: once the gate can be judged again, it holds as before.
