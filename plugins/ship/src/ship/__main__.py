@@ -12,8 +12,9 @@ import sys
 from pathlib import Path
 from datetime import UTC, datetime
 
-from . import assess, budget, feature, gate, github, hold, problems
+from . import assess, budget, feature, gate, github, hold, problems, tidy
 from .errors import Refusal
+from .shell import run, try_run
 from .gitwiring import (
     commits_since,
     create_branch_and_worktree,
@@ -781,6 +782,37 @@ def cmd_merge(args: argparse.Namespace) -> None:
         print(f"  shipped with: {'; '.join(decision.reasons)}")
 
 
+def cmd_tidy(args: argparse.Namespace) -> None:
+    """Remove a merged feature's checkout and local branch, once they hold nothing the PR doesn't (see tidy.py)."""
+    branch = args.branch or current_branch()
+    _, state, _, decision = feature.gate_for(branch)
+    if decision.verdict is not gate.Verdict.MERGED:
+        sys.exit(f"Refusing to tidy {branch}: its PR hasn't merged, so its checkout is still the work.")
+    main = main_checkout_root()
+    head = github.pr_head_sha(state["pr"])
+    checkout = worktree_for_branch(branch, cwd=main)
+    if checkout == main:
+        sys.exit(
+            f"{branch} is checked out in the main checkout, which stays: check out the base branch there and pull it."
+        )
+    if checkout:
+        found = tidy.check(checkout, main, head, set(args.accept))
+        if not found.clear:
+            sys.exit(f"Keeping {checkout}, which holds what the PR doesn't:\n{found}")
+        run(["git", "worktree", "remove", checkout], cwd=main)
+        print(f"Removed the checkout {checkout}")
+    if try_run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=main) is None:
+        return
+    tip = run(["git", "rev-parse", f"refs/heads/{branch}"], cwd=main)
+    if tip != head:
+        sys.exit(f"Keeping the branch {branch}: it is at {tip[:9]}, not the PR's head {head[:9]}.")
+    if stacked := tidy.stacked_on(branch, main):
+        print(f"Keeping the branch {branch}: {', '.join(stacked)} is stacked on it.")
+        return
+    tidy.delete_branch(branch, main)
+    print(f"Deleted the branch {branch}")
+
+
 def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_closed: bool) -> None:
     """Post the outcome, close the issue, then write the terminal `status` — in that order.
 
@@ -1182,6 +1214,19 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.add_argument("--force", action="store_true", help="Record it even if the PR isn't merged")
     c.set_defaults(func=cmd_merge)
+
+    c = sub.add_parser(
+        "tidy", help="Remove a merged feature's checkout and branch, once they hold nothing the PR doesn't"
+    )
+    c.add_argument("--branch")
+    c.add_argument(
+        "--accept",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="An ignored path tidy can't explain that the user OKs deleting (repeatable)",
+    )
+    c.set_defaults(func=cmd_tidy)
 
     c = sub.add_parser(
         "reconcile",

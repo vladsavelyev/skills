@@ -34,30 +34,27 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
    unreviewed tail, the problems handed off) into the record; pass that on in the report.
 5. **Tidy up.**
    - If the harness is watching the PR (T3's `watch_pull_request`), unwatch it.
-   - The feature's checkout (`git worktree list`) is done with once it holds nothing the PR
-     doesn't. Check all four:
-     - `git -C <checkout> status --porcelain --untracked-files=all` is empty;
-     - its HEAD is the PR's `headRefOid`;
-     - `git -C <checkout> ls-files -v | grep '^[a-zS]'` is empty: files flagged assume-unchanged
-       or skip-worktree hide their local edits from `status`;
-     - `git -C <checkout> status --porcelain --untracked-files=all --ignored` lists nothing but
-       what the checkout can rebuild (`.venv`, `node_modules`, `__pycache__`, tool caches). An
-       ignored `.env`, eval results or logs are the user's, and removing the worktree deletes them
-       without a word.
+   - If your session is in the feature's checkout, leave it (`ExitWorktree`, `action: "keep"`).
+   - `feature tidy --branch <branch>` removes the checkout and the local branch, once they hold
+     nothing the PR doesn't. It removes nothing while the checkout holds any of these, and lists
+     them:
+     - a modified or untracked file;
+     - a HEAD that isn't the PR's head, or a file assume-unchanged or skip-worktree hides from
+       `status`;
+     - an initialized submodule;
+     - an ignored path the main checkout doesn't have and that isn't a rebuildable cache;
+     - a folder you can't empty.
 
-     `--untracked-files=all` overrides a `status.showUntrackedFiles=no` setting, which would hide
-     both kinds. Anything a check turns up stays: name it and ask before removing. So does a
-     worktree with an initialized submodule (`git -C <checkout> submodule status` lists one without
-     a leading `-`): `git worktree remove` refuses those, and forcing it would delete the
-     submodule's own work.
+     Ignored files that running the project makes (`.env`, a local config, logs: the main
+     checkout has them too) and caches (`.venv`, `node_modules`) go without asking. A
+     branch another is stacked on stays; tidy says so.
 
-     Then, if your session is in it, leave it (`ExitWorktree`, `action: "keep"`). A linked
-     worktree goes with `git worktree remove <worktree>`. The main checkout can't be removed:
-     check out the base branch there and pull it. Then delete the branch, unless another branch is
-     stacked on it (`git config --get-regexp '^git-town-branch\..*\.parent$'` names it as a
-     parent; say so if you keep it): `git branch -D <branch>`, then
-     `git config --unset git-town-branch.<branch>.parent`, the git-town pointer `git branch -D`
-     leaves behind.
+     When it refuses, act on what it lists: commit and push work, or ask the user about an
+     ignored path, with your recommendation, and pass each one they OK deleting as
+     `--accept <path>`. A folder you can't empty was made by something running as root, a
+     container usually: fix where it's made so it's made as the user, and never reach for sudo.
+     When the branch is checked out in the main checkout, tidy leaves it there: check out the
+     base branch and pull it.
 6. **Report** in two or three lines: the feature closed, what shipped outstanding, what happened to
    each open problem (handed off to a fix PR, kept as an issue, or wontfix), any fix PR you
    started, and what you removed or left.
