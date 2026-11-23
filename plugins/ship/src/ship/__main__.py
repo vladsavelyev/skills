@@ -373,8 +373,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     print(f"  → {decision.next_step}")
     if held:
         print(
-            "  This session is held: it can't end its turn until the gate is OPEN. Fix every open problem; "
-            "`feature escalate` only for what the user must decide, `feature release` only if they stop the run."
+            f"  This session is held: it can't end its turn until the gate settles. {hold.work(decision, worktree_for_branch(branch))}"
         )
 
 

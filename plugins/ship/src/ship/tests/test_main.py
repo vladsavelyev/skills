@@ -476,6 +476,7 @@ def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict]
     monkeypatch.setattr(feature, "decide", lambda *a, **k: decision)
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
     monkeypatch.setattr(cli, "_hold", lambda branch: did.append("hold") or True)
+    monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment"))
     monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: did.append("save"))
@@ -624,3 +625,18 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (3, False, []))
     cli.main(["budget", "--branch", "add-oauth", "--auto"])
     assert state["review_budget_run"] is None
+
+
+def test_review_record_tells_a_held_session_the_same_as_the_stop_hook(monkeypatch, capsys):
+    """#153: after the gate said not to fix the problems before the user's call on a redesign, the
+    held line said "Fix every open problem"."""
+    _stub_review_record(monkeypatch)
+    redesign = cli.gate.GateDecision(
+        cli.gate.Verdict.NEEDS_DECISION, ["back"], cli.gate._NEXT_REDESIGN, 2, 4, redesign=True
+    )
+    monkeypatch.setattr(feature, "decide", lambda *a, **k: redesign)
+    monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: "/wt")
+    cli.main(_RECORD)
+    out = capsys.readouterr().out
+    assert hold.work(redesign, "/wt") in out
+    assert "Fix every open problem" not in out and "Fixing is part of the run" not in out

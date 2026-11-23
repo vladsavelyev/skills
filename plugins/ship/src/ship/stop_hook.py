@@ -18,29 +18,12 @@ from .gitwiring import feature_issue, worktree_for_branch
 
 def _why(branch: str, worktree: str | None, issue: int, state: dict, blocking: list[dict], decision) -> str:
     listed = "\n".join(f"  #{s['number']} [{problems.severity(s)}] {s['title']}" for s in blocking) or "  none"
-    if decision.redesign:
-        # Fixing first is the work a redesign throws away (`gate.escalation_refusal` lets it through).
-        work = (
-            "The gate recommends a redesign over another round, so don't fix the open problems: the user "
-            "decides first.\n"
-        )
-    else:
-        work = (
-            f"Fixing is part of the run: fix each problem at its root cause in {worktree or 'the feature worktree'}, "
-            f"commit and push, `feature problem resolve <#> --commit <sha>` (or `feature problem wontfix <#> "
-            f"--reason '<why>'` if it isn't relevant), and while the gate says REVIEW_AGAIN, review again with "
-            f"`Skill(ship:ship)`.\n"
-        )
     return (
         f"ship: this session is shipping `{branch}` (PR #{state['pr']}, feature #{issue}), and its gate is "
         f"{decision}. The ship run isn't over, so don't end the turn here.\n"
         f"Open problems, every one blocking:\n{listed}\n"
         f"Next: {decision.next_step}\n"
-        f"{work}"
-        f"Only two ways out short of OPEN, both on the record: `feature escalate --reason '<…>' [--problem <#> …]` "
-        f"when the user must decide (the budget is spent with every problem closed, a problem needs their "
-        f"call, or the gate recommends a redesign), and `feature release --reason '<…>'` when the user stopped "
-        f"the run or the review can't run."
+        f"{hold.work(decision, worktree)}"
     )
 
 
