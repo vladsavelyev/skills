@@ -42,9 +42,7 @@ from .state import (
     render_block,
     replace_block,
     record_fix,
-    record_repeat,
     record_review,
-    repeats,
     set_budget,
     set_status,
 )
@@ -339,7 +337,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     )
     run_num = entry["run"]
     entry["found"] = found
-    entry["repeats"] = problems.recurring(found, repeats(state), earlier=earlier)
+    entry["repeats"] = problems.recurring(found, earlier=earlier, body=github.get_issue_body)
     entry["depth"] = args.depth
     entry["grade"] = {
         "risk": args.risk,
@@ -415,13 +413,8 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
         detail = args.body or f"Found during review of feature #{parent}."
     if args.repeats is not None:
         _require_fixed(branch, args.repeats)
-        # Said in the issue for a human (GitHub cross-links the two); recorded in the state for the gate.
-        detail += f"\n\nRepeats #{args.repeats}: the same kind of bug, back after its fix."
+        detail = problems.with_repeat(detail, args.repeats)
     child = _add_problem(parent, args.title, args.sev, detail)
-    if args.repeats is not None:
-        issue, state, body = feature.load_state(branch)
-        record_repeat(state, child, args.repeats)
-        _save_state(issue, body, state)
     print(f"Added problem #{child} ({args.sev}) under feature #{parent}")
 
 

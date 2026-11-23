@@ -111,8 +111,6 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         "last_review": None,
         # Fix commit (full sha) -> the problems it fixed, from `feature problem resolve --commit`.
         "fixes": {},
-        # Problem -> the fixed problem it repeats, from `feature problem add --repeats`.
-        "repeats": {},
         "updated": updated,
     }
 
@@ -142,18 +140,6 @@ def record_fix(state: dict, problem: int, commits: list[str]) -> None:
     for sha in commits:
         if problem not in recorded.setdefault(sha, []):
             recorded[sha].append(problem)
-
-
-def repeats(state: dict) -> dict[str, int]:
-    """Each problem filed as the same kind of bug as a fixed one, with the problem it repeats (keys
-    are strings, as JSON writes them). A block without the key has none: kept ON PURPOSE, as blocks
-    from before `repeats` are in the feature issues of PRs in flight."""
-    return state.get("repeats", {})
-
-
-def record_repeat(state: dict, problem: int, repeated: int) -> None:
-    """Record that `problem` is the same kind of bug as `repeated`, which was fixed."""
-    state.setdefault("repeats", {})[str(problem)] = repeated
 
 
 def found_before(history: list[dict]) -> set[int]:

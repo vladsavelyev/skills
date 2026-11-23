@@ -76,7 +76,6 @@ git config (per branch, local wiring):
     "summary": "No new blocking issues; one naming nit filed. Token-refresh race from run 1 is fixed."
   },
   "fixes": {"5e1f00d…": [46], "c0ffee1…": [47]},
-  "repeats": {},
   "updated": "2026-07-13T10:22:00Z"
 }
 ```
@@ -94,10 +93,12 @@ when its merge resolved code by hand, and everything before the newest marker is
 the trend and the budget count. `last_review` is only the *currently valid* clean-pass
 evidence, and is nulled on invalidation, which is why it duplicates the last history entry.
 `fixes` maps each commit `feature problem resolve --commit` recorded (full sha) to the problems it
-fixed; a block from before `fixes` has none. `repeats` maps each problem `feature problem add
---repeats` filed as the same kind of bug as a fixed one to that problem (`{"52": 46}`), and each
-round written since keeps, under the same key, the high/med finds it filed that do (a later re-find
-is a regression, counted apart); blocks and rounds from before `repeats` have none.
+fixed; a block from before `fixes` has none. Each round written since `repeats` existed keeps, under
+that key, the high/med finds it filed as the same kind of bug as a fixed problem, each with that
+problem (`{"52": 46}`); a later re-find is a regression, counted apart. The link itself lives only
+in the problem's issue body, the line `feature problem add --repeats` writes (`problems.with_repeat`),
+which `review record` reads back before its one state write: a copy in the state took a second
+write after the issue was filed, and a failed one lost the link for good.
 
 Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
 than read with guessed-at defaults.
@@ -381,7 +382,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
 | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text> [--review-only]` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Unless `--review-only` (the user asked for the review alone), holds the Claude session running it until the gate settles. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
-| `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->] [--repeats <number>]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. `--repeats` names a fixed problem this one is the same kind of bug as: the body says so and `repeats` records it, and a round that finds it (high/med) tells the gate to recommend a redesign. Refuses a problem that is open or `wontfix`. |
+| `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->] [--repeats <number>]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. `--repeats` names a fixed problem this one is the same kind of bug as: its body says so, and a round that finds it (high/med) tells the gate to recommend a redesign. Refuses a problem that is open or `wontfix`. |
 | `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses until then: that would be shipping debt. Old `follow-up` labels count as `handed-off`, and old `rejected` ones as `wontfix`. |

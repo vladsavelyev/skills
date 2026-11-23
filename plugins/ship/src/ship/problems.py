@@ -19,6 +19,9 @@ the merge there is no such option: that would be shipping debt. (A PR closed unm
 its problems, so those close as `wontfix`.)
 """
 
+import re
+from collections.abc import Callable
+
 UNKNOWN_SEV = "sev:?"
 LOW_SEV = "sev:low"
 WONTFIX = "wontfix"
@@ -72,12 +75,30 @@ def low_fix_commits(fixes: dict[str, list[int]], subs: list[dict]) -> set[str]:
     return {sha for sha, fixed in fixes.items() if all(sev[n] == LOW_SEV for n in fixed)}
 
 
-def recurring(found: dict[str, list[int]], repeats: dict[str, int], *, earlier: set[int]) -> dict[str, int]:
-    """A round's high/med finds (`found`, by severity) that repeat a fixed problem (`state.repeats`),
-    each with the problem it repeats, in number order.
+# The link `feature problem add --repeats` writes into a problem's body, for a human (GitHub
+# cross-links the two) and for `recurring`. The issue is its one home: kept in the feature state too,
+# it took a second write after the issue was filed, and a failed one lost it for good.
+_REPEATS = "Repeats #{n}: the same kind of bug, back after its fix."
+_REPEATS_LINE = re.compile(r"^Repeats #(\d+): the same kind of bug, back after its fix\.$", re.MULTILINE)
+
+
+def with_repeat(body: str, repeated: int) -> str:
+    """`body` saying that its problem repeats `repeated`, a fixed one."""
+    return f"{body}\n\n{_REPEATS.format(n=repeated)}"
+
+
+def repeated(body: str) -> int | None:
+    """The fixed problem a problem's `body` says it repeats (`with_repeat`), if any."""
+    match = _REPEATS_LINE.search(body)
+    return int(match[1]) if match else None
+
+
+def recurring(found: dict[str, list[int]], *, earlier: set[int], body: Callable[[int], str]) -> dict[str, int]:
+    """A round's high/med finds (`found`, by severity) filed as repeating a fixed problem, each with
+    the problem it repeats, in number order. `body` reads a problem's issue body.
 
     Only the finds this round filed: one an `earlier` round found is back as a regression, which the
     round counts apart. A low one doesn't count, as in the trend: a nit back again is not evidence
     that the design keeps producing the bug."""
     serious = sorted(n for sev, nums in found.items() if f"sev:{sev}" != LOW_SEV for n in nums if n not in earlier)
-    return {str(n): repeats[str(n)] for n in serious if str(n) in repeats}
+    return {str(n): r for n in serious if (r := repeated(body(n))) is not None}

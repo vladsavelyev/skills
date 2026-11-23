@@ -508,35 +508,31 @@ def _add_args(repeats: int | None = None):
     )
 
 
-def _stub_problem_add(monkeypatch, repeated: dict | None) -> dict:
-    did: dict = {"filed": [], "saved": []}
-    state = _merged_state()
+def _stub_problem_add(monkeypatch, repeated: dict | None) -> list[str]:
+    filed: list[str] = []
     monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
     monkeypatch.setattr(cli, "_require_problem", lambda branch, number: repeated)
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, "body"))
-    monkeypatch.setattr(cli, "_save_state", lambda issue, body, s: did["saved"].append(dict(s["repeats"])))
+    monkeypatch.setattr(feature, "load_state", lambda branch: pytest.fail("touched the state"))
 
     def add(parent, title, sev, detail):
-        did["filed"].append(detail)
+        filed.append(detail)
         return 12
 
     monkeypatch.setattr(cli, "_add_problem", add)
-    return did
+    return filed
 
 
-def test_problem_add_links_a_repeat_of_a_fixed_problem_in_the_issue_and_the_state(monkeypatch):
-    did = _stub_problem_add(monkeypatch, _problem(10, "sev:high", state="CLOSED"))
+def test_problem_add_links_a_repeat_of_a_fixed_problem_in_the_issue_alone(monkeypatch):
+    """#152: a second write to the state could fail after the issue was filed, losing the link."""
+    filed = _stub_problem_add(monkeypatch, _problem(10, "sev:high", state="CLOSED"))
     cli.cmd_problem_add(_add_args(repeats=10))
-    # The issue says so for a human (GitHub cross-links #10), the state for the gate.
-    assert did["filed"] == ["repro\n\nRepeats #10: the same kind of bug, back after its fix."]
-    assert did["saved"] == [{"12": 10}]
+    assert filed == [problems.with_repeat("repro", 10)]
 
 
-def test_problem_add_without_repeats_leaves_the_state_alone(monkeypatch):
-    did = _stub_problem_add(monkeypatch, None)
-    monkeypatch.setattr(feature, "load_state", lambda branch: pytest.fail("touched the state"))
+def test_problem_add_without_repeats_files_the_body_as_given(monkeypatch):
+    filed = _stub_problem_add(monkeypatch, None)
     cli.cmd_problem_add(_add_args())
-    assert did["filed"] == ["repro"]
+    assert filed == ["repro"]
 
 
 @pytest.mark.parametrize(
@@ -550,20 +546,23 @@ def test_problem_add_without_repeats_leaves_the_state_alone(monkeypatch):
 def test_problem_add_refuses_to_repeat_a_problem_that_was_never_fixed(monkeypatch, repeated, refusal):
     """Only a fix that didn't hold says the design keeps producing the bug. A finding like an open
     problem is more of the same before any fix; one like a wontfix answers a reason or isn't a bug."""
-    did = _stub_problem_add(monkeypatch, repeated)
+    filed = _stub_problem_add(monkeypatch, repeated)
     with pytest.raises(SystemExit, match=refusal):
         cli.cmd_problem_add(_add_args(repeats=10))
-    assert did == {"filed": [], "saved": []}
+    assert filed == []
 
 
-def test_review_record_keeps_the_rounds_high_and_med_finds_that_repeat_a_fixed_problem(monkeypatch):
+def test_review_record_keeps_the_rounds_high_and_med_finds_filed_as_repeating_a_fixed_problem(monkeypatch):
     state = _merged_state()
-    # #40 is low; #50 repeats a fixed problem too, but an earlier round found it.
-    state["repeats"] = {"40": 30, "41": 31, "50": 35}
-    subs = [_problem(40, "sev:low"), _problem(41, "sev:high"), _problem(42, "sev:med")]
+    # #50 repeats a fixed problem too, but an earlier round found it: it's back as a regression.
+    state["review_history"] = [{"run": 1, "sha": "a1", "found": {"med": [50]}}]
+    state["review_runs"] = 1
+    subs = [_problem(40, "sev:low"), _problem(41, "sev:high"), _problem(42, "sev:med"), _problem(50, "sev:med")]
     _stub_review_record(monkeypatch, state, subs)
+    bodies = {7: "", 41: problems.with_repeat("repro", 31), 42: "repro"}
+    monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
     found = _RECORD.index("8")
-    cli.main([*_RECORD[:found], "40", "41", "42", *_RECORD[found + 1 :]])
+    cli.main([*_RECORD[:found], "40", "41", "42", "50", *_RECORD[found + 1 :], "--regressions", "1"])
     assert state["review_history"][-1]["repeats"] == {"41": 31}
 
 
