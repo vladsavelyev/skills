@@ -118,10 +118,18 @@ def unexpected_ignored(checkout: str, main: str, accepted: set[str]) -> list[str
 
 
 def undeletable(checkout: str) -> list[str]:
-    """Folders under `checkout` we can't empty: a file in a folder is deleted with write access to that folder."""
+    """Folders under `checkout` we can't empty: emptying one takes listing it and writing to it.
+
+    A folder we can't even list is one `os.walk` would silently skip, so its error is collected too: skipped, it
+    would pass the check and `git worktree remove` would fail on it halfway.
+    """
     stuck = []
-    for top, dirs, files in os.walk(checkout):
-        if (dirs or files) and not os.access(top, os.W_OK | os.X_OK):
+
+    def unscannable(error: OSError) -> None:
+        stuck.append(f"{error.filename} (owned by {Path(error.filename).owner()}): {error.strerror}")
+
+    for top, dirs, files in os.walk(checkout, onerror=unscannable):
+        if (dirs or files) and not os.access(top, os.R_OK | os.W_OK | os.X_OK):
             stuck.append(f"{top} (owned by {Path(top).owner()})")
             dirs.clear()  # its contents go with it, or not at all
     if not os.access(Path(checkout).parent, os.W_OK | os.X_OK):

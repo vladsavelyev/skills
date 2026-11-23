@@ -116,6 +116,19 @@ def test_removes_nothing_while_a_folder_cannot_be_emptied(repo):
         stuck.chmod(0o755)
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any folder")
+def test_removes_nothing_while_a_folder_cannot_be_read(repo):
+    main, checkout = repo
+    stuck = checkout / "logs" / "containers"
+    stuck.chmod(0)  # what a container's 0700 folder under another uid looks like: we can't even list it
+    try:
+        assert str(stuck) in _refused()
+        _kept(main, checkout)
+    finally:
+        stuck.chmod(0o755)
+    assert (stuck / "backend.log").is_file()
+
+
 def test_keeps_a_branch_another_is_stacked_on(repo, capsys):
     main, checkout = repo
     _git("branch", "child", "feat", cwd=main)
