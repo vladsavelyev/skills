@@ -800,7 +800,9 @@ def cmd_tidy(args: argparse.Namespace) -> None:
         found = tidy.check(checkout, main, head, set(args.accept))
         if not found.clear:
             sys.exit(f"Keeping {checkout}, which holds what the PR doesn't:\n{found}")
-        run(["git", "worktree", "remove", checkout], cwd=main)
+        # The check covers everything git's own refusal guards (a modified or untracked file) and more, so --force
+        # only lets git remove a submodule the user accepted, which it otherwise refuses outright.
+        run(["git", "worktree", "remove", "--force", checkout], cwd=main)
         print(f"Removed the checkout {checkout}")
     if try_run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=main) is None:
         return
@@ -1225,7 +1227,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="PATH",
-        help="An ignored path tidy can't explain that the user OKs deleting (repeatable)",
+        help="An ignored path tidy can't explain, or a repository inside the checkout, that the user OKs deleting (repeatable)",
     )
     c.set_defaults(func=cmd_tidy)
 

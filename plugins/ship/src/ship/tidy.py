@@ -2,10 +2,17 @@
 
 What a checkout holds beyond its commits is either work, which removing it would delete without a word, or what
 running the project made there. Work blocks the removal: a modified or untracked file, a commit the PR doesn't have,
-a file hidden from `status` by assume-unchanged or skip-worktree, a repository inside it (a worktree, a submodule).
-An ignored path is what the project made when the main checkout has it too (`.env`, a local config, logs: every
+a file hidden from `status` by assume-unchanged or skip-worktree, a repository inside it. An ignored path is what the project made when the main checkout has it too (`.env`, a local config, logs: every
 checkout that runs the project carries them), or when it is a cache any checkout rebuilds (`.venv`, `node_modules`,
 `__pycache__`). Any other ignored path, eval results say, may be the user's, so it blocks until they accept it.
+
+A repository inside the checkout (a clone, a worktree, a submodule, a bare repo) blocks wherever it sits, whatever
+state it is in, until the user accepts it: its work is its own (an uncommitted edit, a stash, a commit a reflog
+alone holds, a `.env`), and no state git reports proves it holds none. Where it sits proves nothing either: `pip
+install -e git+…` clones into `.venv/src` to be edited. The one `.git` that goes with its folder is one git can't
+open sitting in a cache (pygaljs ships a submodule's pointer without its target): there is no repository there, and
+the cache is rebuilt. Outside a cache, the same `.git` may be all that's left of a worktree moved by hand, so it
+blocks.
 
 Every folder must also be one we can empty: a container that ran as root leaves root-owned files on a Linux host,
 and `git worktree remove` unregisters the checkout before it fails on them, leaving the rest on disk. Those are
@@ -13,10 +20,11 @@ found first, and nothing is removed while any remain.
 """
 
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .shell import run, try_run
+from .shell import CommandFailed, run, try_run
 
 # Folder names whose contents any checkout rebuilds: environments, dependency trees, bytecode, tool caches.
 REBUILDABLE = frozenset(
@@ -43,13 +51,20 @@ class Check:
     head_mismatch: str | None = None
     hidden: list[str] = field(default_factory=list)
     nested: list[str] = field(default_factory=list)
+    worktrees: list[str] = field(default_factory=list)
     unexpected: list[str] = field(default_factory=list)
     undeletable: list[str] = field(default_factory=list)
 
     @property
     def clear(self) -> bool:
         return not (
-            self.changed or self.head_mismatch or self.hidden or self.nested or self.unexpected or self.undeletable
+            self.changed
+            or self.head_mismatch
+            or self.hidden
+            or self.nested
+            or self.worktrees
+            or self.unexpected
+            or self.undeletable
         )
 
     def __str__(self) -> str:
@@ -59,7 +74,11 @@ class Check:
         for title, paths in (
             ("modified or untracked (commit and push them, or delete them)", self.changed),
             ("hidden from `git status` by assume-unchanged or skip-worktree", self.hidden),
-            ("repositories inside it (a worktree, a submodule, a clone), whose own work would go with it", self.nested),
+            ("worktrees registered inside it: `git worktree remove` it first, once it holds nothing", self.worktrees),
+            (
+                "repositories inside it, or what's left of one, whose own work would go with it: pass --accept <path> for each the user OKs deleting",
+                self.nested,
+            ),
             (
                 "ignored, but neither in the main checkout nor a rebuildable cache: pass --accept <path> for each the user OKs deleting",
                 self.unexpected,
@@ -119,34 +138,61 @@ def unexpected_ignored(checkout: str, main: str, accepted: set[str]) -> list[str
     ]
 
 
-def scan(checkout: str) -> tuple[list[str], list[str]]:
-    """Walk `checkout` once for (folders we can't empty, repositories nested in it).
+def _looks_like_git_dir(dirs: list[str], files: list[str]) -> bool:
+    """Git's own test of a folder that is a repository's git data: a bare repo, a mirror, a `.git` folder."""
+    return "HEAD" in files and {"objects", "refs"} <= set(dirs)
+
+
+def _opens(git_dir: str) -> bool:
+    """Whether git opens `git_dir` (a folder, or a `.git` file pointing at one) as a repository.
+
+    `--git-dir` keeps git from looking further up for the checkout around it, and `safe.directory` from refusing a
+    repository someone else owns as if it weren't one. Only git's "there's no repository here" answers are a no.
+    """
+    cmd = ["git", "-c", "safe.directory=*", f"--git-dir={git_dir}", "rev-parse", "--git-dir"]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=os.environ | {"LC_ALL": "C"})
+    if result.returncode == 0:
+        return True
+    if result.returncode == 128 and ("not a git repository" in result.stderr or "invalid gitfile" in result.stderr):
+        return False
+    raise CommandFailed(result.returncode, cmd, result.stdout, result.stderr)
+
+
+def scan(checkout: str, accepted: set[str]) -> tuple[list[str], list[str]]:
+    """Walk `checkout` once for (folders we can't empty, repositories inside it the user hasn't accepted).
 
     Emptying a folder takes listing it and writing to it. A folder we can't even list is one `os.walk` would silently
     skip, so its error is collected too: skipped, it would pass the check and `git worktree remove` would fail on it
-    halfway. A nested repository (another worktree, a submodule, a clone: a folder holding `.git`) has its own work,
-    which none of the checks on this checkout see, and it may sit in an ignored folder the main checkout also has.
+    halfway. The walk goes on into repositories and their git data, since all of it goes with the checkout: a
+    root-owned object, or a repository inside a repository, counts there too. Only a git dir's own folders
+    (`modules/`, `worktrees/`, `refs/`) aren't searched for repositories, since they'd look like some.
     """
-    stuck, nested = [], []
+    stuck, nested, git_dirs = [], [], []
 
     def unscannable(error: OSError) -> None:
         stuck.append(f"{error.filename} (owned by {Path(error.filename).owner()}): {error.strerror}")
 
     for top, dirs, files in os.walk(checkout, onerror=unscannable):
+        here = Path(top)
         if top == checkout:
             if ".git" in dirs:  # the main checkout's own git dir; a linked worktree's `.git` is a file
                 dirs.remove(".git")
-        elif (".git" in dirs or ".git" in files) and not rebuildable(os.path.relpath(top, checkout)):
-            # A package installed into a cache (`.venv`) can ship its own `.git`, and it is rebuilt with the cache.
-            nested.append(top)
-            dirs.clear()  # what's in it is that repository's, and its own checks would have to say
-            continue
+        elif not any(here.is_relative_to(git_dir) for git_dir in git_dirs):
+            rel = os.path.relpath(top, checkout)
+            if _looks_like_git_dir(dirs, files):
+                git_dirs.append(here)
+                nested.append(rel)
+            elif ".git" in dirs or ".git" in files:
+                git_dirs.append(here / ".git")
+                if not rebuildable(rel) or _opens(str(here / ".git")):
+                    nested.append(rel)
         if (dirs or files) and not os.access(top, os.R_OK | os.W_OK | os.X_OK):
-            stuck.append(f"{top} (owned by {Path(top).owner()})")
+            stuck.append(f"{top} (owned by {here.owner()})")
             dirs.clear()  # its contents go with it, or not at all
     if not os.access(Path(checkout).parent, os.W_OK | os.X_OK):
         stuck.append(f"{Path(checkout).parent}, which holds the checkout")
-    return stuck, nested
+    exact = {path.rstrip("/") for path in accepted}
+    return stuck, [rel for rel in nested if rel not in exact]
 
 
 def check(checkout: str, main: str, head: str, accepted: set[str]) -> Check:
@@ -164,14 +210,16 @@ def check(checkout: str, main: str, head: str, accepted: set[str]) -> Check:
         if line[:1].islower() or line[:1] == "S"
     ]
     found.unexpected = unexpected_ignored(checkout, main, accepted)
-    found.undeletable, found.nested = scan(checkout)
-    # A worktree git has registered under this one, wherever it sits, cache or not.
+    found.undeletable, found.nested = scan(checkout, accepted)
+    # A worktree git has registered under this one, even one we can't read. Deleting it would leave git a registration
+    # to prune and a branch marked checked out, so git, not --accept, removes it.
     registered = [
-        line.removeprefix("worktree ")
+        os.path.relpath(line.removeprefix("worktree "), checkout)
         for line in run(["git", "-C", main, "worktree", "list", "--porcelain"]).splitlines()
-        if line.startswith("worktree ")
+        if line.startswith("worktree ") and Path(checkout) in Path(line.removeprefix("worktree ")).parents
     ]
-    found.nested += [path for path in registered if Path(checkout) in Path(path).parents and path not in found.nested]
+    found.nested = [path for path in found.nested if path not in registered]
+    found.worktrees = registered
     return found
 
 

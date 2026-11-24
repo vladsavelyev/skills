@@ -165,35 +165,107 @@ def test_keeps_a_checkout_holding_another_worktree(repo):
     nested = checkout / ".claude" / "worktrees" / "child"  # .claude/ is ignored, and the main checkout has it too
     _git("worktree", "add", "-q", "-b", "child", str(nested), cwd=main)
     (nested / "unsaved.md").write_text("important work\n")
-    assert str(nested) in _refused()
+    assert ".claude/worktrees/child" in _refused()
     _kept(main, checkout)
     assert (nested / "unsaved.md").is_file()
 
 
-def test_keeps_a_checkout_holding_a_repo_of_its_own(repo):
+def test_a_registered_worktree_cannot_be_accepted(repo):
+    main, checkout = repo
+    nested = checkout / ".claude" / "worktrees" / "child"
+    _git("worktree", "add", "-q", "-b", "child", str(nested), cwd=main)
+    assert "`git worktree remove` it first" in _refused("--accept", ".claude/worktrees/child")
+    _kept(main, checkout)
+
+
+def test_keeps_a_checkout_holding_a_repo_of_its_own_until_the_user_accepts_it(repo):
     main, checkout = repo
     nested = checkout / "logs" / "clone"  # logs/ is ignored, and the main checkout has it too
     nested.mkdir()
     _git("init", "-q", cwd=nested)
-    assert str(nested) in _refused()
+    assert "logs/clone" in _refused()
+    _kept(main, checkout)
+    cli.main(["tidy", "--branch", "feat", "--accept", "logs/clone"])
+    assert not checkout.exists()
+
+
+def test_keeps_a_checkout_holding_a_bare_repo(repo):
+    main, checkout = repo
+    backup = checkout / "logs" / "backup.git"
+    _git("init", "-q", "--bare", str(backup), cwd=main)
+    assert "logs/backup.git" in _refused()
     _kept(main, checkout)
 
 
-def test_keeps_a_worktree_registered_inside_a_cache(repo):
+def test_keeps_a_repo_in_a_cache_whatever_state_it_is_in(repo):
     main, checkout = repo
-    nested = checkout / ".venv" / "child"
-    _git("worktree", "add", "-q", "-b", "child", str(nested), cwd=main)
-    assert str(nested) in _refused()
+    editable = checkout / ".venv" / "src" / "editable"  # where `pip install -e git+…` clones, to be edited
+    editable.mkdir(parents=True)
+    _git("init", "-q", cwd=editable)
+    (editable / "code.py").write_text("uncommitted edit\n")
+    assert ".venv/src/editable" in _refused()
+    _kept(main, checkout)
+    assert (editable / "code.py").is_file()
+
+
+def test_finds_a_repo_inside_a_nested_repo(repo):
+    main, checkout = repo
+    outer = checkout / "logs" / "clone"
+    (outer / ".venv" / "inner").mkdir(parents=True)
+    _git("init", "-q", cwd=outer)
+    _git("init", "-q", cwd=outer / ".venv" / "inner")
+    refused = _refused("--accept", "logs/clone")
+    assert "logs/clone/.venv/inner" in refused
     _kept(main, checkout)
 
 
-def test_a_package_that_ships_its_own_git_in_a_cache_goes_with_it(repo):
+def test_a_git_dir_s_internals_are_not_taken_for_repos(repo):
     main, checkout = repo
-    package = checkout / ".venv" / "lib" / "site-packages" / "pkg"
+    clone = checkout / "logs" / "clone"
+    clone.mkdir()
+    _git("init", "-q", cwd=clone)
+    (clone / ".git" / "modules" / "sub").mkdir(parents=True)
+    _git("init", "-q", "--bare", str(clone / ".git" / "modules" / "sub"), cwd=main)  # a submodule's git dir
+    assert "modules" not in _refused()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can empty any folder")
+def test_a_folder_that_cannot_be_emptied_inside_a_nested_repo_blocks(repo):
+    main, checkout = repo
+    clone = checkout / "logs" / "clone"
+    clone.mkdir()
+    _git("init", "-q", cwd=clone)
+    stuck = clone / ".git" / "objects"
+    stuck.chmod(0o555)
+    try:
+        assert str(stuck) in _refused("--accept", "logs/clone")
+        _kept(main, checkout)
+    finally:
+        stuck.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    "pointer",
+    ["gitdir: ../../../.git/modules/src/pkg/static\n", ""],
+    ids=["dangling submodule pointer", "empty gitfile"],
+)
+def test_a_git_file_git_cannot_open_goes_with_its_cache(repo, pointer):
+    main, checkout = repo
+    package = checkout / ".venv" / "lib" / "site-packages" / "pkg" / "static"
     package.mkdir(parents=True)
-    _git("init", "-q", cwd=package)  # what pip leaves of a package installed from a git checkout
+    (package / ".git").write_text(pointer)  # what pygaljs ships: a submodule's pointer, its target never packaged
     cli.main(["tidy", "--branch", "feat"])
     assert not checkout.exists()
+
+
+def test_a_git_file_git_cannot_open_outside_a_cache_blocks(repo):
+    main, checkout = repo
+    leftover = checkout / ".claude" / "worktrees" / "moved"  # a worktree moved by hand, its registration pruned
+    leftover.mkdir(parents=True)
+    (leftover / ".git").write_text("gitdir: /nowhere/.git/worktrees/moved\n")
+    (leftover / "notes.md").write_text("important work\n")
+    assert ".claude/worktrees/moved" in _refused()
+    _kept(main, checkout)
 
 
 def test_accepts_an_ignored_folder_as_tidy_prints_it(repo):
@@ -202,4 +274,20 @@ def test_accepts_an_ignored_folder_as_tidy_prints_it(repo):
     (checkout / "results" / "run1.json").write_text("{}\n")
     assert "results/" in _refused()
     cli.main(["tidy", "--branch", "feat", "--accept", "results/"])
+    assert not checkout.exists()
+
+
+def test_a_submodule_goes_once_the_user_accepts_it(repo, tmp_path, monkeypatch):
+    main, checkout = repo
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _git("init", "-q", "-b", "main", cwd=upstream)
+    _git("-c", "user.name=t", "-c", "user.email=t@e", "commit", "-q", "--allow-empty", "-m", "u", cwd=upstream)
+    _git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(upstream), "sub", cwd=checkout)
+    _git("commit", "-q", "-m", "sub", cwd=checkout)
+    head = _git("rev-parse", "HEAD", cwd=checkout)
+    monkeypatch.setattr(github, "pr_head_sha", lambda number: head)
+    assert "sub" in _refused()
+    _kept(main, checkout)
+    cli.main(["tidy", "--branch", "feat", "--accept", "sub"])
     assert not checkout.exists()

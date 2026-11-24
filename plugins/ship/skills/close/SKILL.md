@@ -41,7 +41,8 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
      - a modified or untracked file;
      - a HEAD that isn't the PR's head, or a file assume-unchanged or skip-worktree hides from
        `status`;
-     - a repository inside it: another worktree, a submodule, a clone;
+     - a repository inside it, wherever it sits and whatever its state: a clone, a worktree, a
+       submodule, a bare repo, or a `.git` git can't open outside a cache;
      - an ignored path the main checkout doesn't have and that isn't a rebuildable cache;
      - a folder you can't empty.
 
@@ -50,8 +51,8 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
      branch another is stacked on stays; tidy says so.
 
      When it refuses, act on what it lists: commit and push work, or ask the user about an
-     ignored path, with your recommendation, and pass each one they OK deleting as
-     `--accept <path>`. A folder you can't empty was made by something running as root, a
+     ignored path or a repository, with your recommendation, and pass each one they OK deleting
+     as `--accept <path>`. A registered worktree can't be accepted: close it out first. A folder you can't empty was made by something running as root, a
      container usually: fix where it's made so it's made as the user, and never reach for sudo.
      When the branch is checked out in the main checkout, tidy leaves the checkout: check out the
      base branch there, pull it, then run `feature tidy --branch <branch>` again, which deletes the
