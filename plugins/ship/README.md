@@ -142,6 +142,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |
 | `feature gate [--branch <b>]` | Exit 0 = OPEN, 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION, 30 = MERGED (1 and 2 stay "the command failed"). |
 | `feature merge [--branch <b>] [--force]` | Mark merged and close the issue (checks that the PR really merged and records what the gate still had outstanding; refuses while an open problem hasn't been handed off). |
+| `feature tidy [--branch <b>] [--accept <path> …]` | Once the PR has merged, remove the feature's checkout and local branch, if they hold nothing the PR doesn't: no modified or untracked file, no commit the PR lacks, no repository inside it and no ignored path that neither the main checkout has nor a cache explains (unless `--accept`ed), and no folder you can't empty (checked before anything is removed). Keeps a branch another is stacked on. |
 | `feature reconcile [--branch <b>] [--dry-run]` | Sweep the repo: close out every feature whose PR already merged, close as `abandoned` the ones whose PR was closed unmerged, and repair ship's block on still-open PRs (stale link, duplicate blocks). |
 | `feature migrate [--branch <b>]` | Upgrade a repo for this CLI version: (re-)create the workflow labels and the feature issue's state block. Run it once per repo after upgrading. |
 

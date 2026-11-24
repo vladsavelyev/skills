@@ -175,6 +175,10 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 6. **Verify and dedup each finding** against the real code:
    - Take its evidence at least to traced, and to ran when a script or test against the real
      code is cheap. Stuck at cited → drop it.
+   - Never run `sudo`, not even `sudo -n`: it stops for the user's approval. To make a file owned by
+     root or by a uid the host doesn't know, chown it from a container (`docker run --rm -v <dir>:/d
+     alpine chown -R <uid>:<gid> /d/<path>`), and hand it back the same way once done, so the
+     scratch dir can be deleted.
    - Outside the PR's intent (other paths, rare cases, small perf) → `low`. So is code, a test or
      a guard the intent doesn't need.
    - Same meaning as an OPEN problem → skip.
