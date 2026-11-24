@@ -127,16 +127,15 @@ def rebuildable(path: str) -> bool:
 
 
 def unexpected_ignored(checkout: str, main: str, accepted: set[str]) -> list[str]:
-    """Ignored paths that running the project doesn't explain: not in the main checkout, not a rebuildable cache."""
+    """Ignored paths that running the project doesn't explain: not in the main checkout, not a rebuildable cache, not
+    one of the `accepted` paths (as `check` normalises them)."""
     # `normal`, not `all`: an ignored folder is one entry, so `logs/` is matched as a whole against the main checkout.
     entries = _status(checkout, "--ignored", "--untracked-files=normal")
     ignored = [path for kind, path in entries if kind == "ignored"]
-    # Git prints an ignored folder as `results/`; take it with or without the slash, but only that path, not what's under.
-    exact = {path.rstrip("/") for path in accepted}
     return [
         path
         for path in ignored
-        if not rebuildable(path) and not (Path(main) / path).exists() and path.rstrip("/") not in exact
+        if not rebuildable(path) and not (Path(main) / path).exists() and path.rstrip("/") not in accepted
     ]
 
 
@@ -181,8 +180,8 @@ def _held_by_others(folder: Path, names: list[str]) -> list[Path]:
     return [folder / name for name in names if os.lstat(folder / name).st_uid != me]
 
 
-def scan(checkout: str, accepted: set[str]) -> tuple[list[str], list[str]]:
-    """Walk `checkout` once for (folders we can't empty, repositories inside it the user hasn't accepted).
+def scan(checkout: str) -> tuple[list[str], list[str]]:
+    """Walk `checkout` once for (folders we can't empty, repositories inside it).
 
     Emptying a folder takes listing it and writing to it, and in a sticky folder, owning what's in it. A folder we can't even list is one `os.walk` would silently
     skip, so its error is collected too: skipped, it would pass the check and `git worktree remove` would fail on it
@@ -220,13 +219,14 @@ def scan(checkout: str, accepted: set[str]) -> tuple[list[str], list[str]]:
     parent = Path(checkout).parent
     if not os.access(parent, os.W_OK | os.X_OK) or _held_by_others(parent, [Path(checkout).name]):
         stuck.append(f"{parent}, which holds the checkout")
-    exact = {path.rstrip("/") for path in accepted}
-    return stuck, [rel for rel in nested if rel not in exact]
+    return stuck, nested
 
 
 def check(checkout: str, main: str, head: str, accepted: set[str]) -> Check:
     """What `checkout` holds that removing it would lose, or that would stop the removal halfway."""
     found = Check()
+    # Git prints an ignored folder as `results/`; take it with or without the slash, but only that path, not what's under.
+    accepted = {path.rstrip("/") for path in accepted}
     found.changed = [path for _, path in _status(checkout, "--untracked-files=all")]
     local = run(["git", "-C", checkout, "rev-parse", "HEAD"])
     if local != head:
@@ -239,7 +239,7 @@ def check(checkout: str, main: str, head: str, accepted: set[str]) -> Check:
         if line[:1].islower() or line[:1] == "S"
     ]
     found.unexpected = unexpected_ignored(checkout, main, accepted)
-    found.undeletable, found.nested = scan(checkout, accepted)
+    found.undeletable, nested = scan(checkout)
     # A worktree git has registered under this one, even one we can't read. Deleting it would leave git a registration
     # to prune and a branch marked checked out, so git, not --accept, removes it.
     registered = [
@@ -247,7 +247,7 @@ def check(checkout: str, main: str, head: str, accepted: set[str]) -> Check:
         for line in run(["git", "-C", main, "worktree", "list", "--porcelain"]).splitlines()
         if line.startswith("worktree ") and Path(checkout) in Path(line.removeprefix("worktree ")).parents
     ]
-    found.nested = [path for path in found.nested if path not in registered]
+    found.nested = [path for path in nested if path not in registered and path not in accepted]
     found.worktrees = registered
     return found
 
