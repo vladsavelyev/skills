@@ -798,9 +798,10 @@ def cmd_tidy(args: argparse.Namespace) -> None:
         found = tidy.check(checkout, main, head, set(args.accept))
         if not found.clear:
             sys.exit(f"Keeping {checkout}, which holds what the PR doesn't:\n{found}")
-        # The check covers everything git's own refusal guards (a modified or untracked file) and more, so --force
-        # only lets git remove a submodule the user accepted, which it otherwise refuses outright.
-        run(["git", "worktree", "remove", "--force", checkout], cwd=main)
+        # Git's own refusal of a modified or untracked file stays the last guard, for an edit made since the check.
+        # Only a submodule, which git refuses outright however clean, takes --force: the check had the user accept it.
+        force = ["--force"] if tidy.holds_submodule(checkout) else []
+        run(["git", "worktree", "remove", *force, checkout], cwd=main)
         print(f"Removed the checkout {checkout}")
     if try_run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=main) is None:
         return

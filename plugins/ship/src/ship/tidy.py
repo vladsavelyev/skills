@@ -261,6 +261,16 @@ def check(checkout: str, main: str, head: str, accepted: set[str]) -> Check:
     return found
 
 
+def holds_submodule(checkout: str) -> bool:
+    """Whether a submodule is checked out in `checkout`, the one thing `git worktree remove` refuses without --force
+    however clean it is. Asked once `check` is clear, so the user accepted each one."""
+    entries = run(["git", "-C", checkout, "ls-files", "--stage", "-z"]).split("\0")
+    return any(
+        entry.startswith("160000 ") and (Path(checkout) / entry.split("\t", 1)[1] / ".git").exists()
+        for entry in entries
+    )
+
+
 def stacked_on(branch: str, cwd: str) -> list[str]:
     """Branches git-town has stacked on `branch`."""
     out = try_run(["git", "config", "--get-regexp", r"^git-town-branch\..*\.parent$"], cwd=cwd) or ""

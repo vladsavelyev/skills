@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 from ship import __main__ as cli
-from ship import feature, github
+from ship import feature, github, tidy
+from ship.shell import CommandFailed
 from ship.state import new_state
 
 
@@ -114,6 +115,22 @@ def test_keeps_a_checkout_whose_head_the_pr_does_not_have(repo):
     (checkout / "app.py").write_text("print(2)\n")
     _git("commit", "-q", "-am", "unpushed", cwd=checkout)
     assert "not the PR's head" in _refused()
+    _kept(main, checkout)
+
+
+def test_git_s_own_check_keeps_an_edit_made_after_tidy_s(repo, monkeypatch):
+    main, checkout = repo
+    checked = tidy.check
+
+    def then_edited(*args):  # another session writes to the checkout between tidy's check and the removal
+        found = checked(*args)
+        (checkout / "app.py").write_text("edited meanwhile\n")
+        return found
+
+    monkeypatch.setattr(tidy, "check", then_edited)
+    with pytest.raises(CommandFailed, match="contains modified or untracked files"):
+        cli.main(["tidy", "--branch", "feat"])
+    assert (checkout / "app.py").read_text() == "edited meanwhile\n"
     _kept(main, checkout)
 
 
