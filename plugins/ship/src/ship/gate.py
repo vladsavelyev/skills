@@ -41,8 +41,8 @@ _NEXT_MERGED = "Don't review: the PR has merged. Close the feature out with `Ski
 # an agent at a spent budget left real problems open that it could have fixed in minutes. Nothing
 # ships as debt: every open problem is fixed, or closed as `wontfix` because it isn't relevant.
 _NEXT_DECISION = (
-    "STOP reviewing, but still close every open problem: fix it, or `feature problem wontfix <#> "
-    "--reason '<why>'` if it isn't relevant. The budget limits review rounds, not fixes, and nothing "
+    "STOP reviewing, but still close every open problem (`Skill(ship:fix)`: it fixes each, or closes it "
+    "as `wontfix` if it isn't relevant). The budget limits review rounds, not fixes, and nothing "
     "ships as debt. Then `feature escalate --reason '<what you recommend>'`, and a human decides "
     "whether to review the fixes in another round (`feature budget --set <n>`), merge with them "
     "unreviewed, or split/redesign the PR."
@@ -307,9 +307,9 @@ def evaluate(
             budget,
         )
     next_step = (
-        "Close every open problem: fix it (`feature problem resolve <#> --commit <sha>…`), or "
-        "`feature problem wontfix <#> --reason '<why>'` if it isn't relevant. Then a fresh review "
-        "round (`Skill(ship:review)`) if the gate still asks for it."
+        "Close every open problem (`Skill(ship:fix)`: it fixes each at its root cause, or closes it as "
+        "`wontfix` if it isn't relevant). Then a fresh review round (`Skill(ship:review)`) if the gate "
+        "still asks for it."
         if blocking_open > 0
         else "Run a fresh review round (`Skill(ship:review)`)."
     )

@@ -10,9 +10,9 @@ session on an existing branch reconstructs full context (base branch, last promp
 open problems) from GitHub. Once the PR merges, the `close` skill closes the feature out: it
 records what shipped and closes the tracking issue, and never reviews.
 
-A ship run doesn't stop at the review. It fixes every problem the review files, in the caller's
-session, and reviews again until the gate settles. Each round runs in a fresh fork, where Sol finds
-blind. A Stop hook keeps the session from ending its turn with the gate shut, and a guard refuses
+A ship run doesn't stop at the review. It fixes every problem the review files and reviews again
+until the gate settles. Each round runs in a fresh fork, where Sol finds blind, and each round's
+fixes run in another, so the caller's thread keeps only their reports. A Stop hook keeps the session from ending its turn with the gate shut, and a guard refuses
 `gh pr merge` of a tracked PR until the gate opens.
 
 Before the merge the gate has three verdicts, because "review until a run finds nothing" never

@@ -373,9 +373,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     print(f"GATE {decision}")
     print(f"  → {decision.next_step}")
     if held:
-        print(
-            f"  This session is held: it can't end its turn until the gate settles. {hold.work(decision, worktree_for_branch(branch))}"
-        )
+        print(f"  This session is held: it can't end its turn until the gate settles. {hold.work()}")
 
 
 def _add_problem(parent: int, title: str, sev: str, detail: str) -> int:
