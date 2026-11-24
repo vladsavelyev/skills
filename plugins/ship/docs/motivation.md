@@ -249,6 +249,21 @@ triager, so round 2's triage is still not the fixer's. The Stop hook's reason sh
 restated the gate's next step and the skill's fixing steps on every block; now it gives the gate
 with its reasons, the open problems and a pointer back to the run.
 
+**17. Comments left to the author → a fourth check in the review.** Agents write most of the code
+ship reviews, and they narrate it: comments that restate the line below, record what the code used
+to do, or justify a workaround instead of fixing it. Lint can't tell those from the few a reader
+needs. It catches commented-out code and bare suppressions, but not narration, and a blanket ban
+also hits the comments that explain a vendor's quirk. pstack's `no-comments` (MIT, © 2026 Lauren
+Tan) settles it with a reviewer that didn't write the comments, since an author defends its own.
+ship's reviewer already reads the diff blind, so the check rides in the same run, with
+`comment-sicko`'s keep list adapted: license headers, external constraints, public API contracts,
+issue links, comments the repo's rules ask for, and text the code reads at runtime. ship doesn't
+spawn `comment-sicko` itself: that would tie ship to pstack, and `comment-sicko` deletes comments,
+which a review round must never do. Like spec and design findings, comment findings are filed
+`low`. The deletions go in one problem rather than one per comment, so the fixer closes them in one
+commit that needs no further review. A comment that hides a surprise in our own code, or claims a
+constraint a check could enforce, gets its own problem, because its fix changes code.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

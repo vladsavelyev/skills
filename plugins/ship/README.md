@@ -3,7 +3,7 @@
 A CLI and hooks for running multiple Claude features in parallel. A feature starts as
 a branch, a worktree and a draft PR (the `start` skill); when it's shipped (the `ship` skill) it
 gets a GitHub tracking issue and a review by Sol (Codex, via T3) at a reasoning effort sized from
-the PR: real defects, plus spec gaps and design smells, and Sol's grade of the PR's risk and complexity goes into the PR body. Features can be **stacked** on each
+the PR: real defects, plus spec gaps, design smells and comments the code doesn't need, and Sol's grade of the PR's risk and complexity goes into the PR body. Features can be **stacked** on each
 other (via git-town). Review-found problems are tracked as GitHub sub-issues, and a **merge
 gate** blocks until every one is closed and a review covers the branch head. A new Claude
 session on an existing branch reconstructs full context (base branch, last prompt, last review,
