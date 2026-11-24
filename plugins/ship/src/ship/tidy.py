@@ -12,7 +12,8 @@ alone holds, a `.env`), and no state git reports proves it holds none. Where it 
 install -e git+…` clones into `.venv/src` to be edited. The one `.git` that goes with its folder is one git can't
 open sitting in a cache (pygaljs ships a submodule's pointer without its target): there is no repository there, and
 the cache is rebuilt. Outside a cache, the same `.git` may be all that's left of a worktree moved by hand, so it
-blocks.
+blocks. A worktree some repository registered, the feature's or any other, can't be accepted at all: deleting it
+would leave that repository a registration to prune and a branch marked checked out, so git removes it.
 
 Every folder must also be one we can empty: a container that ran as root leaves root-owned files on a Linux host,
 and `git worktree remove` unregisters the checkout before it fails on them, leaving the rest on disk. Those are
@@ -144,18 +145,22 @@ def _looks_like_git_dir(dirs: list[str], files: list[str]) -> bool:
     return "HEAD" in files and {"objects", "refs"} <= set(dirs)
 
 
-def _opens(git_dir: str) -> bool:
-    """Whether git opens `git_dir` (a folder, or a `.git` file pointing at one) as a repository.
+def _opens(git_dir: str) -> str | None:
+    """What git opens at `git_dir` (a folder, or a `.git` file pointing at one): None when there's no repository,
+    "worktree" when it's a worktree some repository registered (its git dir is that repository's `worktrees/<id>`, not
+    the repository's own), else "repository".
 
     `--git-dir` keeps git from looking further up for the checkout around it, and `safe.directory` from refusing a
-    repository someone else owns as if it weren't one. Only git's "there's no repository here" answers are a no.
+    repository someone else owns as if it weren't one. Only git's "there's no repository here" answers are None.
     """
-    cmd = ["git", "-c", "safe.directory=*", f"--git-dir={git_dir}", "rev-parse", "--git-dir"]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=os.environ | {"LC_ALL": "C"})
+    cmd = ["git", "-c", "safe.directory=*", f"--git-dir={git_dir}", "rev-parse", "--path-format=absolute"]
+    cmd += ["--git-dir", "--git-common-dir"]
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, env=os.environ | {"LC_ALL": "C"})
     if result.returncode == 0:
-        return True
+        own, common = result.stdout.splitlines()
+        return "worktree" if own != common else "repository"
     if result.returncode == 128 and ("not a git repository" in result.stderr or "invalid gitfile" in result.stderr):
-        return False
+        return None
     raise CommandFailed(result.returncode, cmd, result.stdout, result.stderr)
 
 
@@ -180,8 +185,8 @@ def _held_by_others(folder: Path, names: list[str]) -> list[Path]:
     return [folder / name for name in names if os.lstat(folder / name).st_uid != me]
 
 
-def scan(checkout: str) -> tuple[list[str], list[str]]:
-    """Walk `checkout` once for (folders we can't empty, repositories inside it).
+def scan(checkout: str) -> tuple[list[str], list[str], list[str]]:
+    """Walk `checkout` once for (folders we can't empty, repositories inside it, worktrees registered inside it).
 
     Emptying a folder takes listing it and writing to it, and in a sticky folder, owning what's in it. A folder we can't even list is one `os.walk` would silently
     skip, so its error is collected too: skipped, it would pass the check and `git worktree remove` would fail on it
@@ -189,7 +194,7 @@ def scan(checkout: str) -> tuple[list[str], list[str]]:
     root-owned object, or a repository inside a repository, counts there too. Only a git dir's own folders
     (`modules/`, `worktrees/`, `refs/`) aren't searched for repositories, since they'd look like some.
     """
-    stuck, nested, git_dirs = [], [], []
+    stuck, nested, worktrees, git_dirs = [], [], [], []
 
     def unscannable(error: OSError) -> None:
         stuck.append(f"{error.filename} (owned by {_owner(error.filename)}): {error.strerror}")
@@ -206,8 +211,13 @@ def scan(checkout: str) -> tuple[list[str], list[str]]:
                 nested.append(rel)
             elif ".git" in dirs or ".git" in files:
                 git_dirs.append(here / ".git")
-                if not rebuildable(rel) or _opens(str(here / ".git")):
-                    nested.append(rel)
+                match _opens(str(here / ".git")):
+                    case "worktree":
+                        worktrees.append(rel)
+                    case None if rebuildable(rel):
+                        pass  # no repository there, and the cache is rebuilt
+                    case _:
+                        nested.append(rel)
         if (dirs or files) and not os.access(top, os.R_OK | os.W_OK | os.X_OK):
             stuck.append(f"{top} (owned by {_owner(top)})")
             dirs.clear()  # its contents go with it, or not at all
@@ -219,7 +229,7 @@ def scan(checkout: str) -> tuple[list[str], list[str]]:
     parent = Path(checkout).parent
     if not os.access(parent, os.W_OK | os.X_OK) or _held_by_others(parent, [Path(checkout).name]):
         stuck.append(f"{parent}, which holds the checkout")
-    return stuck, nested
+    return stuck, nested, worktrees
 
 
 def check(checkout: str, main: str, head: str, accepted: set[str]) -> Check:
@@ -239,16 +249,15 @@ def check(checkout: str, main: str, head: str, accepted: set[str]) -> Check:
         if line[:1].islower() or line[:1] == "S"
     ]
     found.unexpected = unexpected_ignored(checkout, main, accepted)
-    found.undeletable, nested = scan(checkout)
-    # A worktree git has registered under this one, even one we can't read. Deleting it would leave git a registration
-    # to prune and a branch marked checked out, so git, not --accept, removes it.
+    found.undeletable, nested, worktrees = scan(checkout)
+    # The feature's repository names its worktrees under this one even where the scan can't read them.
     registered = [
         os.path.relpath(line.removeprefix("worktree "), checkout)
         for line in run(["git", "-C", main, "worktree", "list", "--porcelain"]).splitlines()
         if line.startswith("worktree ") and Path(checkout) in Path(line.removeprefix("worktree ")).parents
     ]
-    found.nested = [path for path in nested if path not in registered and path not in accepted]
-    found.worktrees = registered
+    found.worktrees = registered + [path for path in worktrees if path not in registered]
+    found.nested = [path for path in nested if path not in found.worktrees and path not in accepted]
     return found
 
 

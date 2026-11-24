@@ -220,6 +220,18 @@ def test_a_registered_worktree_cannot_be_accepted(repo):
     _kept(main, checkout)
 
 
+def test_a_worktree_another_repository_registered_cannot_be_accepted(repo, tmp_path):
+    main, checkout = repo
+    other = tmp_path / "other"
+    other.mkdir()
+    _git("init", "-q", "-b", "main", cwd=other)
+    _git("-c", "user.name=t", "-c", "user.email=t@e", "commit", "-q", "--allow-empty", "-m", "o", cwd=other)
+    _git("worktree", "add", "-q", "-b", "side", str(checkout / "logs" / "other-worktree"), cwd=other)
+    assert "`git worktree remove` it first" in _refused("--accept", "logs/other-worktree")
+    _kept(main, checkout)
+    assert str(checkout / "logs" / "other-worktree") in _git("worktree", "list", cwd=other)
+
+
 def test_keeps_a_checkout_holding_a_repo_of_its_own_until_the_user_accepts_it(repo):
     main, checkout = repo
     nested = checkout / "logs" / "clone"  # logs/ is ignored, and the main checkout has it too
