@@ -499,7 +499,7 @@ Skill(ship:ship) ─▶ Skill(ship:review) ─▶ forked subagent, fresh context
    2. `feature describe` ─▶ title + description from the motivation and commit messages
    3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
    4. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
-      ─▶ raw defects, spec gaps, design smells, unneeded comments + Sol's grade of risk and complexity
+      ─▶ raw defects, spec gaps, design smells, flaws comments cover + Sol's grade of risk and complexity
          (Sol gets the recorded request as intent, never tracked state)
    5. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)

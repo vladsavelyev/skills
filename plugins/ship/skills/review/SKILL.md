@@ -151,21 +151,31 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      - Refused Bequest: a subclass or implementer that ignores most of what it inherits.
      A documented rule wins over a smell. Skip what a linter or formatter enforces.
    - Comments: each comment, docstring and lint or type-checker suppression the diff adds or
-     rewrites that the code doesn't need. Most aren't needed: narration of what the code does,
-     banners, commented-out code, history ("was X", "now uses Y"), a workaround's justification.
-     Keep only:
-     - license headers and formatter directives (`# fmt: off`, `// prettier-ignore`);
-     - behaviour forced by an external dependency, platform, vendor or protocol we can't change;
-     - doc comments and docstrings that define a public API's contract;
-     - issue or RFC links that explain a constraint the code can't express;
-     - comments the repo's AGENTS.md or CLAUDE.md asks for, by that file's own bar;
-     - text the code reads at runtime, where cutting it changes behaviour: a docstring that
-       becomes a schema or a prompt (a pydantic model's does), a tool description, CLI help.
-     A suppression stays only when its rule is wrong here or style-only; one that silences a
-     correctness or safety rule is a finding, fixed in the code it silences. The fix is to delete
-     the comment, plus the change that makes it unneeded when it explains a surprise in our own
-     code (a rename, an extracted function, a type) or claims a constraint ("do not remove", "keep
-     in sync with X") that a type, test or check could enforce instead.
+     rewrites. A comment that explains our own code is usually covering for it, so read each one
+     as a pointer to the code and sort it:
+     - Covers a flaw: it explains a surprise in our own code (a misleading name, an argument that
+       must be passed just so, an order that matters, a special case), or justifies a workaround
+       ("fine for now", "too risky to change", "needed because X does Y"). The finding is the
+       code, named by its symbol, and the fix is the redesign that makes the comment unnecessary:
+       a rename, an extracted function, a type, the workaround removed at its cause. The comment
+       goes with it. A shorter comment is never the fix.
+     - Claims a constraint: "do not remove", "keep in sync with X", "must run before Y". Check the
+       claim against the code. If it holds, the fix enforces it with a type, test, runtime check
+       or lint, and deletes the comment; if it doesn't, the fix deletes the comment.
+     - Says nothing the code doesn't: narration of what it does, banners, commented-out code,
+       history ("was X", "now uses Y"). The fix is to delete it.
+     - Kept, and no finding:
+       - license headers and formatter directives (`# fmt: off`, `// prettier-ignore`);
+       - behaviour forced by an external dependency, platform, vendor or protocol we can't
+         change, checked against the code: a surprise in our own code doesn't qualify;
+       - doc comments and docstrings that define a public API's contract;
+       - issue or RFC links that explain a constraint the code can't express;
+       - comments the repo's AGENTS.md or CLAUDE.md asks for, by that file's own bar;
+       - text the code reads at runtime, where cutting it changes behaviour: a docstring that
+         becomes a schema or a prompt (a pydantic model's does), a tool description, CLI help.
+     Report a comment when you're unsure a keep clause covers it, unless cutting it could change
+     behaviour. A suppression stays only when its rule is wrong here or style-only; one that
+     silences a correctness or safety rule covers a flaw, fixed in the code it silences.
 
    Then grade the PR as a whole: risk and complexity each low/med/high, the door and the blast
    radius, plus one or two sentences on what drives the risk and complexity:
@@ -219,12 +229,17 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
      quoted intent doesn't say what Sol claims, a rule breach the cited rule doesn't cover, a smell
      outside the PR's own code, a comment the PR didn't add or rewrite, and one the brief's keep
      list covers (read the code for the external constraint or the runtime read it claims). Title
-     them `Spec: …`, `Design: …` or `Comments: …`. The comments that only need deleting go in one
-     problem, listing each `file:line`; a comment whose fix changes code gets a problem of its own.
+     them `Spec: …`, `Design: …` or `Comments: …`. A comment that covers a flaw is a design
+     finding: file it as `Design: …` on the code it names, with the comment quoted in the body, and
+     merge it with any smell or rule finding on the same code. If Sol proposed only deleting a
+     comment that explains our own code or justifies a workaround, file the flaw it covers
+     instead, with its redesign. A constraint to enforce is a `Comments: …` problem of its own.
+     The comments that only need deleting go in one `Comments: …` problem, listing each
+     `file:line`.
 7. **File new ones**: `feature problem add --title "…" --sev … [--repeats <#>] --body-file - <<'EOF' … EOF`, with
    the repro, its evidence (traced or ran, with the script if ran; for a spec gap, the quoted
-   intent; for a design finding, the rule or smell and the code; for a comment, the comment and why
-   no keep clause covers it), `file:line` and the suggested
+   intent; for a design finding, the rule or smell and the code; for a comment, the comment, which kind
+   it is and why no keep clause covers it), `file:line` and the suggested
    root-cause fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
