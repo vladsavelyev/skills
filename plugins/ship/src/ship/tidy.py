@@ -20,6 +20,7 @@ found first, and nothing is removed while any remain.
 """
 
 import os
+import stat
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -158,10 +159,22 @@ def _opens(git_dir: str) -> bool:
     raise CommandFailed(result.returncode, cmd, result.stdout, result.stderr)
 
 
+def _held_by_others(folder: Path, names: list[str]) -> list[Path]:
+    """The entries of a folder we can write to that the kernel still won't let us delete.
+
+    In a sticky folder (`/tmp`'s 1777, which a container's log folder often copies) only root, the folder's owner or
+    an entry's own owner may delete that entry, however writable the folder is.
+    """
+    me, held = os.geteuid(), os.lstat(folder)
+    if not held.st_mode & stat.S_ISVTX or me in (0, held.st_uid):
+        return []
+    return [folder / name for name in names if os.lstat(folder / name).st_uid != me]
+
+
 def scan(checkout: str, accepted: set[str]) -> tuple[list[str], list[str]]:
     """Walk `checkout` once for (folders we can't empty, repositories inside it the user hasn't accepted).
 
-    Emptying a folder takes listing it and writing to it. A folder we can't even list is one `os.walk` would silently
+    Emptying a folder takes listing it and writing to it, and in a sticky folder, owning what's in it. A folder we can't even list is one `os.walk` would silently
     skip, so its error is collected too: skipped, it would pass the check and `git worktree remove` would fail on it
     halfway. The walk goes on into repositories and their git data, since all of it goes with the checkout: a
     root-owned object, or a repository inside a repository, counts there too. Only a git dir's own folders
@@ -189,8 +202,14 @@ def scan(checkout: str, accepted: set[str]) -> tuple[list[str], list[str]]:
         if (dirs or files) and not os.access(top, os.R_OK | os.W_OK | os.X_OK):
             stuck.append(f"{top} (owned by {here.owner()})")
             dirs.clear()  # its contents go with it, or not at all
-    if not os.access(Path(checkout).parent, os.W_OK | os.X_OK):
-        stuck.append(f"{Path(checkout).parent}, which holds the checkout")
+            continue
+        for entry in _held_by_others(here, dirs + files):
+            stuck.append(f"{entry} (owned by {entry.owner()}, in a sticky folder)")
+            if entry.name in dirs:
+                dirs.remove(entry.name)  # it stays, and so does all it holds
+    parent = Path(checkout).parent
+    if not os.access(parent, os.W_OK | os.X_OK) or _held_by_others(parent, [Path(checkout).name]):
+        stuck.append(f"{parent}, which holds the checkout")
     exact = {path.rstrip("/") for path in accepted}
     return stuck, [rel for rel in nested if rel not in exact]
 

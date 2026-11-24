@@ -1,7 +1,9 @@
 """`feature tidy` against real git repos: what it removes, and what makes it keep a checkout untouched."""
 
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -50,6 +52,28 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.chdir(main)
     return main, checkout
+
+
+# A container bind-mounting a host folder writes there as its own user: root, or a uid the host has no account for.
+# Only a Linux host keeps that ownership; Docker Desktop's mounts give the files to the user.
+docker = pytest.mark.skipif(
+    sys.platform != "linux"
+    or shutil.which("docker") is None
+    or subprocess.run(["docker", "info"], check=False, capture_output=True).returncode != 0,
+    reason="needs docker on a Linux host",
+)
+
+
+@pytest.fixture
+def container(repo):
+    """Run a shell script as root in a container with the checkout's `logs/` at /d; give it all back to us after."""
+
+    def as_root(script: str) -> None:
+        mount = f"{repo[1] / 'logs'}:/d"
+        subprocess.run(["docker", "run", "--rm", "-v", mount, "alpine", "sh", "-c", script], check=True)
+
+    yield as_root
+    as_root(f"chown -R {os.getuid()}:{os.getgid()} /d && chmod -R u+rwx /d")
 
 
 def _branches(main: Path) -> list[str]:
@@ -127,6 +151,15 @@ def test_removes_nothing_while_a_folder_cannot_be_read(repo):
     finally:
         stuck.chmod(0o755)
     assert (stuck / "backend.log").is_file()
+
+
+@docker
+def test_removes_nothing_while_a_sticky_folder_holds_files_someone_else_owns(repo, container):
+    main, checkout = repo
+    # World-writable, but sticky: only a file's owner, or the folder's, may delete the file.
+    container("mkdir -m 1777 /d/shared && echo up > /d/shared/backend.log")
+    assert str(checkout / "logs" / "shared" / "backend.log") in _refused()
+    _kept(main, checkout)
 
 
 def test_keeps_a_branch_another_is_stacked_on(repo, capsys):
