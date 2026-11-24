@@ -20,6 +20,7 @@ found first, and nothing is removed while any remain.
 """
 
 import os
+import pwd
 import stat
 import subprocess
 from dataclasses import dataclass, field
@@ -159,6 +160,15 @@ def _opens(git_dir: str) -> bool:
     raise CommandFailed(result.returncode, cmd, result.stdout, result.stderr)
 
 
+def _owner(path: str | Path) -> str:
+    """Who owns `path`: a user's name, or the bare uid of a container's own user, which the host has no account for."""
+    uid = os.lstat(path).st_uid
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:  # `getpwuid`'s answer for a uid with no account, which still owns the path
+        return f"uid {uid}"
+
+
 def _held_by_others(folder: Path, names: list[str]) -> list[Path]:
     """The entries of a folder we can write to that the kernel still won't let us delete.
 
@@ -183,7 +193,7 @@ def scan(checkout: str, accepted: set[str]) -> tuple[list[str], list[str]]:
     stuck, nested, git_dirs = [], [], []
 
     def unscannable(error: OSError) -> None:
-        stuck.append(f"{error.filename} (owned by {Path(error.filename).owner()}): {error.strerror}")
+        stuck.append(f"{error.filename} (owned by {_owner(error.filename)}): {error.strerror}")
 
     for top, dirs, files in os.walk(checkout, onerror=unscannable):
         here = Path(top)
@@ -200,11 +210,11 @@ def scan(checkout: str, accepted: set[str]) -> tuple[list[str], list[str]]:
                 if not rebuildable(rel) or _opens(str(here / ".git")):
                     nested.append(rel)
         if (dirs or files) and not os.access(top, os.R_OK | os.W_OK | os.X_OK):
-            stuck.append(f"{top} (owned by {here.owner()})")
+            stuck.append(f"{top} (owned by {_owner(top)})")
             dirs.clear()  # its contents go with it, or not at all
             continue
         for entry in _held_by_others(here, dirs + files):
-            stuck.append(f"{entry} (owned by {entry.owner()}, in a sticky folder)")
+            stuck.append(f"{entry} (owned by {_owner(entry)}, in a sticky folder)")
             if entry.name in dirs:
                 dirs.remove(entry.name)  # it stays, and so does all it holds
     parent = Path(checkout).parent

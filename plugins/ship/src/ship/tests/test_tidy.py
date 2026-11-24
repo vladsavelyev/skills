@@ -162,6 +162,15 @@ def test_removes_nothing_while_a_sticky_folder_holds_files_someone_else_owns(rep
     _kept(main, checkout)
 
 
+@docker
+@pytest.mark.parametrize("mode", ["755", "700"], ids=["can't empty", "can't read"])
+def test_names_the_uid_of_a_folder_s_owner_the_host_has_no_account_for(repo, container, mode):
+    main, checkout = repo
+    container(f"mkdir -m {mode} /d/grafana && echo x > /d/grafana/db && chown -R 42424242 /d/grafana")
+    assert f"{checkout / 'logs' / 'grafana'} (owned by uid 42424242)" in _refused()
+    _kept(main, checkout)
+
+
 def test_keeps_a_branch_another_is_stacked_on(repo, capsys):
     main, checkout = repo
     _git("branch", "child", "feat", cwd=main)
