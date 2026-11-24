@@ -37,6 +37,10 @@ Take them highest severity first.
 2. Fix it at its root cause, not the symptom. Prefer deleting or narrowing over new code, and keep
    the diff to what the problem needs. Show the fix works: the repro or a test that fails before
    it and passes after.
+   Never run `sudo`, not even `sudo -n`: it stops for the user's approval. To make a file owned by
+   root or by a uid the host doesn't know, chown it from a container (`docker run --rm -v <dir>:/d
+   alpine chown -R <uid>:<gid> /d/<path>`), and hand it back the same way once done, so the scratch
+   dir can be deleted.
 3. Commit the fix apart from other work (a commit that fixes only `low` problems needs no review),
    push, then `feature problem resolve <#> --commit <sha>…` with every commit of the fix.
 
