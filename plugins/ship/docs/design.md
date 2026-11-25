@@ -480,8 +480,9 @@ the plugin holds the session instead (`hold.py`):
   branch name in two repos is two holds, and parallel sessions never share one.
 - The Stop hook (`stop_hook.py`) runs whenever the agent is about to end its turn. For each branch
   the session holds it first asks T3 whether the round's thread still runs (`t3 thread show`, via
-  `$T3CODE_CLI_PATH`): if it does, the turn may end, since the thread's completion wakes the
-  session, and nothing is judged yet (the first round tracks the branch as it runs). Asking T3,
+  `$T3CODE_CLI_PATH`): an active run, or status `waiting`, T3's word for a turn that ended with a
+  delegated child or awaited work still holding its completion. If it does, the turn may end,
+  since the thread's completion wakes the session, and nothing is judged yet (the first round tracks the branch as it runs). Asking T3,
   not a flag the run sets and clears, is what keeps a crashed or cancelled round from switching the
   hold off. Once the round is done it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
   the stop, and Claude Code hands the agent the reason: the gate with its reasons, the open

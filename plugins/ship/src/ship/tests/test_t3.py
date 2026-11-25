@@ -8,8 +8,8 @@ from ship.errors import Refusal
 from ship.shell import CommandFailed
 
 
-def _fake_cli(tmp_path, monkeypatch, *, active_run: str | None, exit_code: int = 0):
-    shown = {"thread": {"threadId": "t1", "status": "running", "activeRunId": active_run}, "messages": []}
+def _fake_cli(tmp_path, monkeypatch, *, active_run: str | None, status: str = "running", exit_code: int = 0):
+    shown = {"thread": {"threadId": "t1", "status": status, "activeRunId": active_run}, "messages": []}
     cli = tmp_path / "t3"
     cli.write_text(
         f"#!/bin/sh\necho \"$@\" > {tmp_path}/args\ncat <<'EOF'\n{json.dumps(shown)}\nEOF\nexit {exit_code}\n"
@@ -25,8 +25,15 @@ def test_a_thread_with_an_active_run_is_running(tmp_path, monkeypatch):
 
 
 def test_a_thread_whose_run_ended_is_not(tmp_path, monkeypatch):
-    _fake_cli(tmp_path, monkeypatch, active_run=None)
+    _fake_cli(tmp_path, monkeypatch, active_run=None, status="completed")
     assert not t3.thread_running("t1")
+
+
+def test_a_thread_whose_turn_ended_waiting_on_a_child_is_running(tmp_path, monkeypatch):
+    """A round's turn ended with its Sol review still delegated: T3 hasn't completed it, and won't wake
+    the run until it has."""
+    _fake_cli(tmp_path, monkeypatch, active_run=None, status="waiting")
+    assert t3.thread_running("t1")
 
 
 def test_a_thread_t3_doesnt_know_fails(tmp_path, monkeypatch):

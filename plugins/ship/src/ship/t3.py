@@ -12,9 +12,12 @@ CLI_ENV = "T3CODE_CLI_PATH"
 
 
 def thread_running(thread: str) -> bool:
-    """Whether T3 thread `thread` has a run going. Raises if T3 doesn't know the thread."""
+    """Whether T3 thread `thread` hasn't completed yet: it has a run going, or its turn ended with work
+    that holds its completion (a delegated child, a background subagent, an awaited command), which
+    T3 reports as status `waiting`. Its completion is what wakes the thread that delegated it. Raises
+    if T3 doesn't know the thread."""
     cli = os.environ.get(CLI_ENV)
     if cli is None:
         raise Refusal(f"${CLI_ENV} isn't set, so this isn't a T3 Code session: can't ask T3 about thread {thread}.")
-    shown = json.loads(run([cli, "thread", "show", "--json", "--messages", "0", thread], timeout=30))
-    return shown["thread"]["activeRunId"] is not None
+    shown = json.loads(run([cli, "thread", "show", "--json", "--messages", "0", thread], timeout=30))["thread"]
+    return shown["activeRunId"] is not None or shown["status"] == "waiting"
