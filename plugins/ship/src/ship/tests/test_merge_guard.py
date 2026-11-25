@@ -209,3 +209,92 @@ def test_a_subshells_cd_stays_in_the_subshell():
 
 def test_eval_runs_in_this_shell_so_its_cd_carries():
     assert [c.cwd for c in merge_calls('eval "cd sub"; gh pr merge 2', "/repo")] == ["/repo/sub"]
+
+
+def _run_t3_hook(monkeypatch, capsys, tool_input: dict) -> str:
+    payload = {"tool_name": merge_guard.T3_MERGE, "tool_input": tool_input, "cwd": "/repo"}
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    merge_guard.main()
+    return capsys.readouterr().out
+
+
+def test_t3s_merge_tool_is_refused_at_a_shut_gate(monkeypatch, capsys):
+    """#179: T3 tells agents to merge with `pull_request_merge`, which never reached the guard."""
+    _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
+    out = json.loads(_run_t3_hook(monkeypatch, capsys, {"number": 5355, "expectedHeadSha": "f" * 40}))
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "refuses to merge PR #5355" in reason and "#5400 [sev:med] stale cache" in reason
+    assert 'SHIP_PAST_GATE="<their reason>" gh pr merge 5355 --repo org/app' in reason
+
+
+def test_t3s_merge_tool_merges_at_an_open_gate(monkeypatch, capsys):
+    _stub_pr(monkeypatch, verdict=Verdict.OPEN)
+    assert _run_t3_hook(monkeypatch, capsys, {"expectedHeadSha": "f" * 40}) == ""
+
+
+def test_t3s_merge_input_names_the_pr_or_leaves_it_to_the_branch():
+    call = merge_guard.t3_merge_call({"number": 7, "repository": "org/app", "auto": True, "stack": True}, "/repo")
+    assert call == MergeCall(target="7", repo="org/app", cwd="/repo", override=None, auto=True, stack=True)
+    assert merge_guard.t3_merge_call({"expectedHeadSha": "abc"}, "/repo").target is None
+
+
+def test_a_t3_merge_in_another_environment_must_name_the_pr(monkeypatch, capsys):
+    monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("guessed the other environment's PR"))
+    out = json.loads(_run_t3_hook(monkeypatch, capsys, {"environmentId": "laptop", "expectedHeadSha": "abc"}))
+    assert "name the PR with `number` and `repository`" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_auto_merge_of_a_tracked_pr_is_refused_even_at_an_open_gate(monkeypatch):
+    posted = _stub_pr(monkeypatch, verdict=Verdict.OPEN)
+    refusal = merge_guard.check(MergeCall(target="5355", repo=None, cwd="/repo", override=None, auto=True))
+    assert "refuses to auto-merge PR #5355" in refusal and posted == []
+
+
+def test_the_users_reason_lets_an_auto_merge_through_on_the_record(monkeypatch):
+    posted = _stub_pr(monkeypatch, verdict=Verdict.OPEN)
+    assert merge_guard.check(MergeCall(target="5355", repo=None, cwd="/repo", override="ok", auto=True)) is None
+    [(issue, text)] = posted
+    assert issue == 39 and "with auto-merge past the gate" in text
+
+
+def test_gh_auto_is_an_auto_merge_and_disabling_it_is_no_merge():
+    [call] = merge_calls("gh pr merge 5 --auto --squash", "/repo")
+    assert call.auto
+    assert merge_calls("gh pr merge 5 --disable-auto", "/repo") == []
+
+
+def _stub_stack(monkeypatch, prs: dict[int, dict]) -> None:
+    """`prs` by number, each with its head and base branch; a tracked one's gate is shut."""
+    _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
+    by_head = {pr["headRefName"]: n for n, pr in prs.items()}
+    monkeypatch.setattr(github, "pr_view", lambda target, repo: prs[int(target)])
+    monkeypatch.setattr(github, "open_pr_for_branch", lambda branch, repo: by_head.get(branch))
+
+
+def _layer(number: int, head: str, base: str, *, tracked: bool) -> dict:
+    body = "> **Tracking issue:** closes #39" if tracked else "> nothing of ship's"
+    return {
+        "number": number,
+        "repo": "org/app",
+        "state": "OPEN",
+        "headRefName": head,
+        "headRefOid": "f" * 40,
+        "baseRefName": base,
+        "body": f"Why.\n\n<!-- ship -->\n{body}\n<!-- /ship -->\n",
+    }
+
+
+def test_a_stack_merge_judges_each_layer_below(monkeypatch):
+    _stub_stack(
+        monkeypatch,
+        {9: _layer(9, "top", "fix-it", tracked=False), 5355: _layer(5355, "fix-it", "main", tracked=True)},
+    )
+    stacked = MergeCall(target="9", repo=None, cwd="/repo", override=None, stack=True)
+    assert "refuses to merge PR #5355" in merge_guard.check(stacked)
+    assert merge_guard.check(MergeCall(target="9", repo=None, cwd="/repo", override=None)) is None
+
+
+def test_a_stack_whose_bases_loop_is_an_error(monkeypatch):
+    _stub_stack(monkeypatch, {1: _layer(1, "a", "b", tracked=False), 2: _layer(2, "b", "a", tracked=False)})
+    with pytest.raises(ValueError, match="loops back"):
+        merge_guard.check(MergeCall(target="1", repo=None, cwd="/repo", override=None, stack=True))

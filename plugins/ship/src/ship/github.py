@@ -131,7 +131,7 @@ def create_issue(title: str, body: str, labels: list[str]) -> int:
     return int(url.rstrip("/").rsplit("/", 1)[-1])
 
 
-def open_pr_for_branch(branch: str) -> int | None:
+def open_pr_for_branch(branch: str, *, repo: str | None = None) -> int | None:
     """Return the number of the open PR whose head is `branch`, or None if there is none.
 
     Used by `adopt` so wiring a branch that already has a PR links it automatically instead
@@ -139,9 +139,8 @@ def open_pr_for_branch(branch: str) -> int | None:
     an empty array (not an error) when nothing matches, so no result is a real "no PR" — not
     a swallowed failure — and we surface that as None.
     """
-    out = run(
-        ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number", "--jq", ".[0].number // empty"]
-    )
+    query = ["--head", branch, "--state", "open", *(["--repo", repo] if repo else [])]
+    out = run(["gh", "pr", "list", *query, "--json", "number", "--jq", ".[0].number // empty"])
     return int(out) if out else None
 
 
@@ -246,9 +245,9 @@ def pr_state(number: int) -> str:
 def pr_view(target: str | None, *, repo: str | None) -> dict:
     """The PR `gh pr merge` would merge: `target` is its number, URL or branch, None for the current
     branch's PR, in `repo` (`OWNER/NAME`) or the current one. Returns `number`, `url`, `body`,
-    `headRefName`, `headRefOid`, `state`, and `repo` as `OWNER/NAME`."""
+    `headRefName`, `headRefOid`, `baseRefName`, `state`, and `repo` as `OWNER/NAME`."""
     args = ["gh", "pr", "view", *([target] if target else []), *(["--repo", repo] if repo else [])]
-    pr = json.loads(run([*args, "--json", "number,url,body,headRefName,headRefOid,state"]))
+    pr = json.loads(run([*args, "--json", "number,url,body,headRefName,headRefOid,baseRefName,state"]))
     owner, name = re.fullmatch(r"https://[^/]+/([^/]+)/([^/]+)/pull/\d+", pr["url"]).groups()
     return {**pr, "repo": f"{owner}/{name}"}
 

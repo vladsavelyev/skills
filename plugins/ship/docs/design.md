@@ -508,13 +508,26 @@ has written (`prbody.tracking_issue`; an unmarked `Part of #N` only if that issu
 commit the merge would land, and refused unless the gate is `OPEN`, with the open problems listed.
 A command it can't read (an unclosed quote) that mentions `gh … pr merge` is refused too.
 
+T3 Code tells agents to merge with its own `pull_request_merge` tool rather than `gh` (#179), so the
+same hook matches that tool too, and reads the PR straight from its input: `number` and
+`repository`, or the current branch's PR, the same default T3 takes from the thread's branch. A
+call into another linked environment (`environmentId`) must name both, since that branch is out of
+sight. Both front ends build the same `MergeCall`, and one check judges it. T3 refuses a merge
+unless the head is the `expectedHeadSha` it was given, so judging the PR's head judges the commit
+the merge would land. A `stack` merge lands every open layer below the PR, so the check follows the
+base chain (the open PR whose head is the base, and down) and judges each layer. An auto-merge (T3's
+`auto`, `gh pr merge --auto`) lands whichever head passes CI, even one pushed after the gate was
+judged, so a tracked PR's is refused even at `OPEN`: the ship run waits for CI itself and merges
+when the PR is ready. `--disable-auto` isn't a merge.
+
 The user decides to merge past the gate, not the agent: told what's open, a user who still wants it
 merged gets `SHIP_PAST_GATE="<their reason>" gh pr merge …`, and the hook posts that reason and the
-gate on the tracking issue before letting it through. It fails closed: an error while checking a
-merge denies the merge with the error. The gate query the hooks and the CLI share lives in
-`feature.py` and raises `Refusal` (`errors.py`) for an expected condition rather than exiting the
-process, so no failure leaves the guard by a path its error handling doesn't see. It sees only `gh pr merge`; a merge in GitHub's UI is the
-human's own.
+gate on the tracking issue before letting it through. A tool call has no such prefix, so a refused T3
+merge names the same `gh` command. It fails closed: an error while checking a merge denies the merge
+with the error. The gate query the hooks and the CLI share lives in `feature.py` and raises
+`Refusal` (`errors.py`) for an expected condition rather than exiting the process, so no failure
+leaves the guard by a path its error handling doesn't see. A merge in GitHub's UI is the human's
+own, and so is one from a T3 thread running Codex, which Claude Code's hooks don't reach.
 
 ## The review round
 
