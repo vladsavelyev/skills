@@ -60,17 +60,6 @@ def _save_state(issue: int, body: str, state: dict) -> None:
     github.set_issue_body(issue, replace_block(body, state))
 
 
-def _hold(branch: str) -> bool:
-    """Hold `branch` for the Claude session running this command, if any (`hold.py`): the session
-    recording a review or closing a problem is working the loop, so it can't end its turn until the
-    gate settles. Returns whether a session was held."""
-    session = hold.current_session()
-    if session is None:
-        return False
-    hold.hold(session, branch=branch, checkout=main_checkout_root())
-    return True
-
-
 def _blocking(issue: int) -> list[dict]:
     return problems.blocking(github.sub_issues(issue))
 
@@ -356,9 +345,6 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     blocking = problems.blocking(subs)
     _write_block(state, issue)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
-    # The hold is a fallible write too (a file), and taking it twice is harmless, so it goes before.
-    # A round the user asked for as a review alone fixes nothing, so it holds nobody to fixing.
-    held = not decision.settled and not args.review_only and _hold(branch)
     github.comment(
         issue,
         f"🔍 Review run {run_num} ({args.sha}): {new_serious} new high/med, {new_low} new low, "
@@ -372,8 +358,6 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     print(f"Recorded review run {run_num} for #{issue}")
     print(f"GATE {decision}")
     print(f"  → {decision.next_step}")
-    if held:
-        print(f"  This session is held: it can't end its turn until the gate settles. {hold.work()}")
 
 
 def _add_problem(parent: int, title: str, sev: str, detail: str) -> int:
@@ -428,7 +412,6 @@ def cmd_problem_resolve(args: argparse.Namespace) -> None:
         _save_state(issue, body, state)
     note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
     github.close_issue(args.number, note)
-    _hold(branch)
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
@@ -449,7 +432,6 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     # and a re-run finishes the job.
     github.add_label(args.number, problems.WONTFIX)
     github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
-    _hold(branch)
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
@@ -679,6 +661,17 @@ def cmd_escalate(args: argparse.Namespace) -> None:
     if (session := hold.current_session()) is not None:
         hold.release(session, branch=branch, checkout=main_checkout_root())
     print(f"Escalated #{issue} for a human decision; status is now needs-decision.")
+
+
+def cmd_round(args: argparse.Namespace) -> None:
+    branch = args.branch or current_branch()
+    session = hold.current_session()
+    if session is None:
+        sys.exit("`feature round` holds the Claude session driving the ship run, and this command isn't in one.")
+    held = hold.hold(session, branch=branch, checkout=main_checkout_root())
+    print(f"Holding '{branch}'. Start the {args.kind} round as a background subagent with this description:")
+    print(f"  {held.round_description(args.kind)}")
+    print("While it runs you may end your turn: its completion wakes you.")
 
 
 def cmd_release(args: argparse.Namespace) -> None:
@@ -1105,11 +1098,6 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--blast-radius", required=True, help="A few words: who or what a bug in the PR would reach")
     r.add_argument("--complexity", required=True, choices=assess.LEVELS, help="The reviewer's grade of its complexity")
     r.add_argument("--why", required=True, help="One or two sentences: what drives that risk and complexity")
-    r.add_argument(
-        "--review-only",
-        action="store_true",
-        help="The user asked for this review alone, without fixes: don't hold the session to fixing",
-    )
     r.add_argument("--branch")
     r.set_defaults(func=cmd_review_record)
 
@@ -1196,6 +1184,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     c.add_argument("--branch")
     c.set_defaults(func=cmd_escalate)
+
+    c = sub.add_parser("round", help="Hold the branch for this session, and name the round of its ship run it starts")
+    c.add_argument("kind", choices=hold.ROUND_KINDS, help="The round: a review or a batch of fixes")
+    c.add_argument("--branch")
+    c.set_defaults(func=cmd_round)
 
     c = sub.add_parser("release", help="Let this session end its turn with the gate still shut, on the record")
     c.add_argument(

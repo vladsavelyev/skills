@@ -2,11 +2,14 @@
 
 A ship run used to end after one review round and hand the fixes to its caller as advice. On navari
 PR #5355 the caller never fixed the problem the round filed, and the PR was admin-merged with it open.
-Now the session that records a review round, or closes one of its problems, holds the feature: the
+Now the session driving the ship run holds the feature from its first round (`feature round`): the
 plugin's Stop hook (`stop_hook.py`) refuses to let that session end its turn until the gate is OPEN
-or MERGED. A held session leaves the loop early in two recorded ways only: `feature escalate` (the
-budget is spent with every problem closed, or a problem needs the user's call) and `feature release`
-(the user stopped the run, or the review can't run).
+or MERGED, except while a round runs. Each round is a background subagent whose description names
+the hold (`Hold.round_description`); the Stop hook finds it among the session's in-flight tasks, so the
+session may end its turn and answer the user meanwhile, and the round's completion wakes it to take
+in the report. A held session leaves the loop early in two recorded ways only: `feature escalate`
+(the budget is spent with every problem closed, or a problem needs the user's call) and `feature
+release` (the user stopped the run, or the review can't run).
 
 One file per Claude session, under the user's state dir, listing the branches it holds, each with
 its repo's main checkout (a branch name alone could be in two repos; the main checkout outlives
@@ -18,11 +21,14 @@ finds it from whatever directory the session ends in, with one file check when n
 
 import json
 import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 # The id Claude Code gives every Bash command of a session, subagents and forked skills included;
 # the Stop hook's input names the session the same way.
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+ROUND_KINDS = ("review", "fix")
 
 
 def holds_dir() -> Path:
@@ -40,53 +46,84 @@ def _path(session: str) -> Path:
     return holds_dir() / f"{session}.json"
 
 
-def held(session: str) -> list[dict]:
-    """The holds of `session`: `{"branch", "checkout"}` each, oldest first."""
+@dataclass(frozen=True)
+class Hold:
+    branch: str
+    checkout: str
+
+    def same(self, branch: str, checkout: str) -> bool:
+        # A branch name alone isn't a feature: two repos can each have a `fix-tests`.
+        return self.branch == branch and self.checkout == checkout
+
+    def round_description(self, kind: str) -> str:
+        """The description of the background subagent running a `kind` round of this hold's ship run:
+        the Stop hook knows the round runs by finding it among the session's in-flight tasks. It names
+        the checkout too, so a round of one repo's `fix-tests` never lets another repo's go unjudged."""
+        return f"ship {kind} {self.branch} in {self.checkout}"
+
+    def round_running(self, tasks: list[dict]) -> bool:
+        """Whether a round of this hold is among `tasks`, the session's in-flight background tasks (the
+        Stop hook's `background_tasks`). A held session may end its turn then: the round's completion
+        wakes it."""
+        rounds = {self.round_description(kind) for kind in ROUND_KINDS}
+        return any(t["type"] == "subagent" and t["description"] in rounds for t in tasks)
+
+
+def _decode(entry: object, path: Path) -> Hold:
+    if not (
+        isinstance(entry, dict)
+        and entry.keys() == {"branch", "checkout"}
+        and isinstance(entry["branch"], str)
+        and isinstance(entry["checkout"], str)
+    ):
+        raise ValueError(f"{path} holds {entry!r}, not a hold: {{branch, checkout}}")
+    return Hold(branch=entry["branch"], checkout=entry["checkout"])
+
+
+def held(session: str) -> list[Hold]:
+    """The holds of `session`, oldest first."""
     path = _path(session)
     if not path.exists():
         return []
-    return json.loads(path.read_text())
+    entries = json.loads(path.read_text())
+    if not isinstance(entries, list):
+        raise ValueError(f"{path} holds {entries!r}, not a list of holds")
+    return [_decode(entry, path) for entry in entries]
 
 
-def _write(session: str, holds: list[dict]) -> None:
+def _write(session: str, holds: list[Hold]) -> None:
     path = _path(session)
     if not holds:
         path.unlink(missing_ok=True)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(holds, indent=2) + "\n")
+    tmp.write_text(json.dumps([asdict(h) for h in holds], indent=2) + "\n")
     tmp.replace(path)
 
 
-def _same(h: dict, branch: str, checkout: str) -> bool:
-    # A branch name alone isn't a feature: two repos can each have a `fix-tests`.
-    return h["branch"] == branch and h["checkout"] == checkout
-
-
-def hold(session: str, *, branch: str, checkout: str) -> None:
+def hold(session: str, *, branch: str, checkout: str) -> Hold:
     """Hold `branch` of the repo whose main checkout is `checkout`, for `session`."""
-    _write(
-        session,
-        [*(h for h in held(session) if not _same(h, branch, checkout)), {"branch": branch, "checkout": checkout}],
-    )
+    new = Hold(branch=branch, checkout=checkout)
+    _write(session, [*(h for h in held(session) if not h.same(branch, checkout)), new])
+    return new
 
 
 def holds(session: str, *, branch: str, checkout: str) -> bool:
-    return any(_same(h, branch, checkout) for h in held(session))
+    return any(h.same(branch, checkout) for h in held(session))
 
 
 def release(session: str, *, branch: str, checkout: str) -> bool:
     """Drop `session`'s hold on `branch` of `checkout`'s repo. Returns whether there was one."""
     before = held(session)
-    kept = [h for h in before if not _same(h, branch, checkout)]
+    kept = [h for h in before if not h.same(branch, checkout)]
     _write(session, kept)
     return len(kept) != len(before)
 
 
 def work() -> str:
-    """What keeps a held session going, for the Stop hook and `review record` alike: the ship run, and
-    its two ways out on the record. What this gate asks for is the skill's loop and the gate's next
+    """What keeps a held session going, for the Stop hook: the ship run, and its two ways out on the
+    record. What this gate asks for is the skill's loop and the gate's next
     step to say: a gate-specific text here drifted from them once (#153: a redesign round was told to
     fix every open problem), and restated the skill's loop each time the hook fired."""
     return (

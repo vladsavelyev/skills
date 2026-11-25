@@ -35,7 +35,7 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
-| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] [--review-only] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
+| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
 | Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
@@ -235,11 +235,6 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    reaches further (widen the blast radius) or is harder to undo (the door turns one-way). Many findings in a low-risk change still mean low risk. The CLI writes the
    grade into the PR body and sizes the next round's depth from it: low risk always reviews at
    low.
-
-   Recording holds the session (ship's Stop hook) until the gate settles: the caller fixes what
-   this round filed before its turn can end. When your arguments say the user asked for this review
-   alone, without fixes (not a round of `Skill(ship:ship)`), pass `--review-only`, which holds
-   nobody.
 
 ## Rules
 
