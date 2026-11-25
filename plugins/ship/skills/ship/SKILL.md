@@ -8,7 +8,7 @@ description: Use when the user asks to ship a PR, or to babysit or watch one.
 One call of this skill is a whole ship run: it takes the PR to ready to merge. It reviews the PR,
 fixes every problem the review files and reviews again until the gate settles, then babysits the
 PR through CI, its reviewers and its base. You drive the run; every review round is
-`Skill(ship:review)` and every batch of fixes `Skill(ship:fix)`, each in a T3 child thread
+`Skill(ship:review)` and every batch of fixes `Skill(ship:fix)`, each in a background subagent
 (**Rounds** below), so this thread reviews and fixes nothing itself and the user can talk to you
 while a round runs.
 
@@ -28,22 +28,22 @@ relevant, closed as `wontfix` with the reason. A spent budget limits review roun
 
 ## Rounds
 
-Start each round in a T3 child thread; never call `Skill(ship:review)` or `Skill(ship:fix)`
+Start each round in a background subagent; never call `Skill(ship:review)` or `Skill(ship:fix)`
 yourself. Called here, a round would block this thread until it returned, and the user's messages
-would go unread until then.
+would go unread until then. Use the `Agent` tool even under T3, whose instructions send background
+work to `delegate_task`: a child thread per round clutters the user's thread list.
 
-1. **Start it.** `delegate_task` with `mode: "async"`, no `target` (the child runs as you do),
-   `role: "review"` or `"implementation"`, `title: "Review PR #<n>"` or `"Fix PR #<n>"`, and `task:
-   "Run Skill(ship:review) with args: <args>. Reply with only its report, verbatim."` (`ship:fix`
-   for a fix round).
-2. **Hold it.** `feature round --branch <the PR's head branch> --thread <childThreadId>`. While the
-   thread runs you may end your turn; once it's done, the Stop hook keeps you going until the gate
-   settles.
-3. **End your turn.** The thread's completion wakes you with its report: go on from the step that
-   started the round. Until then, answer whatever the user sends and do what they ask.
+1. **Hold the branch.** `feature round review` (or `fix`) `--branch <the PR's head branch>`. It
+   prints the round's description.
+2. **Start it.** `Agent` with `run_in_background: true`, `description` exactly as printed, and
+   `prompt: "Run Skill(ship:review) with args: <args>. Reply with only its report, verbatim."`
+   (`ship:fix` for a fix round). The Stop hook knows the round runs by that description.
+3. **End your turn.** The round's completion notification hands you its report: go on from the
+   step that started the round. Until then, answer whatever the user sends and do what they ask.
+   Don't poll the round or read its output file.
 
-A round thread that fails or is cancelled wakes you too: start it again, or end `STOPPED` if it
-fails the same way twice.
+A round that ends without a report wakes you too: start it again, or end `STOPPED` if it fails
+the same way twice.
 
 ## The run
 

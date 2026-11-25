@@ -11,7 +11,7 @@ open problems) from GitHub. Once the PR merges, the `close` skill closes the fea
 records what shipped and closes the tracking issue, and never reviews.
 
 A ship run doesn't stop at the review. It fixes every problem the review files and reviews again
-until the gate settles. Each round runs in a T3 child thread, where Sol finds blind, and each
+until the gate settles. Each round runs in a background subagent, where Sol finds blind, and each
 round's fixes run in another, so the caller's thread keeps only their reports and stays free to
 talk to the user while a round runs. Then it babysits the PR
 until it's ready to merge: a failed check or a reviewer's comment becomes a problem like the
@@ -141,7 +141,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking, handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto]` | Show or override the review-round budget. |
 | `feature escalate --reason <t> [--problem <#> …]` | Park at `needs-decision` with your recommendation for a human, ending the session's hold. Every open problem must be closed first, or named with `--problem` as needing the user's call, unless the gate recommends a redesign. |
-| `feature round --thread <id> [--branch <b>]` | Hold the branch for the session driving the ship run while T3 thread `<id>` runs one of its rounds (`hold.py`): the session may end its turn while the thread runs, and once it's done can't until the gate settles. |
+| `feature round <review\|fix> [--branch <b>]` | Hold the branch for the session driving the ship run (`hold.py`), and print the description to give the round's background subagent: the session may end its turn while that subagent runs, and once it's done can't until the gate settles. |
 | `feature release --reason <t>` | Let this session end its turn with the gate still shut (the user stopped the run, or the review can't run), with the reason on the tracking issue. |
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |

@@ -283,23 +283,28 @@ carry it for the agent's. So did what a model does unprompted (rerun a flake, ac
 push, answer a question), and what the CLI already says: the ship skill leaves each
 `NEEDS_DECISION`'s options to the gate's next step, and the merge override to the guard's refusal.
 
-**19. Rounds as skills the caller calls → in T3 child threads.** Each round was a forked skill,
-`Skill(ship:review)` or `Skill(ship:fix)`, with `background: false` so the caller got its report in
-the same turn. A tool call holds its caller's turn until it returns, so the caller's thread was
-blocked for the whole round, and a round reviewed by Sol runs for many minutes. On navari #4932 a
-user's two messages sat unread ("waiting to be read") through a 12-minute round: a question about a
-review comment, and a request to ship two other PRs in new threads, which waited for the round too.
-A forked skill can run in the background, with its result arriving as a notification, but not
-under T3: Claude Code waits for every forked skill when it runs under the Agent SDK, as T3 runs it.
-So each round runs in a T3 child thread (`delegate_task`, async) that calls the skill, and the
-caller ends its turn; the thread's completion wakes it with the report. That broke the hold (#14)
-twice over. The rounds' `review record` and `problem resolve` held the child's session, so its Stop
-hook would have sent the reviewer on to fix. And the caller now ends turns with the gate shut on
-purpose, while a round runs. Now the caller holds the branch itself as each round starts (`feature
-round`), with the round's thread, and the Stop hook lets a turn end while T3 says that thread
-still runs. The hook asks T3 rather than reading a flag the run sets and clears: a flag a crashed
-round never cleared would switch the hold off for good. The review-only flag went with the holds:
-a review the user asks for alone holds nobody.
+**19. Rounds as skills the caller calls → in background subagents.** Each round was a forked
+skill, `Skill(ship:review)` or `Skill(ship:fix)`, with `background: false` so the caller got its
+report in the same turn. A tool call holds its caller's turn until it returns, so the caller's
+thread was blocked for the whole round, and a round reviewed by Sol runs for many minutes. On navari
+#4932 a user's two messages sat unread ("waiting to be read") through a 12-minute round: a question
+about a review comment, and a request to ship two other PRs in new threads, which waited for the
+round too. A forked skill can run in the background, but not under T3: Claude Code waits for every
+forked skill when it runs under the Agent SDK, as T3 runs it. A background subagent doesn't, under
+T3 too. So each round is an `Agent` call with `run_in_background: true` whose prompt calls the
+skill, and the caller ends its turn; the subagent's completion notification wakes it with the
+report. A first version ran each round in a T3 child thread instead (`delegate_task`), which
+worked but added a thread per round to the user's thread list.
+
+The caller now ends turns with the gate shut on purpose, while a round runs, so the hold (#14) has
+to tell a running round from a finished one. The Stop hook's input lists the session's in-flight
+background tasks: the caller names each round's subagent after the branch (`feature round` prints
+the description), and the hook lets a turn end while that subagent runs. The hook reads Claude
+Code's list rather than a flag the run sets and clears: a flag a crashed round never cleared would
+switch the hold off for good. The rounds' `review record` and `problem resolve` used to take the
+hold. A subagent's commands carry its caller's session id, so they'd still hold the right session,
+but they also held a review the user asked for alone, which needed a `--review-only` flag. Now only
+the run holds, as each round starts, and the flag is gone.
 
 ## Deliberately deferred
 

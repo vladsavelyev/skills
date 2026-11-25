@@ -372,7 +372,7 @@ def _stub_escalate(
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setenv(hold.SESSION_ENV, "s1")
     monkeypatch.setattr(cli, "main_checkout_root", lambda: "/repo")
-    hold.hold("s1", branch="add-oauth", checkout="/repo", round="t1")
+    hold.hold("s1", branch="add-oauth", checkout="/repo")
     return posted
 
 
@@ -382,7 +382,7 @@ def test_escalate_refuses_while_a_problem_nobody_asked_about_is_open(monkeypatch
     with pytest.raises(SystemExit, match="#5400 still open"):
         cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="budget spent", problem=[]))
     assert posted == []
-    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo", round="t1")]
+    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo")]
 
 
 def test_escalate_refuses_while_review_budget_remains_and_no_problem_needs_the_user(monkeypatch, tmp_path):
@@ -414,51 +414,36 @@ def test_release_refuses_a_branch_this_session_does_not_hold(monkeypatch, tmp_pa
         cli.cmd_release(cli.argparse.Namespace(branch="other", reason="x"))
 
 
-def _in_session(monkeypatch, tmp_path, *, running: bool = True) -> None:
+def _in_session(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setenv(hold.SESSION_ENV, "s1")
     monkeypatch.setattr(cli, "main_checkout_root", lambda: "/repo")
-    monkeypatch.setattr(cli.t3, "thread_running", lambda thread: running)
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
 
 
-def test_a_round_holds_the_session_driving_the_run_with_its_thread(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("kind", hold.ROUND_KINDS)
+def test_a_round_holds_the_session_and_names_the_subagent_the_stop_hook_looks_for(monkeypatch, tmp_path, capsys, kind):
     _in_session(monkeypatch, tmp_path)
-    cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
-    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo", round="t-review")]
-    assert "End your turn" in capsys.readouterr().out
+    cli.main(["round", kind, "--branch", "add-oauth"])
+    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo")]
+    out = capsys.readouterr().out
+    assert f"  {hold.round_description(kind, 'add-oauth')}\n" in out
+    task = {"type": "subagent", "description": out.splitlines()[1].strip()}
+    assert hold.round_running([task], "add-oauth")
 
 
-def test_the_next_round_replaces_the_thread_the_hold_waits_on(monkeypatch, tmp_path):
+def test_the_next_round_keeps_one_hold(monkeypatch, tmp_path):
     _in_session(monkeypatch, tmp_path)
-    cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
-    cli.main(["round", "--branch", "add-oauth", "--thread", "t-fix"])
-    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo", round="t-fix")]
-
-
-def test_a_round_that_already_finished_still_holds_and_says_so(monkeypatch, tmp_path, capsys):
-    _in_session(monkeypatch, tmp_path, running=False)
-    cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
-    assert hold.held("s1") != [] and "already finished" in capsys.readouterr().out
-
-
-def test_a_thread_t3_doesnt_know_holds_nothing(monkeypatch, tmp_path):
-    _in_session(monkeypatch, tmp_path)
-
-    def unknown(thread):
-        raise CommandFailed(1, ["t3"], stderr="Thread t-typo is no longer available.")
-
-    monkeypatch.setattr(cli.t3, "thread_running", unknown)
-    with pytest.raises(CommandFailed):
-        cli.main(["round", "--branch", "add-oauth", "--thread", "t-typo"])
-    assert hold.held("s1") == []
+    cli.main(["round", "review", "--branch", "add-oauth"])
+    cli.main(["round", "fix", "--branch", "add-oauth"])
+    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo")]
 
 
 def test_a_round_outside_a_claude_session_refuses(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     with pytest.raises(SystemExit, match="isn't in one"):
-        cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
+        cli.main(["round", "review", "--branch", "add-oauth"])
     assert not (tmp_path / "ship").exists()
 
 

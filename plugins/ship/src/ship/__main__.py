@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from datetime import UTC, datetime
 
-from . import assess, budget, feature, gate, github, hold, problems, t3, tidy
+from . import assess, budget, feature, gate, github, hold, problems, tidy
 from .errors import Refusal
 from .shell import run, try_run
 from .gitwiring import (
@@ -664,21 +664,20 @@ def cmd_escalate(args: argparse.Namespace) -> None:
 
 
 def cmd_round(args: argparse.Namespace) -> None:
-    """Hold the branch for this session while T3 thread `--thread` runs a round of its ship run.
+    """Hold the branch for this session, which drives its ship run, and name the round it starts.
 
-    The session may end its turn while that thread runs, and the thread's completion wakes it to take
-    in the report; once it's done, the session can't end its turn until the gate settles (`hold.py`).
+    The round runs as a background subagent with the description this prints. While it runs, the
+    session may end its turn, and the round's completion wakes it to take in the report; once it's
+    done, the session can't end its turn until the gate settles (`hold.py`).
     """
     branch = args.branch or current_branch()
     session = hold.current_session()
     if session is None:
         sys.exit("`feature round` holds the Claude session driving the ship run, and this command isn't in one.")
-    running = t3.thread_running(args.thread)
-    hold.hold(session, branch=branch, checkout=main_checkout_root(), round=args.thread)
-    if running:
-        print(f"Holding '{branch}' while round thread {args.thread} runs. End your turn: its completion wakes you.")
-    else:
-        print(f"Holding '{branch}'. Round thread {args.thread} has already finished: take in its report.")
+    hold.hold(session, branch=branch, checkout=main_checkout_root())
+    print(f"Holding '{branch}'. Start the {args.kind} round as a background subagent with this description:")
+    print(f"  {hold.round_description(args.kind, branch)}")
+    print("While it runs you may end your turn: its completion wakes you.")
 
 
 def cmd_release(args: argparse.Namespace) -> None:
@@ -1192,8 +1191,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_escalate)
 
-    c = sub.add_parser("round", help="Hold the branch for this session while a T3 thread runs a round of its ship run")
-    c.add_argument("--thread", required=True, help="The child thread `delegate_task` started for the round")
+    c = sub.add_parser("round", help="Hold the branch for this session, and name the round of its ship run it starts")
+    c.add_argument("kind", choices=hold.ROUND_KINDS, help="The round: a review or a batch of fixes")
     c.add_argument("--branch")
     c.set_defaults(func=cmd_round)
 

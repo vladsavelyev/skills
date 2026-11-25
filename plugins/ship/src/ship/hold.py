@@ -2,17 +2,18 @@
 
 A ship run used to end after one review round and hand the fixes to its caller as advice. On navari
 PR #5355 the caller never fixed the problem the round filed, and the PR was admin-merged with it open.
-Now the session driving the ship run holds the feature from its first round: the plugin's Stop hook
-(`stop_hook.py`) refuses to let that session end its turn until the gate is OPEN or MERGED, except
-while a round runs. Each round runs in a T3 child thread (`t3.py`), and `feature round` holds the
-branch with that thread: while it runs, the session may end its turn and answer the user, and the
-thread's completion wakes it to take in the report. A held session leaves the loop early in two
-recorded ways only: `feature escalate` (the budget is spent with every problem closed, or a problem
-needs the user's call) and `feature release` (the user stopped the run, or the review can't run).
+Now the session driving the ship run holds the feature from its first round (`feature round`): the
+plugin's Stop hook (`stop_hook.py`) refuses to let that session end its turn until the gate is OPEN
+or MERGED, except while a round runs. Each round is a background subagent whose description names
+the branch (`round_description`); the Stop hook finds it among the session's in-flight tasks, so the
+session may end its turn and answer the user meanwhile, and the round's completion wakes it to take
+in the report. A held session leaves the loop early in two recorded ways only: `feature escalate`
+(the budget is spent with every problem closed, or a problem needs the user's call) and `feature
+release` (the user stopped the run, or the review can't run).
 
 One file per Claude session, under the user's state dir, listing the branches it holds, each with
 its repo's main checkout (a branch name alone could be in two repos; the main checkout outlives
-the feature's worktree) and the thread of its latest round. Keyed by session rather than by branch, so parallel sessions on other
+the feature's worktree). Keyed by session rather than by branch, so parallel sessions on other
 features in the same repo never inherit each other's holds; kept outside the repo, so the Stop hook
 finds it from whatever directory the session ends in, with one file check when nothing is held.
 `bin/feature-stop-hook` reads the same directory before it starts Python.
@@ -47,8 +48,6 @@ def _path(session: str) -> Path:
 class Hold:
     branch: str
     checkout: str
-    # The T3 thread of the branch's latest round. None: no round is in flight, so the gate is judged.
-    round: str | None
 
     def same(self, branch: str, checkout: str) -> bool:
         # A branch name alone isn't a feature: two repos can each have a `fix-tests`.
@@ -56,17 +55,14 @@ class Hold:
 
 
 def _decode(entry: object, path: Path) -> Hold:
-    # Deliberately kept: files the plugin wrote before rounds ran in T3 threads have no `round`, and
-    # stay on disk in sessions that held a branch then. They mean no round is in flight.
     if not (
         isinstance(entry, dict)
-        and entry.keys() in ({"branch", "checkout"}, {"branch", "checkout", "round"})
+        and entry.keys() == {"branch", "checkout"}
         and isinstance(entry["branch"], str)
         and isinstance(entry["checkout"], str)
-        and isinstance(entry.get("round"), str | None)
     ):
-        raise ValueError(f"{path} holds {entry!r}, not a hold: {{branch, checkout[, round]}}")
-    return Hold(branch=entry["branch"], checkout=entry["checkout"], round=entry.get("round"))
+        raise ValueError(f"{path} holds {entry!r}, not a hold: {{branch, checkout}}")
+    return Hold(branch=entry["branch"], checkout=entry["checkout"])
 
 
 def held(session: str) -> list[Hold]:
@@ -91,15 +87,11 @@ def _write(session: str, holds: list[Hold]) -> None:
     tmp.replace(path)
 
 
-def hold(session: str, *, branch: str, checkout: str, round: str) -> None:
-    """Hold `branch` of the repo whose main checkout is `checkout`, for `session`, while T3 thread
-    `round` runs its round."""
+def hold(session: str, *, branch: str, checkout: str) -> None:
+    """Hold `branch` of the repo whose main checkout is `checkout`, for `session`."""
     _write(
         session,
-        [
-            *(h for h in held(session) if not h.same(branch, checkout)),
-            Hold(branch=branch, checkout=checkout, round=round),
-        ],
+        [*(h for h in held(session) if not h.same(branch, checkout)), Hold(branch=branch, checkout=checkout)],
     )
 
 
@@ -113,6 +105,22 @@ def release(session: str, *, branch: str, checkout: str) -> bool:
     kept = [h for h in before if not h.same(branch, checkout)]
     _write(session, kept)
     return len(kept) != len(before)
+
+
+ROUND_KINDS = ("review", "fix")
+
+
+def round_description(kind: str, branch: str) -> str:
+    """The description of the background subagent running a `kind` round of `branch`'s ship run: the
+    Stop hook knows the round runs by finding it among the session's in-flight tasks."""
+    return f"ship {kind} {branch}"
+
+
+def round_running(tasks: list[dict], branch: str) -> bool:
+    """Whether a round of `branch` is among `tasks`, the session's in-flight background tasks (the Stop
+    hook's `background_tasks`). A held session may end its turn then: the round's completion wakes it."""
+    rounds = {round_description(kind, branch) for kind in ROUND_KINDS}
+    return any(t["type"] == "subagent" and t["description"] in rounds for t in tasks)
 
 
 def work() -> str:
