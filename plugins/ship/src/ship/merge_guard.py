@@ -7,8 +7,8 @@ merge` in any Bash command, and T3 Code's `pull_request_merge` tool, which T3 te
 instead of `gh` (#179). For a PR whose ship block names a tracking issue, it judges the gate at the
 PR's head (what the merge would land) and denies the merge unless the gate is OPEN, naming what's
 open. T3 refuses a merge unless the head is the `expectedHeadSha` it was given, so the PR's head is
-that commit whenever the merge can happen. A T3 `stack` merge lands every open layer below the PR
-too, so each layer is judged. An auto-merge lands whichever head passes CI, even one pushed after
+that commit whenever the merge can happen. A T3 `stack` merge is refused: T3 reads the lower layers'
+heads after this hook has run, so no check here can judge what it lands. An auto-merge lands whichever head passes CI, even one pushed after
 the gate was judged, so it is refused on a tracked PR.
 
 A user who has been told and still wants the merge says so, and the agent merges with
@@ -48,15 +48,13 @@ _MENTIONS_MERGE = re.compile(r"\bgh\b.*\bpr\b\s+merge\b", re.DOTALL)
 @dataclass(frozen=True)
 class MergeCall:
     """One merge: the PR it names (None: the current branch's), its repo, the directory it runs in
-    (after a command's own `cd`s), the `SHIP_PAST_GATE` reason if given, whether it auto-merges, and
-    whether it also merges the open stack layers below the PR."""
+    (after a command's own `cd`s), the `SHIP_PAST_GATE` reason if given, and whether it auto-merges."""
 
     target: str | None
     repo: str | None
     cwd: str
     override: str | None
     auto: bool = False
-    stack: bool = False
 
 
 def _merge_args(args: list[str]) -> tuple[str | None, str | None]:
@@ -165,13 +163,17 @@ def t3_merge_call(tool_input: dict, cwd: str) -> MergeCall:
     number, repo = tool_input.get("number"), tool_input.get("repository")
     if tool_input.get("environmentId") and (number is None or repo is None):
         raise ValueError("this merge runs in another linked environment, so name the PR with `number` and `repository`")
+    if tool_input.get("stack") is True:
+        raise ValueError(
+            "a stack merge lands layers whose heads T3 reads after this check, so merge the PRs one at a time, "
+            "bottom up, each with its own `expectedHeadSha`"
+        )
     return MergeCall(
         target=None if number is None else str(number),
         repo=repo,
         cwd=cwd,
         override=None,
         auto=tool_input.get("auto") is True,
-        stack=tool_input.get("stack") is True,
     )
 
 
@@ -200,34 +202,12 @@ def _auto_refusal(pr: dict, issue: int) -> str:
     )
 
 
-def _layers_below(pr: dict) -> list[dict]:
-    """The open PRs a stack merge of `pr` lands with it: the PR whose head is its base, that one's,
-    and so on down to a base no open PR has. Raises ValueError for a stack whose bases loop."""
-    layers, seen = [], {pr["number"]}
-    base = pr["baseRefName"]
-    while (number := github.open_pr_for_branch(base, repo=pr["repo"])) is not None:
-        if number in seen:
-            raise ValueError(f"the stack under PR #{pr['number']} loops back to PR #{number}")
-        seen.add(number)
-        layer = github.pr_view(str(number), repo=pr["repo"])
-        layers.append(layer)
-        base = layer["baseRefName"]
-    return layers
-
-
 def check(call: MergeCall) -> str | None:
-    """Why `call` must not run, or None if it may: no PR it lands is ship's, each one's gate is OPEN,
-    or the user's reason for merging past it is now on the record."""
+    """Why `call` must not run, or None if it may: its PR isn't ship's, its gate is OPEN, or the
+    user's reason for merging past it is now on the record."""
     os.chdir(call.cwd)
     github.use_owner_account()
     pr = github.pr_view(call.target, repo=call.repo)
-    landed = [pr, *(_layers_below(pr) if call.stack else [])]
-    refusals = [refusal for layer in landed if (refusal := _judge(layer, call))]
-    return "\n\n".join(refusals) or None
-
-
-def _judge(pr: dict, call: MergeCall) -> str | None:
-    """Why `call` must not land `pr`, or None if it may."""
     issue = prbody.tracking_issue(pr["body"])
     if issue is None:
         issue = next((n for n in prbody.part_of_references(pr["body"]) if "feature" in github.issue_labels(n)), None)
@@ -266,7 +246,7 @@ def main() -> None:
         try:
             calls = [t3_merge_call(tool_input, payload["cwd"])]
         except ValueError as exc:
-            _deny([f"ship can't check the merge gate: {exc}."])
+            _deny([f"ship refuses this merge: {exc}."])
             return
     elif tool == "Bash":
         command = tool_input["command"]

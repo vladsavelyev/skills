@@ -233,8 +233,8 @@ def test_t3s_merge_tool_merges_at_an_open_gate(monkeypatch, capsys):
 
 
 def test_t3s_merge_input_names_the_pr_or_leaves_it_to_the_branch():
-    call = merge_guard.t3_merge_call({"number": 7, "repository": "org/app", "auto": True, "stack": True}, "/repo")
-    assert call == MergeCall(target="7", repo="org/app", cwd="/repo", override=None, auto=True, stack=True)
+    call = merge_guard.t3_merge_call({"number": 7, "repository": "org/app", "auto": True}, "/repo")
+    assert call == MergeCall(target="7", repo="org/app", cwd="/repo", override=None, auto=True)
     assert merge_guard.t3_merge_call({"expectedHeadSha": "abc"}, "/repo").target is None
 
 
@@ -263,38 +263,8 @@ def test_gh_auto_is_an_auto_merge_and_disabling_it_is_no_merge():
     assert merge_calls("gh pr merge 5 --disable-auto", "/repo") == []
 
 
-def _stub_stack(monkeypatch, prs: dict[int, dict]) -> None:
-    """`prs` by number, each with its head and base branch; a tracked one's gate is shut."""
-    _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
-    by_head = {pr["headRefName"]: n for n, pr in prs.items()}
-    monkeypatch.setattr(github, "pr_view", lambda target, repo: prs[int(target)])
-    monkeypatch.setattr(github, "open_pr_for_branch", lambda branch, repo: by_head.get(branch))
-
-
-def _layer(number: int, head: str, base: str, *, tracked: bool) -> dict:
-    body = "> **Tracking issue:** closes #39" if tracked else "> nothing of ship's"
-    return {
-        "number": number,
-        "repo": "org/app",
-        "state": "OPEN",
-        "headRefName": head,
-        "headRefOid": "f" * 40,
-        "baseRefName": base,
-        "body": f"Why.\n\n<!-- ship -->\n{body}\n<!-- /ship -->\n",
-    }
-
-
-def test_a_stack_merge_judges_each_layer_below(monkeypatch):
-    _stub_stack(
-        monkeypatch,
-        {9: _layer(9, "top", "fix-it", tracked=False), 5355: _layer(5355, "fix-it", "main", tracked=True)},
-    )
-    stacked = MergeCall(target="9", repo=None, cwd="/repo", override=None, stack=True)
-    assert "refuses to merge PR #5355" in merge_guard.check(stacked)
-    assert merge_guard.check(MergeCall(target="9", repo=None, cwd="/repo", override=None)) is None
-
-
-def test_a_stack_whose_bases_loop_is_an_error(monkeypatch):
-    _stub_stack(monkeypatch, {1: _layer(1, "a", "b", tracked=False), 2: _layer(2, "b", "a", tracked=False)})
-    with pytest.raises(ValueError, match="loops back"):
-        merge_guard.check(MergeCall(target="1", repo=None, cwd="/repo", override=None, stack=True))
+def test_a_t3_stack_merge_is_refused(monkeypatch, capsys):
+    """#190, #192: T3 reads the lower layers' heads after the hook, so none of them can be judged."""
+    monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("judged a stack merge"))
+    out = json.loads(_run_t3_hook(monkeypatch, capsys, {"number": 9, "repository": "org/app", "stack": True}))
+    assert "merge the PRs one at a time" in out["hookSpecificOutput"]["permissionDecisionReason"]
