@@ -88,11 +88,15 @@ def test_new_work_and_fixes_of_serious_problems_need_review(repo):
     assert unreviewed(repo) == [work, high_fix, both]
 
 
-def resolve_conflict(ref: str, path: str, text: str) -> str:
-    assert subprocess.run(["git", "merge", "-q", ref], capture_output=True).returncode == 1  # conflicts
-    resolved = commit(path, text, f"merge {ref}, resolving {path}")
+def continue_after_resolving(path: str, text: str) -> str:
+    resolved = commit(path, text, f"merge, resolving {path}")
     assert len(git("rev-list", "--parents", "-n1", resolved).split()) == 3  # a merge commit
     return resolved
+
+
+def resolve_conflict(ref: str, path: str, text: str) -> str:
+    assert subprocess.run(["git", "merge", "-q", ref], capture_output=True).returncode == 1  # conflicts
+    return continue_after_resolving(path, text)
 
 
 def test_a_merge_that_resolved_code_by_hand_needs_review(repo):
@@ -177,7 +181,7 @@ def test_a_rerun_after_a_conflicted_sync_invalidates_the_review(repo, sync):
     advance_main("shared.py", "c\n")
     with pytest.raises(CommandFailed):
         sync(stop_at_conflict)
-    commit("shared.py", "b and c\n", "merge origin/main, resolving shared.py")  # git town continue
+    continue_after_resolving("shared.py", "b and c\n")
     sync(lambda: "")
     assert repo["last_review"] is None
     assert [entry.get("event") for entry in repo["review_history"]] == [None, "base-advanced"]
