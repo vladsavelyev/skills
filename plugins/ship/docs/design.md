@@ -501,24 +501,30 @@ scopes, with quotes resolved the way bash does: a substitution in single quotes 
 subshell or a substitution is its own scope, and a heredoc's body is data unless an unquoted one
 expands a substitution. The guard walks the tree, into `sh -c` scripts and `eval`, and finds
 `gh pr merge` behind any wrapper (`command`, `env`, `sudo`, `timeout 60`, `xargs`). For each it
-takes the `cd`s of its own scope, the PR it names (number, URL, branch, or the current branch's)
-and its `--repo`, before or after `merge`. A PR whose body names a tracking issue in any format ship
+takes the `cd`s of its own scope, and reads the words after `gh` the way gh's flag parser does
+(a value flag's value is never a PR or a flag, `--auto=false` is no auto-merge): the PR it names
+(number, URL, branch, or the current branch's), `--repo` before or after `merge`, `--auto`,
+`--admin` and `--match-head-commit`. `--disable-auto` and `--help` aren't merges. A PR whose body names a tracking issue in any format ship
 has written (`prbody.tracking_issue`; an unmarked `Part of #N` only if that issue is labelled
-`feature`), read from the PR so it works without this clone's wiring, is judged at its head, the
-commit the merge would land, and refused unless the gate is `OPEN`, with the open problems listed.
+`feature`), read from the PR so it works without this clone's wiring, is judged at the commit
+the merge would land: the head it pins (`--match-head-commit`, T3's `expectedHeadSha`), else the
+PR's head. It is refused unless the gate is `OPEN`, with the open problems listed.
 A command it can't read (an unclosed quote) that mentions `gh … pr merge` is refused too.
 
 T3 Code tells agents to merge with its own `pull_request_merge` tool rather than `gh` (#179), so the
-same hook matches that tool too, and reads the PR straight from its input: `number` and
-`repository`, or the current branch's PR, the same default T3 takes from the thread's branch. A
-call into another linked environment (`environmentId`) must name both, since that branch is out of
-sight. Both front ends build the same `MergeCall`, and one check judges it. T3 refuses a merge
-unless the head is the `expectedHeadSha` it was given, so judging the PR's head judges the commit
-the merge would land. A `stack` merge lands every open layer below the PR, so the check follows the
-base chain (the open PR whose head is the base, and down) and judges each layer. An auto-merge (T3's
-`auto`, `gh pr merge --auto`) lands whichever head passes CI, even one pushed after the gate was
+same hook matches that tool too, and reads the merge straight from its input. It must name
+`number` and `repository`: T3's default is its thread's branch, which the hook can't see (the
+session may have `cd`'d elsewhere). Both front ends build the same `MergeCall`, and one check
+judges it. A `stack` merge is refused in any repo: T3 reads and pins the lower layers' heads after
+the hook has run, so the agent merges the PRs one at a time, bottom up.
+
+A merge GitHub defers lands whichever head passes CI later, even one pushed after the gate was
 judged, so a tracked PR's is refused even at `OPEN`: the ship run waits for CI itself and merges
-when the PR is ready. `--disable-auto` isn't a merge.
+when the PR is ready. That is an auto-merge (T3's `auto`, `gh pr merge --auto`), and a merge into a
+base that requires a merge queue (`isMergeQueueEnabled`), which T3 always joins by enabling
+auto-merge and `gh` does while checks are pending. GitHub keeps auto-merge on through a push by
+anyone with write access, and its docs don't say a push takes a PR out of the queue. `gh pr merge
+--admin` skips the queue and merges now, so it is judged as a plain merge.
 
 The user decides to merge past the gate, not the agent: told what's open, a user who still wants it
 merged gets `SHIP_PAST_GATE="<their reason>" gh pr merge …`, and the hook posts that reason and the

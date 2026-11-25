@@ -5,11 +5,10 @@ session admin-merged the PR at the user's next message with the problem still op
 the gate and the merge looked at the gate. Now this hook sees both ways an agent merges: `gh pr
 merge` in any Bash command, and T3 Code's `pull_request_merge` tool, which T3 tells agents to use
 instead of `gh` (#179). For a PR whose ship block names a tracking issue, it judges the gate at the
-PR's head (what the merge would land) and denies the merge unless the gate is OPEN, naming what's
-open. T3 refuses a merge unless the head is the `expectedHeadSha` it was given, so the PR's head is
-that commit whenever the merge can happen. A T3 `stack` merge is refused: T3 reads the lower layers'
-heads after this hook has run, so no check here can judge what it lands. An auto-merge lands whichever head passes CI, even one pushed after
-the gate was judged, so it is refused on a tracked PR.
+commit the merge would land (the head it pins, else the PR's) and denies the merge unless the gate
+is OPEN, naming what's open. A merge GitHub defers until CI passes (auto-merge, a merge queue) lands
+whichever head passes, even one pushed after the gate was judged, so it is refused on a tracked PR.
+A T3 `stack` merge is refused on any PR: T3 reads the lower layers' heads after this hook has run.
 
 A user who has been told and still wants the merge says so, and the agent merges with
 `SHIP_PAST_GATE="<the user's reason>"` in front of `gh pr merge` (a tool call has no such prefix, so

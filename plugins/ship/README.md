@@ -186,8 +186,8 @@ The plugin's `hooks/hooks.json` runs three:
 - Stop, `feature-stop-hook`: a session that recorded a review or closed a problem can't end its
   turn until the gate is `OPEN` or `MERGED`, short of `feature escalate` or `feature release`.
 - PreToolUse on Bash and on T3 Code's `pull_request_merge`, `feature-merge-guard`: a merge of a
-  tracked PR is refused while its gate is shut, and so is an auto-merge of one at any gate; a stack
-  merge is judged layer by layer. A user who has been told and still wants it gets it with
+  tracked PR is refused while its gate is shut, and so is an auto-merge or a merge-queue merge of
+  one at any gate, and a T3 stack merge of any PR. A user who has been told and still wants it gets it with
   `SHIP_PAST_GATE="<their reason>" gh pr merge …`, and the reason goes on the tracking issue.
 
 See "Driving the loop to the end" and "The merge guard" in [docs/design.md](docs/design.md).
