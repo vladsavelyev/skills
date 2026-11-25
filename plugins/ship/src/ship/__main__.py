@@ -664,12 +664,6 @@ def cmd_escalate(args: argparse.Namespace) -> None:
 
 
 def cmd_round(args: argparse.Namespace) -> None:
-    """Hold the branch for this session, which drives its ship run, and name the round it starts.
-
-    The round runs as a background subagent with the description this prints. While it runs, the
-    session may end its turn, and the round's completion wakes it to take in the report; once it's
-    done, the session can't end its turn until the gate settles (`hold.py`).
-    """
     branch = args.branch or current_branch()
     session = hold.current_session()
     if session is None:

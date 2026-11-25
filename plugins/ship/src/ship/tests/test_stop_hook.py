@@ -184,7 +184,6 @@ def test_a_round_of_one_repos_branch_leaves_the_same_branch_of_another_repo_judg
 
 
 def test_a_first_round_keeps_its_hold_before_it_tracks_the_branch(monkeypatch, capsys, tmp_path):
-    """The first round adopts the branch as it runs: an untracked branch says nothing until it's done."""
     _two_holds(monkeypatch, tmp_path, feat_error=None, rounds=(_round(tmp_path, "review", "untracked"),))
     hold.release("s1", branch="feat", checkout=str(tmp_path))
     hold.release("s1", branch="fix-it", checkout=str(tmp_path))
