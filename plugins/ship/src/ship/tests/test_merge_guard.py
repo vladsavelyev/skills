@@ -15,7 +15,7 @@ from ship.merge_guard import MergeCall, merge_calls
 
 def test_a_bare_merge_names_the_current_branchs_pr():
     assert merge_calls("gh pr merge --admin --squash", "/repo") == [
-        MergeCall(target=None, repo=None, cwd="/repo", override=None, admin=True)
+        MergeCall(target=None, repo=None, cwd="/repo", override=None, admin=True, method="squash")
     ]
 
 
