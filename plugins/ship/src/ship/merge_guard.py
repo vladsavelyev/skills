@@ -40,6 +40,7 @@ _VALUE_FLAGS = {"author-email", "body", "body-file", "match-head-commit", "repo"
 _SHORT_FLAGS = {"A": "author-email", "b": "body", "F": "body-file", "d": "delete-branch", "h": "help", "m": "merge"}
 _SHORT_FLAGS |= {"r": "rebase", "R": "repo", "s": "squash", "t": "subject"}
 _TRUE = {"1", "t", "T", "true", "TRUE", "True"}
+_FALSE = {"0", "f", "F", "false", "FALSE", "False"}
 # The `gh pr merge` flag for each merge method of T3's `pull_request_merge`. GitHub has no fast-forward.
 _GH_METHODS = {"merge": "--merge", "squash": "--squash", "rebase": "--rebase"}
 # Words in front of a command that leave it the same command, in the same scope.
@@ -66,46 +67,64 @@ class MergeCall:
     method: str | None = None
 
 
-def _gh_args(words: list[str]) -> tuple[list[str], dict[str, str | bool]]:
-    """The positional words of a gh command line, and its flags by long name, read the way gh reads
-    them for `gh pr merge`: a value flag takes `=value`, the rest of a short cluster or the next word,
-    and a boolean takes an optional `=true` or `=false`."""
+def _gh_args(words: list[str]) -> tuple[list[str], dict[str, str | bool], list[str]]:
+    """The positional words of a gh command line, its flags by long name, and the flag words gh
+    would refuse, read the way gh reads them for `gh pr merge`: a value flag takes `=value`, the rest
+    of a short cluster or the next word, and a boolean takes an optional `=true` or `=false`."""
     positional: list[str] = []
     flags: dict[str, str | bool] = {}
+    refused: list[str] = []
     rest = iter(words)
     for word in rest:
         if word == "--":
             positional += rest
-        elif word.startswith("--"):
-            name, eq, value = word[2:].partition("=")
-            if name in _VALUE_FLAGS:
-                flags[name] = value if eq else next(rest, "")
-            else:
-                flags[name] = value in _TRUE if eq else True
-        elif word.startswith("-") and word != "-":
-            for k, letter in enumerate(word[1:], start=2):
-                name, tail = _SHORT_FLAGS.get(letter, letter), word[k:]
-                if name in _VALUE_FLAGS:
-                    flags[name] = tail.removeprefix("=") if tail else next(rest, "")
-                    break
-                if tail.startswith("="):
-                    flags[name] = tail[1:] in _TRUE
-                    break
-                flags[name] = True
-        else:
+            continue
+        if not word.startswith("-") or word == "-":
             positional.append(word)
-    return positional, flags
+            continue
+        for name, attached in _flag_words(word):
+            if name in _VALUE_FLAGS:
+                value = next(rest, None) if attached is None else attached
+            elif attached is None:
+                value = True
+            elif attached in _TRUE or attached in _FALSE:
+                value = attached in _TRUE
+            else:
+                value = None
+            if value is None:
+                refused.append(word)
+            else:
+                flags[name] = value
+    return positional, flags, refused
+
+
+def _flag_words(word: str) -> list[tuple[str, str | None]]:
+    """The flags `word` sets by long name, each with the text attached to it (None: none). In a short
+    cluster, a value flag or a `=` takes the rest of the word."""
+    if word.startswith("--"):
+        name, eq, attached = word[2:].partition("=")
+        return [(name, attached if eq else None)]
+    found: list[tuple[str, str | None]] = []
+    for k, letter in enumerate(word[1:], start=2):
+        name, tail = _SHORT_FLAGS.get(letter, letter), word[k:]
+        if name in _VALUE_FLAGS or tail.startswith("="):
+            return [*found, (name, tail.removeprefix("=") if tail else None)]
+        found.append((name, None))
+    return found
 
 
 def _gh_merge(words: list[str], cwd: str, env: dict[str, str]) -> MergeCall | None:
     """The merge `words` run with `gh pr merge`, behind whatever wrapper (`command`, `env`, `sudo`,
-    `timeout 10`, `xargs`, …), or None if they run none: `--help` and `--disable-auto` merge nothing."""
+    `timeout 10`, `xargs`, …), or None if they run none: `--help` and `--disable-auto` merge nothing.
+    Raises ValueError for a merge with a flag gh would refuse, rather than read it as another."""
     for k, word in enumerate(words):
         if Path(word).name != "gh":
             continue
-        positional, flags = _gh_args(words[k + 1 :])
+        positional, flags, refused = _gh_args(words[k + 1 :])
         if positional[:2] != ["pr", "merge"]:
             continue
+        if refused:
+            raise ValueError(f"gh would refuse `{refused[0]}`")
         if flags.get("help") is True or flags.get("disable-auto") is True:
             return None
         env = env | dict(w.partition("=")[::2] for w in words[:k] if _is_assignment(w))

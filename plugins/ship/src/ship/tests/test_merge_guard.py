@@ -338,6 +338,27 @@ def test_a_short_flag_cluster_takes_its_value_from_the_next_word():
     assert (call.target, call.repo) == ("5", "org/app")
 
 
+@pytest.mark.parametrize(
+    ("command", "flag"),
+    [
+        ("gh pr merge 5 --repo", "--repo"),
+        ("gh pr merge 5 -dR", "-dR"),
+        ("gh pr merge 5 --match-head-commit", "--match-head-commit"),
+        ("gh pr merge 5 --auto=yes", "--auto=yes"),
+        ("gh pr merge 5 -d=no", "-d=no"),
+    ],
+)
+def test_a_merge_flag_gh_would_refuse_is_refused_not_misread(monkeypatch, capsys, command, flag):
+    monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("misread a flag gh refuses"))
+    out = json.loads(_run_hook(monkeypatch, capsys, command))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and f"gh would refuse `{flag}`" in out["permissionDecisionReason"]
+
+
+def test_flags_of_other_gh_commands_are_not_judged():
+    command = "gh pr view 5 --json=title && gh pr merge 5 --auto=F -d=1"
+    assert merge_calls(command, "/repo") == [MergeCall(target="5", repo=None, cwd="/repo", override=None)]
+
+
 def test_a_t3_stack_merge_is_refused(monkeypatch, capsys):
     """#190, #192: T3 reads the lower layers' heads after the hook, so none of them can be judged."""
     monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("judged a stack merge"))
