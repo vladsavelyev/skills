@@ -188,7 +188,8 @@ The plugin's `hooks/hooks.json` runs three:
 - PreToolUse on Bash and on T3 Code's `pull_request_merge`, `feature-merge-guard`: a merge of a
   tracked PR is refused while its gate is shut, and so is an auto-merge or a merge-queue merge of
   one at any gate, and a T3 stack merge of any PR. A user who has been told and still wants it gets it with
-  `SHIP_PAST_GATE="<their reason>" gh pr merge …`, and the reason goes on the tracking issue.
+  `SHIP_PAST_GATE="<their reason>"` in front of the `gh pr merge` (for a T3 merge, the one its refusal
+  prints), and the reason goes on the tracking issue.
 
 See "Driving the loop to the end" and "The merge guard" in [docs/design.md](docs/design.md).
 

@@ -10,11 +10,12 @@ is OPEN, naming what's open. A merge GitHub defers until CI passes (auto-merge, 
 whichever head passes, even one pushed after the gate was judged, so it is refused on a tracked PR.
 A T3 `stack` merge is refused on any PR: T3 reads the lower layers' heads after this hook has run.
 
-A user who has been told and still wants the merge says so, and the agent merges with
-`SHIP_PAST_GATE="<the user's reason>"` in front of `gh pr merge` (a tool call has no such prefix, so
-the refusal of a T3 merge points there too). The hook then lets it through and posts the reason and
-the gate on the tracking issue first, so merging past the gate is a decision on the record, never a
-silent skip. A merge by hand in GitHub's UI is the user's own and isn't seen here.
+A user who has been told and still wants the merge says so, and the agent re-runs its `gh pr
+merge` with `SHIP_PAST_GATE="<the user's reason>"` in front of `gh`. A tool call can't carry that
+prefix, so the refusal of a T3 merge prints the `gh pr merge` that makes the same merge. The hook
+then lets it through and posts the reason and the gate on the tracking issue first, so merging past
+the gate is a decision on the record, never a silent skip. A merge by hand in GitHub's UI is the
+user's own and isn't seen here.
 
 Fails closed: once a command is a merge of some PR, any error checking it denies the command with
 that error, because letting it through would be the silent skip this exists to stop.
@@ -39,6 +40,8 @@ _VALUE_FLAGS = {"author-email", "body", "body-file", "match-head-commit", "repo"
 _SHORT_FLAGS = {"A": "author-email", "b": "body", "F": "body-file", "d": "delete-branch", "h": "help", "m": "merge"}
 _SHORT_FLAGS |= {"r": "rebase", "R": "repo", "s": "squash", "t": "subject"}
 _TRUE = {"1", "t", "T", "true", "TRUE", "True"}
+# The `gh pr merge` flag for each merge method of T3's `pull_request_merge`. GitHub has no fast-forward.
+_GH_METHODS = {"merge": "--merge", "squash": "--squash", "rebase": "--rebase"}
 # Words in front of a command that leave it the same command, in the same scope.
 _RESERVED = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "{", "}", "!", "time"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
@@ -50,8 +53,8 @@ _MENTIONS_MERGE = re.compile(r"\bgh\b.*\bpr\b\s+merge\b", re.DOTALL)
 class MergeCall:
     """One merge: the PR it names (None: the current branch's), its repo, the directory it runs in
     (after a command's own `cd`s), the `SHIP_PAST_GATE` reason if given, whether it auto-merges,
-    whether it skips a merge queue (`gh pr merge --admin`), and the head it pins (None: whatever
-    the PR's head is)."""
+    whether it skips a merge queue (`gh pr merge --admin`), the head it pins (None: whatever the
+    PR's head is), and a T3 call's merge method (None: a `gh pr merge`, whose own flags carry it)."""
 
     target: str | None
     repo: str | None
@@ -60,6 +63,7 @@ class MergeCall:
     auto: bool = False
     admin: bool = False
     head: str | None = None
+    method: str | None = None
 
 
 def _gh_args(words: list[str]) -> tuple[list[str], dict[str, str | bool]]:
@@ -186,23 +190,34 @@ def t3_merge_call(tool_input: dict, cwd: str) -> MergeCall:
         override=None,
         auto=tool_input.get("auto") is True,
         head=tool_input.get("expectedHeadSha"),
+        method=tool_input.get("method") or "merge",
     )
 
 
-def _past_gate(pr: dict) -> str:
-    return (
-        f'Only if the user, told this, still wants it merged now: `{OVERRIDE}="<their reason>" gh pr merge '
-        f"{pr['number']} --repo {pr['repo']}`; the reason goes on the tracking issue."
-    )
+def _past_gate(call: MergeCall, pr: dict, head: str) -> str:
+    """How the user's merge runs past the gate: its `gh pr merge` with the reason in front, or for a
+    T3 call, the `gh pr merge` that makes it, pinned to the head the gate was judged at."""
+    if call.method is None:
+        how = f're-run the command with `{OVERRIDE}="<their reason>"` in front of `gh`'
+    else:
+        flag = _GH_METHODS.get(call.method, "--merge|--squash|--rebase")
+        auto = " --auto" if call.auto else ""
+        how = (
+            f'run `{OVERRIDE}="<their reason>" gh pr merge {pr["number"]} --repo {pr["repo"]} {flag}{auto} '
+            f"--match-head-commit {head}`"
+        )
+        if call.method not in _GH_METHODS:
+            how += f" with the method the user picks: GitHub has no {call.method} merge"
+    return f"Only if the user, told this, still wants it merged now, {how}; the reason goes on the tracking issue."
 
 
-def _refusal(pr: dict, issue: int, decision, blocking: list[dict]) -> str:
+def _refusal(pr: dict, issue: int, decision, blocking: list[dict], past_gate: str) -> str:
     listed = "\n".join(f"  #{s['number']} [{problems.severity(s)}] {s['title']}" for s in blocking) or "  none"
     return (
         f"ship refuses to merge PR #{pr['number']}: its gate (feature #{issue}) is {decision}.\n"
         f"Open problems, every one blocking:\n{listed}\n"
         f"Nothing ships as debt. Close them with `Skill(ship:ship)`, which fixes each one and reviews again "
-        f"until the gate is OPEN. Tell the user what is open. {_past_gate(pr)}"
+        f"until the gate is OPEN. Tell the user what is open. {past_gate}"
     )
 
 
@@ -217,11 +232,11 @@ def _deferral(call: MergeCall, pr: dict) -> str | None:
     return None
 
 
-def _deferred_refusal(pr: dict, issue: int, deferral: str, call: MergeCall) -> str:
+def _deferred_refusal(pr: dict, issue: int, deferral: str, call: MergeCall, past_gate: str) -> str:
     wait = "Wait for the checks, then merge without auto. " if call.auto else ""
     return (
         f"ship refuses to merge PR #{pr['number']} {deferral} (feature #{issue}): GitHub then lands whichever "
-        f"head passes CI, even one pushed after the gate was judged. {wait}{_past_gate(pr)}"
+        f"head passes CI, even one pushed after the gate was judged. {wait}{past_gate}"
     )
 
 
@@ -252,10 +267,11 @@ def check(call: MergeCall) -> str | None:
         return None
     blocking = problems.blocking(subs)
     if call.override is None:
+        past_gate = _past_gate(call, pr, head)
         return (
-            _deferred_refusal(pr, issue, deferral, call)
+            _deferred_refusal(pr, issue, deferral, call, past_gate)
             if decision.settled
-            else _refusal(pr, issue, decision, blocking)
+            else _refusal(pr, issue, decision, blocking, past_gate)
         )
     how = f" {deferral}" if deferral else ""
     github.comment(

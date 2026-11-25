@@ -230,7 +230,38 @@ def test_t3s_merge_tool_is_refused_at_a_shut_gate(monkeypatch, capsys):
     out = json.loads(_run_t3_hook(monkeypatch, capsys, tool_input))
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "refuses to merge PR #5355" in reason and "#5400 [sev:med] stale cache" in reason
-    assert 'SHIP_PAST_GATE="<their reason>" gh pr merge 5355 --repo org/app' in reason
+
+
+@pytest.mark.parametrize(
+    ("tool_input", "command"),
+    [
+        ({"method": "squash", "expectedHeadSha": "a" * 40}, "--squash --match-head-commit " + "a" * 40),
+        ({}, "--merge --match-head-commit " + "f" * 40),
+        ({"method": "rebase", "auto": True}, "--rebase --auto --match-head-commit " + "f" * 40),
+    ],
+)
+def test_a_refused_t3_merge_names_the_gh_merge_that_makes_it(monkeypatch, capsys, tool_input, command):
+    _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
+    out = json.loads(_run_t3_hook(monkeypatch, capsys, {"number": 5355, "repository": "org/app"} | tool_input))
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert f'`SHIP_PAST_GATE="<their reason>" gh pr merge 5355 --repo org/app {command}`;' in reason
+
+
+def test_a_refused_t3_fast_forward_leaves_the_method_to_the_user(monkeypatch, capsys):
+    _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
+    tool_input = {"number": 5355, "repository": "org/app", "method": "fast-forward"}
+    reason = json.loads(_run_t3_hook(monkeypatch, capsys, tool_input))["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "gh pr merge 5355 --repo org/app --merge|--squash|--rebase --match-head-commit" in reason
+    assert "with the method the user picks: GitHub has no fast-forward merge" in reason
+
+
+def test_a_refused_gh_merge_is_rerun_with_the_reason_in_front(monkeypatch, capsys):
+    _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
+    out = json.loads(_run_hook(monkeypatch, capsys, "gh pr merge 5355 --squash"))["hookSpecificOutput"]
+    assert (
+        're-run the command with `SHIP_PAST_GATE="<their reason>"` in front of `gh`'
+        in (out["permissionDecisionReason"])
+    )
 
 
 def test_t3s_merge_tool_merges_at_an_open_gate(monkeypatch, capsys):
@@ -242,7 +273,7 @@ def test_t3s_merge_tool_merges_at_an_open_gate(monkeypatch, capsys):
 
 def test_t3s_merge_input_names_the_pr():
     call = merge_guard.t3_merge_call({"number": 7, "repository": "org/app", "auto": True}, "/repo")
-    assert call == MergeCall(target="7", repo="org/app", cwd="/repo", override=None, auto=True)
+    assert call == MergeCall(target="7", repo="org/app", cwd="/repo", override=None, auto=True, method="merge")
 
 
 @pytest.mark.parametrize("tool_input", [{"expectedHeadSha": "abc"}, {"number": 7}, {"environmentId": "laptop"}])

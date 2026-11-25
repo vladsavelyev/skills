@@ -528,8 +528,11 @@ anyone with write access, and its docs don't say a push takes a PR out of the qu
 
 The user decides to merge past the gate, not the agent: told what's open, a user who still wants it
 merged gets `SHIP_PAST_GATE="<their reason>" gh pr merge …`, and the hook posts that reason and the
-gate on the tracking issue before letting it through. A tool call has no such prefix, so a refused T3
-merge names the same `gh` command. It fails closed: an error while checking a merge denies the merge
+gate on the tracking issue before letting it through. A refused `gh pr merge` is re-run with the
+prefix, keeping its own flags. A tool call has no such prefix, so a refused T3 merge prints the `gh
+pr merge` that makes it: its method as a flag (T3's default is a merge commit; GitHub has no
+fast-forward, so that one is left to the user) and `--match-head-commit` at the head the gate was
+judged at. It fails closed: an error while checking a merge denies the merge
 with the error. The gate query the hooks and the CLI share lives in `feature.py` and raises
 `Refusal` (`errors.py`) for an expected condition rather than exiting the process, so no failure
 leaves the guard by a path its error handling doesn't see. A merge in GitHub's UI is the human's
