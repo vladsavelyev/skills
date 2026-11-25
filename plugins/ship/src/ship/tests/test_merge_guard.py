@@ -224,7 +224,6 @@ def _run_t3_hook(monkeypatch, capsys, tool_input: dict) -> str:
 
 
 def test_t3s_merge_tool_is_refused_at_a_shut_gate(monkeypatch, capsys):
-    """#179: T3 tells agents to merge with `pull_request_merge`, which never reached the guard."""
     _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
     tool_input = {"number": 5355, "repository": "org/app", "expectedHeadSha": "f" * 40}
     out = json.loads(_run_t3_hook(monkeypatch, capsys, tool_input))
@@ -309,7 +308,6 @@ def test_the_users_reason_lets_an_auto_merge_through_on_the_record(monkeypatch):
     ],
 )
 def test_gh_auto_is_read_from_the_flag_not_the_words(command, auto):
-    """#189: `"--auto" in args` also matched a body, and missed `--auto=true`."""
     [call] = merge_calls(command, "/repo")
     assert call.auto is auto
 
@@ -329,7 +327,6 @@ def test_disabling_auto_merge_or_asking_for_help_is_no_merge(command):
 
 
 def test_a_body_naming_disable_auto_is_still_a_merge():
-    """#189: this merged with no gate check at all."""
     assert [c.target for c in merge_calls('gh pr merge 5355 --merge --body "--disable-auto"', "/repo")] == ["5355"]
 
 
@@ -377,7 +374,6 @@ def _judged_head(monkeypatch, run) -> str:
 
 
 def test_the_gate_is_judged_at_the_head_the_merge_pins(monkeypatch, capsys):
-    """#192: the guard read the PR's head itself, not the commit T3 or gh would land."""
     t3 = {"number": 5355, "repository": "org/app", "expectedHeadSha": "a" * 40}
     assert _judged_head(monkeypatch, lambda: _run_t3_hook(monkeypatch, capsys, t3)) == "a" * 40
     gh = "gh pr merge 5355 --match-head-commit " + "b" * 40
