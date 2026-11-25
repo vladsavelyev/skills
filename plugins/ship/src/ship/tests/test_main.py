@@ -382,7 +382,7 @@ def test_escalate_refuses_while_a_problem_nobody_asked_about_is_open(monkeypatch
     with pytest.raises(SystemExit, match="#5400 still open"):
         cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="budget spent", problem=[]))
     assert posted == []
-    assert hold.held("s1") == [{"branch": "add-oauth", "checkout": "/repo", "round": "t1"}]
+    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo", round="t1")]
 
 
 def test_escalate_refuses_while_review_budget_remains_and_no_problem_needs_the_user(monkeypatch, tmp_path):
@@ -425,7 +425,7 @@ def _in_session(monkeypatch, tmp_path, *, running: bool = True) -> None:
 def test_a_round_holds_the_session_driving_the_run_with_its_thread(monkeypatch, tmp_path, capsys):
     _in_session(monkeypatch, tmp_path)
     cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
-    assert hold.held("s1") == [{"branch": "add-oauth", "checkout": "/repo", "round": "t-review"}]
+    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo", round="t-review")]
     assert "End your turn" in capsys.readouterr().out
 
 
@@ -433,7 +433,7 @@ def test_the_next_round_replaces_the_thread_the_hold_waits_on(monkeypatch, tmp_p
     _in_session(monkeypatch, tmp_path)
     cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
     cli.main(["round", "--branch", "add-oauth", "--thread", "t-fix"])
-    assert hold.held("s1") == [{"branch": "add-oauth", "checkout": "/repo", "round": "t-fix"}]
+    assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo", round="t-fix")]
 
 
 def test_a_round_that_already_finished_still_holds_and_says_so(monkeypatch, tmp_path, capsys):

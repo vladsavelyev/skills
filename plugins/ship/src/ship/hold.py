@@ -20,6 +20,7 @@ finds it from whatever directory the session ends in, with one file check when n
 
 import json
 import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 # The id Claude Code gives every Bash command of a session, subagents and forked skills included;
@@ -42,29 +43,52 @@ def _path(session: str) -> Path:
     return holds_dir() / f"{session}.json"
 
 
-def held(session: str) -> list[dict]:
-    """The holds of `session`: `{"branch", "checkout", "round"}` each, oldest first, `round` being the
-    T3 thread of the branch's latest round."""
+@dataclass(frozen=True)
+class Hold:
+    branch: str
+    checkout: str
+    # The T3 thread of the branch's latest round. None: no round is in flight, so the gate is judged.
+    round: str | None
+
+    def same(self, branch: str, checkout: str) -> bool:
+        # A branch name alone isn't a feature: two repos can each have a `fix-tests`.
+        return self.branch == branch and self.checkout == checkout
+
+
+def _decode(entry: object, path: Path) -> Hold:
+    # Deliberately kept: files the plugin wrote before rounds ran in T3 threads have no `round`, and
+    # stay on disk in sessions that held a branch then. They mean no round is in flight.
+    if not (
+        isinstance(entry, dict)
+        and entry.keys() in ({"branch", "checkout"}, {"branch", "checkout", "round"})
+        and isinstance(entry["branch"], str)
+        and isinstance(entry["checkout"], str)
+        and isinstance(entry.get("round"), str | None)
+    ):
+        raise ValueError(f"{path} holds {entry!r}, not a hold: {{branch, checkout[, round]}}")
+    return Hold(branch=entry["branch"], checkout=entry["checkout"], round=entry.get("round"))
+
+
+def held(session: str) -> list[Hold]:
+    """The holds of `session`, oldest first."""
     path = _path(session)
     if not path.exists():
         return []
-    return json.loads(path.read_text())
+    entries = json.loads(path.read_text())
+    if not isinstance(entries, list):
+        raise ValueError(f"{path} holds {entries!r}, not a list of holds")
+    return [_decode(entry, path) for entry in entries]
 
 
-def _write(session: str, holds: list[dict]) -> None:
+def _write(session: str, holds: list[Hold]) -> None:
     path = _path(session)
     if not holds:
         path.unlink(missing_ok=True)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(holds, indent=2) + "\n")
+    tmp.write_text(json.dumps([asdict(h) for h in holds], indent=2) + "\n")
     tmp.replace(path)
-
-
-def _same(h: dict, branch: str, checkout: str) -> bool:
-    # A branch name alone isn't a feature: two repos can each have a `fix-tests`.
-    return h["branch"] == branch and h["checkout"] == checkout
 
 
 def hold(session: str, *, branch: str, checkout: str, round: str) -> None:
@@ -73,20 +97,20 @@ def hold(session: str, *, branch: str, checkout: str, round: str) -> None:
     _write(
         session,
         [
-            *(h for h in held(session) if not _same(h, branch, checkout)),
-            {"branch": branch, "checkout": checkout, "round": round},
+            *(h for h in held(session) if not h.same(branch, checkout)),
+            Hold(branch=branch, checkout=checkout, round=round),
         ],
     )
 
 
 def holds(session: str, *, branch: str, checkout: str) -> bool:
-    return any(_same(h, branch, checkout) for h in held(session))
+    return any(h.same(branch, checkout) for h in held(session))
 
 
 def release(session: str, *, branch: str, checkout: str) -> bool:
     """Drop `session`'s hold on `branch` of `checkout`'s repo. Returns whether there was one."""
     before = held(session)
-    kept = [h for h in before if not _same(h, branch, checkout)]
+    kept = [h for h in before if not h.same(branch, checkout)]
     _write(session, kept)
     return len(kept) != len(before)
 

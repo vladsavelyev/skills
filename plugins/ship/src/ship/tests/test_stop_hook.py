@@ -7,8 +7,12 @@ import pytest
 
 from ship import github, hold, stop_hook, t3
 from ship.errors import Refusal
+from ship.shell import CommandFailed
 from ship import gate
 from ship.gate import GateDecision, Verdict
+
+
+_asks_t3 = t3.thread_running
 
 
 @pytest.fixture(autouse=True)
@@ -115,7 +119,7 @@ def test_a_hold_whose_branch_isnt_tracked_is_dropped_and_the_others_still_hold(m
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "block" and "`fix-it`" in out["reason"]
     assert "`untracked`: it isn't a tracked feature" in out["systemMessage"]
-    assert [h["branch"] for h in hold.held("s1")] == ["feat", "fix-it"]
+    assert [h.branch for h in hold.held("s1")] == ["feat", "fix-it"]
 
 
 def test_a_gate_github_cant_answer_keeps_the_hold_and_holds_the_stop_once(monkeypatch, capsys, tmp_path):
@@ -124,7 +128,7 @@ def test_a_gate_github_cant_answer_keeps_the_hold_and_holds_the_stop_once(monkey
     stop_hook.main()
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "block" and "HTTP 503" in out["reason"]
-    assert [h["branch"] for h in hold.held("s1")] == ["feat", "fix-it"]
+    assert [h.branch for h in hold.held("s1")] == ["feat", "fix-it"]
 
 
 def test_a_second_stop_in_a_row_with_github_down_goes_through_with_the_error_shown(monkeypatch, capsys, tmp_path):
@@ -133,7 +137,7 @@ def test_a_second_stop_in_a_row_with_github_down_goes_through_with_the_error_sho
     stop_hook.main()
     out = json.loads(capsys.readouterr().out)
     assert "decision" not in out and "HTTP 503" in out["systemMessage"]
-    assert [h["branch"] for h in hold.held("s1")] == ["feat"]
+    assert [h.branch for h in hold.held("s1")] == ["feat"]
 
 
 def test_a_held_session_ends_its_turn_while_its_round_runs(monkeypatch, capsys, tmp_path):
@@ -142,7 +146,7 @@ def test_a_held_session_ends_its_turn_while_its_round_runs(monkeypatch, capsys, 
     monkeypatch.setattr(stop_hook.feature, "gate_for", lambda branch: pytest.fail("judged a gate"))
     stop_hook.main()
     assert capsys.readouterr().out == ""
-    assert [h["branch"] for h in hold.held("s1")] == ["feat", "fix-it"]
+    assert [h.branch for h in hold.held("s1")] == ["feat", "fix-it"]
 
 
 def test_only_the_branch_whose_round_runs_may_wait(monkeypatch, capsys, tmp_path):
@@ -163,7 +167,7 @@ def test_a_first_round_keeps_its_hold_before_it_tracks_the_branch(monkeypatch, c
     monkeypatch.setattr(t3, "thread_running", lambda thread: True)
     stop_hook.main()
     assert capsys.readouterr().out == ""
-    assert [h["branch"] for h in hold.held("s1")] == ["untracked"]
+    assert [h.branch for h in hold.held("s1")] == ["untracked"]
 
 
 def test_a_round_t3_cant_answer_for_holds_the_stop_once(monkeypatch, capsys, tmp_path):
@@ -171,10 +175,31 @@ def test_a_round_t3_cant_answer_for_holds_the_stop_once(monkeypatch, capsys, tmp
     hold.release("s1", branch="fix-it", checkout=str(tmp_path))
 
     def down(thread):
-        raise Refusal("T3 server not running")
+        raise CommandFailed(1, ["t3", "thread", "show"], "", "T3 server not running")
 
     monkeypatch.setattr(t3, "thread_running", down)
     stop_hook.main()
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "block" and "T3 server not running" in out["reason"]
-    assert [h["branch"] for h in hold.held("s1")] == ["feat"]
+    assert [h.branch for h in hold.held("s1")] == ["feat"]
+
+
+def test_a_round_outside_t3_fails_the_hook_instead_of_passing_for_an_outage(monkeypatch, capsys, tmp_path):
+    """#205: every other stop was blocked as if T3 were down, and the gate never judged again."""
+    _two_holds(monkeypatch, tmp_path, feat_error=None)
+    monkeypatch.setattr(t3, "thread_running", _asks_t3)
+    with pytest.raises(Refusal, match="isn't a T3 Code session"):
+        stop_hook.main()
+    assert [h.branch for h in hold.held("s1")] == ["feat", "fix-it"]
+
+
+def test_a_hold_written_before_rounds_had_threads_is_judged_by_its_gate(monkeypatch, capsys, tmp_path):
+    """#205: it raised `KeyError('round')`, which the hook took for T3 being down, on every stop."""
+    _two_holds(monkeypatch, tmp_path, feat_error=None)
+    path = hold.holds_dir() / "s1.json"
+    path.write_text(json.dumps([{"branch": "fix-it", "checkout": str(tmp_path)}]))
+    monkeypatch.setattr(t3, "thread_running", lambda thread: pytest.fail("asked T3 about no round"))
+    stop_hook.main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "`fix-it`" in out["reason"] and "systemMessage" not in out
+    assert hold.held("s1") == [hold.Hold(branch="fix-it", checkout=str(tmp_path), round=None)]

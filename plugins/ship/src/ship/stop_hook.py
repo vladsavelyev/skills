@@ -3,7 +3,8 @@
 Claude Code runs it whenever the agent is about to end its turn. For each branch this session holds,
 it first asks T3 whether the branch's round still runs. If it does, the turn may end: the round's
 completion wakes the session, and the first round tracks the branch as it runs, so nothing is judged
-yet. Otherwise it judges the gate. OPEN or MERGED: the run is over, and the hold goes. Anything else:
+yet. Outside T3 it can't ask, and fails rather than guess. Otherwise, or when the hold names no
+round, it judges the gate. OPEN or MERGED: the run is over, and the hold goes. Anything else:
 it blocks the stop, and Claude Code hands the reason back to the agent, which goes on with what the
 gate asks for: fix the open problems, review again, or leave on the record (`feature escalate`,
 `feature release`).
@@ -11,11 +12,13 @@ gate asks for: fix the open problems, review again, or leave on the record (`fea
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 from . import feature, github, hold, problems, t3
 from .gitwiring import feature_issue
+from .shell import CommandFailed
 
 
 def _why(branch: str, issue: int, state: dict, blocking: list[dict], decision) -> str:
@@ -39,15 +42,15 @@ def main() -> None:
     failed: list[str] = []
     own_token = "GH_TOKEN" in os.environ
     for held in holds:
-        branch, checkout = held["branch"], held["checkout"]
+        branch, checkout = held.branch, held.checkout
         if not Path(checkout).is_dir():
             hold.release(session, branch=branch, checkout=checkout)
             gone.append(f"ship: stopped holding `{branch}`: its checkout {checkout} is gone.")
             continue
         try:
-            if t3.thread_running(held["round"]):
+            if held.round is not None and t3.thread_running(held.round):
                 continue
-        except Exception as exc:  # T3 down: judged like a gate GitHub can't answer, below
+        except (CommandFailed, subprocess.TimeoutExpired) as exc:  # T3 down: like GitHub down, below
             failed.append(
                 f"ship couldn't ask T3 whether the round of `{branch}`, which this session holds, runs: {exc}"
             )
