@@ -2,6 +2,8 @@
 
 import io
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -347,3 +349,10 @@ def test_an_admin_merge_skips_the_queue_so_merges_at_an_open_gate(monkeypatch):
     _stub_pr(monkeypatch, verdict=Verdict.OPEN, queue=True)
     [call] = merge_calls("gh pr merge 5355 --admin", "/repo")
     assert merge_guard.check(call) is None
+
+
+def test_the_hook_runs_on_bash_and_t3s_merge_tool():
+    """#194: a rename of the tool on either side would stop the hook firing for T3 merges."""
+    hooks = json.loads((Path(merge_guard.__file__).parents[2] / "hooks" / "hooks.json").read_text())["hooks"]
+    [matcher] = [h["matcher"] for h in hooks["PreToolUse"] if "feature-merge-guard" in h["hooks"][0]["command"]]
+    assert re.fullmatch(matcher, "Bash") and re.fullmatch(matcher, merge_guard.T3_MERGE)

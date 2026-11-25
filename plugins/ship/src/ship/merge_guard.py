@@ -33,7 +33,6 @@ from .gitwiring import fetch_pr_head, has_object
 from .state import parse_block
 
 OVERRIDE = "SHIP_PAST_GATE"
-# The name Claude Code gives T3 Code's merge tool; `hooks/hooks.json` matches the same name.
 T3_MERGE = "mcp__t3-code__pull_request_merge"
 # The flags `gh pr merge` takes (with `gh pr`'s `--repo`) by long name: those that take a value, and
 # each short name. gh's flag parser reads a boolean's `=value` the way Go's `strconv.ParseBool` does.
