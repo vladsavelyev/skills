@@ -28,8 +28,9 @@ relevant, closed as `wontfix` with the reason. A spent budget limits review roun
 
 ## Rounds
 
-A round runs in a T3 child thread, never in this one: a skill called here holds this thread until
-it returns, and every message the user sends waits with it.
+Start each round in a T3 child thread; never call `Skill(ship:review)` or `Skill(ship:fix)`
+yourself. Called here, a round would block this thread until it returned, and the user's messages
+would go unread until then.
 
 1. **Start it.** `delegate_task` with `mode: "async"`, no `target` (the child runs as you do),
    `role: "review"` or `"implementation"`, `title: "Review PR #<n>"` or `"Fix PR #<n>"`, and `task:
