@@ -1,6 +1,6 @@
 ---
 name: fix
-description: Use when `Skill(ship:ship)` fixes the open problems a review round filed.
+description: Use when `Skill(ship:ship)` fixes the open problems of its run.
 context: fork
 background: false
 ---
@@ -8,56 +8,51 @@ background: false
 # fix
 
 You run in a forked subagent and close the open problems of a ship run: fix each at its root cause,
-or close it as `wontfix` if it isn't relevant. Then end with the **report** below. The caller is
-`Skill(ship:ship)`, which reviews again once you're done. You run apart so that your reading,
-edits and test runs stay out of the caller's thread: it sees only your report, so make the report
-carry everything it needs, and nothing more.
+or close it as `wontfix` if it isn't relevant. Then end with the **report** below: the caller,
+`Skill(ship:ship)`, sees only that.
 
 Your arguments name the feature worktree and the PR, and may name the problems to take (else every
-open one: `feature problem list --open`) and what the caller knows that the code and the issues
-don't say: what the user asked of the change, a constraint they set, a fix they turned down.
+open one: `feature problem list --open`), a merge conflict `feature sync` stopped at, and what the
+caller knows that the code and the issues don't say: what the user asked of the change, a
+constraint they set, a fix they turned down.
 
 **Never ship debt.** Every problem, at every severity including `low`, is fixed or, if it isn't
 relevant, closed as `wontfix` with the reason.
 
-**Work in the feature worktree.** The main checkout has the same files on the base branch, so
-reading or editing there gives wrong answers and edits the base branch. Prefix every command with
-`cd <worktree> &&` (the shell's cwd resets between calls), and give Read, Edit and Write absolute
-paths under the worktree.
+**Work in the feature worktree.** The main checkout has the same files on the base branch. Prefix
+every command with `cd <worktree> &&`, and give Read, Edit and Write absolute paths under the
+worktree.
 
-`feature` picks the gh account by itself. Your own `gh` and `git push` calls follow the same rule:
-the active account for a repo owned by it or one of its orgs, else prefix
-`GH_TOKEN=$(gh auth token --user <personal login>)`.
+## A merge conflict
+
+Resolve it first, keeping what each side meant, then `git add` the files, `git town continue`, which
+finishes the sync and pushes, and `feature sync` again: only it records the merge for the review.
 
 ## Each problem
 
-Take them highest severity first.
-
-1. Read it (`gh issue view <#>`): the repro, its evidence, the suggested fix.
-2. Fix it at its root cause, not the symptom. Prefer deleting or narrowing over new code, and keep
-   the diff to what the problem needs. Show the fix works: the repro or a test that fails before
-   it and passes after.
+1. Fix it at its root cause, not the symptom. Prefer deleting or narrowing over new code. Show the
+   fix works: the repro or a test that fails before it and passes after.
    Never run `sudo`, not even `sudo -n`: it stops for the user's approval. To make a file owned by
    root or by a uid the host doesn't know, chown it from a container (`docker run --rm -v <dir>:/d
    alpine chown -R <uid>:<gid> /d/<path>`), and hand it back the same way once done, so the scratch
    dir can be deleted.
-3. Commit the fix apart from other work (a commit that fixes only `low` problems needs no review),
+2. Commit the fix apart from other work (a commit that fixes only `low` problems needs no review),
    push, then `feature problem resolve <#> --commit <sha>…` with every commit of the fix.
 
 Not relevant (wrong, by design, out of this PR's scope): `feature problem wontfix <#> --reason
 "<evidence>"`, changing no code. A choice only the user can make, which neither the code nor their
 request settles: leave it open, and put the question, its options and your recommendation in the
-report.
+report. So is a `wontfix` a reviewer disputed (the problem's last comment), when the evidence still
+says it isn't relevant: give both sides.
 
-Before the report, wait for every test run you started, and leave the worktree clean: every fix
-committed and pushed. Uncommitted changes that were there before you started aren't yours: leave
-them, and say so.
+Before the report, wait for every test run you started, and leave every fix committed and pushed.
+Uncommitted changes that were there before you started aren't yours: leave them, and say so.
 
 ## Rules
 
-- Never review, escalate, release, merge, or change the budget: those are the caller's.
-- Never lower a severity to make a problem cheaper to close. `wontfix` is only for a problem that
-  isn't relevant, never for a real one you couldn't fix.
+- Never review, escalate, release, merge, post on the PR, or change the budget: those are the
+  caller's.
+- Never lower a severity to make a problem cheaper to close.
 - The CLI fails fast. Report its errors, don't work around them.
 
 ## Report
@@ -70,5 +65,6 @@ Fixed: #<n> <title> — <sha>…: <the root cause, and what shows the fix works>
 Won't fix: #<n> <title> — <why it isn't relevant>
 Question: #<n> <title> — <the question>; options: <…>; recommend: <…>
 Not done: #<n> <title> — <what stopped you>
+Conflict: resolved in <sha> | <what stopped you>   (only when the caller named one)
 Worktree: clean | <what's left uncommitted, and whose>
 ```

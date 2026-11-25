@@ -2,12 +2,15 @@
 the last review still need one."""
 
 import subprocess
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
+from ship import __main__ as cli
 from ship import feature, github
-from ship.state import new_state, record_fix
+from ship.shell import CommandFailed
+from ship.state import new_state, record_fix, record_review
 
 LOW, HIGH = 5, 6
 
@@ -85,11 +88,15 @@ def test_new_work_and_fixes_of_serious_problems_need_review(repo):
     assert unreviewed(repo) == [work, high_fix, both]
 
 
-def resolve_conflict(ref: str, path: str, text: str) -> str:
-    assert subprocess.run(["git", "merge", "-q", ref], capture_output=True).returncode == 1  # conflicts
-    resolved = commit(path, text, f"merge {ref}, resolving {path}")
+def continue_after_resolving(path: str, text: str) -> str:
+    resolved = commit(path, text, f"merge, resolving {path}")
     assert len(git("rev-list", "--parents", "-n1", resolved).split()) == 3  # a merge commit
     return resolved
+
+
+def resolve_conflict(ref: str, path: str, text: str) -> str:
+    assert subprocess.run(["git", "merge", "-q", ref], capture_output=True).returncode == 1  # conflicts
+    return continue_after_resolving(path, text)
 
 
 def test_a_merge_that_resolved_code_by_hand_needs_review(repo):
@@ -128,14 +135,65 @@ def test_the_tail_of_a_squash_merged_parent_counts_as_base(repo, monkeypatch):
     assert unreviewed(repo) == []
 
 
-def test_a_merge_of_a_branch_other_than_the_base_needs_review(repo):
+def merge_another_branch() -> str:
     git("checkout", "-q", "-b", "other", "main")
     commit("other.py", "unreviewed code\n", "another branch's work")
     git("checkout", "-q", "feat")
-    merged = merge("other")
+    return merge("other")
+
+
+def test_a_merge_of_a_branch_other_than_the_base_needs_review(repo):
+    merged = merge_another_branch()
     assert unreviewed(repo) == [merged]
 
 
 def test_a_review_of_the_head_needs_no_walk(repo, monkeypatch):
     monkeypatch.setattr(feature, "commits_since", lambda *a: pytest.fail("walked a covered head"))
     assert unreviewed(repo) == []
+
+
+@pytest.fixture
+def sync(repo, monkeypatch):
+    record_review(repo, sha=git("rev-parse", "HEAD"), new_blocking=0, new_low=0, regressions=0, summary="clean")
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, repo, ""))
+    monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
+    monkeypatch.setattr(github, "comment", lambda issue, note: None)
+    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
+
+    def run(git_town):
+        monkeypatch.setattr(cli, "git_town_sync", lambda stack: git_town())
+        cli.cmd_sync(Namespace(branch="feat", stack=False))
+
+    return run
+
+
+def stop_at_conflict():
+    assert subprocess.run(["git", "merge", "-q", "origin/main"], capture_output=True).returncode == 1
+    raise CommandFailed(1, ["git", "town", "sync"], "", "CONFLICT")
+
+
+def test_a_rerun_after_a_conflicted_sync_invalidates_the_review(repo, sync):
+    commit("shared.py", "b\n", "edit shared.py")
+    advance_main("shared.py", "c\n")
+    with pytest.raises(CommandFailed):
+        sync(stop_at_conflict)
+    continue_after_resolving("shared.py", "b and c\n")
+    sync(lambda: "")
+    assert repo["last_review"] is None
+    assert [entry.get("event") for entry in repo["review_history"]] == [None, "base-advanced"]
+    sync(lambda: "")
+    assert [entry.get("event") for entry in repo["review_history"]] == [None, "base-advanced"]
+
+
+def test_a_clean_merge_of_the_base_keeps_the_review(repo, sync):
+    advance_main("other.py", "x\n")
+    sync(lambda: merge("origin/main"))
+    assert repo["last_review"] is not None
+    assert len(repo["review_history"]) == 1
+
+
+def test_sync_leaves_a_merge_of_another_branch_to_the_coverage_rule(repo, sync):
+    merged = merge_another_branch()
+    sync(lambda: "")
+    assert len(repo["review_history"]) == 1
+    assert unreviewed(repo) == [merged]

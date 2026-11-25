@@ -268,6 +268,21 @@ itself: that would tie ship to pstack, and `comment-sicko` deletes comments, whi
 must never do. Like spec and design findings, comment findings are filed `low`. The plain deletions
 go in one problem rather than one per comment, so the fixer closes them in one commit.
 
+**18. A separate babysit skill → babysitting is the end of the run.** `babysit-pr`, a plugin of its
+own, watched a PR through CI, review bots and its base until it was ready. On a branch ship tracked,
+each of its steps had a ship variant: call `Skill(ship:ship)` after every push, `feature sync`
+rather than `git town sync`, never merge. So a tracked PR had two loops, each deferring to the
+other, and a ship run ended at the gate whether CI was red or a colleague's comment unanswered.
+Now the ship run babysits the PR once the gate opens and ends at `READY`. A failed check or a
+reviewer's comment is filed as a problem, so the fixer fork fixes it like Sol's findings, the gate
+decides whether its fix needs a review (a `low` one's doesn't, which keeps a lint fix from buying a
+round: #12), and a later round dedups against it. The run watches only at `OPEN`, since a gate
+holding the turn would keep it from ending to wait. The three skills' copies of the gh account rule
+went too: `feature` applies it to its own calls, and the agent rules every session and fork read
+carry it for the agent's. So did what a model does unprompted (rerun a flake, act on the latest
+push, answer a question), and what the CLI already says: the ship skill leaves each
+`NEEDS_DECISION`'s options to the gate's next step, and the merge override to the guard's refusal.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).

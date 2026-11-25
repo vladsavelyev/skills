@@ -8,45 +8,29 @@ background: false
 # review
 
 You run in a forked subagent and do one review round of a PR: Sol finds, blind; you verify, dedup
-and file what it found, and record the round. Then end with the **report** below. The caller is
-usually `Skill(ship:ship)`, which fixes what you file and calls you again for the next round; it
-never sees this file, so the report must carry everything it needs. Your arguments name the PR
-(else take the current branch's) and anything the user asked of this round (a deeper review, a
-fresh one past an OPEN gate).
-
-You never fix. Keeping the fixer out of the round is what keeps it independent: you triage Sol's
-findings with no memory of how the code got this way.
+and file what it found, and record the round. Then end with the **report** below: the caller,
+usually `Skill(ship:ship)`, sees only that. Your arguments name the PR (else take the current
+branch's) and anything the user asked of this round (a deeper review, a fresh one past an OPEN
+gate).
 
 **Never ship debt.** Every problem a review files, at every severity including `low`, is closed
 before the PR ships: fixed, or closed as `wontfix` because it isn't relevant. The gate stays shut
 while any problem is open, so file every real finding: the caller fixes them all.
 
-A merged PR is not yours: reviewing it can block nothing, and closing it out is
-`Skill(ship:close)`. If the PR has merged, or the gate says `MERGED`, do nothing else and report
+The `feature` CLI keeps all state in GitHub and git config: a tracked feature is a branch, its
+worktree, its PR and a tracking issue, and review findings are its sub-issues. A merged PR is
+`Skill(ship:close)`'s: if the PR has merged, or the gate says `MERGED`, do nothing else and report
 `MERGED`.
 
-The `feature` CLI (`plugins/ship` in the `vladsavelyev/skills` repo, design in its
-`docs/design.md`) keeps all state in GitHub + git config. A tracked feature is a branch, its
-worktree under the main checkout's `.claude/worktrees/<name>/`, its PR, and a tracking issue.
-Review findings become sub-issues. The merge gate opens when no problem is open and nothing since
-the last review needs one (fixes of low problems, base merges, docs and tests don't). Features
-begin untracked (`Skill(ship:start)`: branch, worktree, draft PR);
-this skill adopts them on the first ship.
-
-**Work in the feature worktree.** The main checkout has the same files on the base branch, so
-reading or running there gives wrong answers. Prefix every command with `cd <worktree> &&`
-(the shell's cwd resets between calls), and never read from the main checkout or another worktree.
-
-`feature` picks the gh account by itself: the active one for a repo owned by it or one of its
-orgs, the other logged-in account for any other repo. Your own `gh` and `git push` calls follow
-the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` when it's personal.
+**Work in the feature worktree.** The main checkout has the same files on the base branch. Prefix
+every command with `cd <worktree> &&`, and never read from the main checkout or another worktree.
 
 ## Commands
 
 | Situation | Command |
 | --- | --- |
 | Track the branch | `feature adopt` (also creates the workflow labels if the repo lacks them) |
-| Resume | `feature status`. If the gate says `MERGED`, stop and report it. |
+| Resume | `feature status` |
 | Record the user's request | `feature prompt "<request>"` |
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
@@ -60,8 +44,7 @@ the same rule, prefixing `GH_TOKEN=$(gh auth token --user <personal login>)` whe
 
 1. **Track the PR.** Take the PR the caller named, else the current branch's open PR
    (`gh pr view --json number,headRefName,baseRefName,isDraft,state`). No PR → don't review;
-   report that one must be opened against the parent branch. Merged → don't review; report
-   `MERGED`. The **worktree** is the checkout that
+   report that one must be opened against the parent branch. The **worktree** is the checkout that
    has its branch (`git worktree list`). If none has it, run `gh pr checkout <PR#>` inside a new
    `git worktree add --detach .claude/worktrees/<branch>` from the main checkout.
    - Untracked branch (`feature status` says so): `feature adopt`. It links the open PR and takes the PR's base as the parent, or refuses if

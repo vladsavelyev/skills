@@ -995,26 +995,22 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
-    """Sync the branch with its base (recursively, via git-town). If the merge resolved code by hand
-    (`gate.needs_review`), invalidate the last review, so the next round starts a fresh budget.
-    Delegates the actual sync to git-town; does not auto-resolve conflicts."""
+    """Sync the branch with its base (recursively, via git-town). If a merge of the base since the
+    last review resolved code by hand, invalidate that review, so the next round starts a fresh
+    budget. Delegates the actual sync to git-town; does not auto-resolve conflicts."""
     branch = args.branch or current_branch()
     issue, state, _ = feature.load_state(branch)
 
-    before = run_head_sha()
     print(f"Syncing {branch} via git-town{' (stack)' if args.stack else ''}…")
     git_town_sync(stack=args.stack)
     after = run_head_sha()
 
-    if after == before:
-        print(f"Already up to date ({after}); review unchanged.")
-        return
-    if state["last_review"] is None:
+    last = state["last_review"]
+    if last is None:
         print(f"Synced to {after}. No review to keep or invalidate.")
         return
-    merges = [(sha, parents) for sha, parents in commits_since(before, after) if len(parents) > 1]
-    if not gate.needs_review(feature.own_changes(merges, state), low_fixes=set(), sensitive=sensitive_patterns()):
-        print(f"Synced to {after}. The merge added no code a review must see, so the last review still covers it.")
+    if not feature.base_merges_needing_review(commits_since(last["sha"], after), state):
+        print(f"Synced to {after}. No merge of the base since the last review resolved code by hand; review kept.")
         return
 
     # The marker in the history is load-bearing: the gate counts review rounds and reads the
@@ -1026,7 +1022,7 @@ def cmd_sync(args: argparse.Namespace) -> None:
     state["last_review"] = None
     body = github.get_issue_body(issue)
     _save_state(issue, body, state)
-    note = f"🔄 Synced with base — now at {after} (was {before}), resolving conflicts in the merge."
+    note = f"🔄 Synced with base — now at {after} (reviewed at {last['sha']}), resolving conflicts in a merge."
     if stale:
         note += " Previous review invalidated; re-review and `feature review record` before merge."
     github.comment(issue, note)

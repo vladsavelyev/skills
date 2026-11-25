@@ -285,9 +285,11 @@ anyone can check. `problem add --repeats` refuses a problem that was never fixed
 open one is more of the same before any fix, and one like a `wontfix` either answers its reason
 (`problem block`) or isn't a bug.
 
-When `feature sync`'s merge resolved code by hand, it clears `last_review` and appends an
-invalidation marker to `review_history`: the gate reopens, and the round count resets to the runs
-after the marker (hand-merged code deserves a fresh budget).
+When a merge of the base since the last review resolved code by hand, `feature sync` clears
+`last_review` and appends an invalidation marker to `review_history`: the gate reopens, and the
+round count resets to the runs after the marker (hand-merged code deserves a fresh budget). It judges
+every merge of the base since the review, not only its own, so rerun after a conflict it stopped at,
+it records the resolved merge. A merge of any other branch is left to the coverage rule.
 
 The gate is still a pure query: `feature gate` never mutates state. Parking a feature at
 `needs-decision` is an explicit act — `feature escalate --reason "…"` — which posts the current gate
@@ -396,7 +398,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature merge [--branch <b>] [--force]` | Final transition: verify **that the PR actually merged**, record what the gate still had outstanding, set status `merged`, close the feature issue (or just comment, if the PR's `Closes` reference already closed it). Does not merge the PR itself; `--force` records a feature that shipped without its PR merging. |
 | `feature tidy [--branch <b>] [--accept <path> …]` | Once the PR has merged, remove the feature's checkout and local branch, if they hold nothing the PR doesn't: no modified or untracked file, no commit the PR lacks, no repository inside it and no ignored path that neither the main checkout has nor a cache explains (unless `--accept`ed), and no folder you can't empty (checked before anything is removed). Keeps a branch another is stacked on. |
 | `feature reconcile [--branch <b>] [--dry-run]` | Repo-wide sweep for features the close-out never reached: closes out every feature whose PR merged, closes as `abandoned` those whose PR was closed unmerged (unless the branch has a newer open PR, which it reports instead), and repairs ship's block on still-open PRs (a stale reference, or duplicate blocks merged into one). GitHub-only (no git), so it reaches features whose branch is long deleted. |
-| `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If its merge resolved code by hand, invalidates the last review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
+| `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If a merge of the base since the last review resolved code by hand (rerun it after resolving a conflict it stopped at), invalidates that review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
 
 ## The ship run
 
@@ -405,28 +407,59 @@ One call of the `ship` skill is a whole run, and it runs inline, in the agent's 
 ```
 Skill(ship:ship), in the caller's session
   ┌─▶ Skill(ship:review) ─▶ one round in a fresh fork (below) ─▶ report: gate + open problems
-  │   Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
-  │     commit (apart from other work), push, `feature problem resolve <#> --commit <sha>`
-  │     (or `feature problem wontfix` if it isn't relevant; a choice only the user can make waits)
-  │     ─▶ report: a line per problem (fixed with its commits, won't fix, question, not done)
-  │   `feature gate`
-  └── REVIEW_AGAIN
-      OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; the human merges
-      NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
-      NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
-      a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
-      MERGED ─▶ Skill(ship:close)
+  │ ┌▶ take in what the PR raised: a failed check, an unanswered review comment ─▶ `feature problem add`
+  │ │   (a flake ─▶ rerun; a question ─▶ answered); the base moved on ─▶ `feature sync`
+  │ │ Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
+  │ │   commit (apart from other work), push, `feature problem resolve <#> --commit <sha>`
+  │ │   (or `feature problem wontfix` if it isn't relevant; a choice only the user can make waits);
+  │ │   resolves a conflict `feature sync` stopped at
+  │ │   ─▶ report: a line per problem (fixed with its commits, won't fix, question, not done)
+  │ │ each filed comment answered in its thread, the thread resolved
+  │ │ ┌▶ `feature gate`
+  │ │ │  MERGED ─▶ Skill(ship:close)
+  └─┼─┼─ REVIEW_AGAIN
+    │ │  OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; then babysit:
+    │ │    ready (checks green, threads resolved, no review pending, base current) ─▶ READY,
+    │ │      or, asked to merge, merge it ─▶ MERGED
+    └─┼─── not ready, with something to take in
+      └─── not ready otherwise ─▶ `watch_pull_request`, end the turn; T3 Code's wake
+         NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
+         NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
+         a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
 ```
 
-It ends only at an end state: `OPEN`, `MERGED`, `NEEDS_DECISION` escalated, a problem escalated
-for the user's call, or a run released on the record (`feature release`: the user stopped it, or
-Sol can't run). The caller drives the loop and the forks do the heavy work, so the caller's
+It ends only at an end state: `READY`, `MERGED`, `NEEDS_DECISION` escalated, a question for the
+user's call, or a run released on the record (`feature release`: the user stopped it, or Sol
+can't run). The caller drives the loop and the forks do the heavy work, so the caller's
 thread keeps their reports, not their reading. The finder, the triager and the fixer are three
 separate agents: Sol starts each round in a new thread with the PR number, a fresh fork dedups and
 files its findings with no memory of the fixes, and another fork fixes them. The fixer starts with
 none of the caller's conversation, so the caller hands it what the code and the issues don't say
 (what the user asked of the change, a constraint they set, a fix they turned down). Why the fixes
 left the caller's thread: motivation.md #16.
+
+### Babysitting
+
+An `OPEN` gate is not yet a PR ready to merge: CI can still fail, people and review bots comment,
+and the base moves on. So the run doesn't end there. It takes in what the PR raised, and waits for
+more with T3 Code's `watch_pull_request`, which wakes the session when a check fails or the
+required ones pass, someone comments or reviews, the branch conflicts, or the PR merges. A wake
+reads the gate first, so a merged PR ends `MERGED` before anything syncs its branch.
+
+What needs fixing goes through the same problems as the review's: a failed check this PR causes,
+and a reviewer's requested change or finding, are filed with `feature problem add`, quoting the
+source. The fixer fork fixes them like any other, the gate decides whether a fix needs a review (a
+`low` one's doesn't), and a later Sol round dedups against them. Once its problem closes, the
+caller answers the comment with the fix commit or the `wontfix` reason, and resolves the thread. A
+reply disputing that reason reopens the problem (`feature problem block`), and a fixer still
+unconvinced puts it to the user with both sides. Questions are answered in the thread, flakes
+rerun, and a base that moved on synced with `feature sync`; a conflict it stops at is the fixer's.
+
+CI and review threads stay out of the gate. The gate holds the session's turn (the Stop hook), and
+waiting for CI or a reviewer needs the turn to end, so the run watches only once the gate is
+`OPEN`, where nothing holds. Ready is the skill's own check: the required checks pass, the review
+bots the repo uses have reviewed the head, every thread is resolved, no requested review is
+pending, and the base hasn't moved on. Why babysitting joined the run: motivation.md #18.
 
 ### Driving the loop to the end
 
