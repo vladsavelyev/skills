@@ -150,17 +150,21 @@ def test_a_round_that_found_only_low_problems_announces_no_further_round():
     )
 
 
-def test_render_links_each_environment_the_pr_is_deployed_to_after_the_reference():
+def test_render_links_the_preview_before_the_reference():
     grade = {"risk": "low", "complexity": "low", "why": "docs"}
     history = [{"run": 1, "depth": "low", "found": {}, "new_blocking": 0, "regressions": 0}]
+    out = assess.render(
+        issue=39,
+        review=_review(grade, history, next_depth="low"),
+        deployments=[("rio-preview", "https://v.test/pr-7/")],
+    )
+    assert out.splitlines()[2:4] == ["> [Preview](https://v.test/pr-7/)", "> **Tracking issue:** closes #39"]
+
+
+def test_render_names_each_preview_for_its_environment_when_there_are_several():
     deployments = [("rio-preview", "https://v.test/pr-7/"), ("staging", "https://staging.test/")]
-    out = assess.render(issue=39, review=_review(grade, history, next_depth="low"), deployments=deployments)
-    assert out.splitlines()[2:4] == [
+    assert assess.render(issue=39, review=None, deployments=deployments).splitlines() == [
+        "> [Preview: rio-preview](https://v.test/pr-7/)",
+        "> [Preview: staging](https://staging.test/)",
         "> **Tracking issue:** closes #39",
-        "> **Deployed:** [rio-preview](https://v.test/pr-7/), [staging](https://staging.test/)",
     ]
-
-
-def test_render_before_any_review_links_the_deployments_too():
-    out = assess.render(issue=39, review=None, deployments=[("rio-preview", "https://v.test/pr-7/")])
-    assert out == "> **Tracking issue:** closes #39\n> **Deployed:** [rio-preview](https://v.test/pr-7/)"
