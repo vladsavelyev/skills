@@ -405,28 +405,56 @@ One call of the `ship` skill is a whole run, and it runs inline, in the agent's 
 ```
 Skill(ship:ship), in the caller's session
   ┌─▶ Skill(ship:review) ─▶ one round in a fresh fork (below) ─▶ report: gate + open problems
-  │   Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
-  │     commit (apart from other work), push, `feature problem resolve <#> --commit <sha>`
-  │     (or `feature problem wontfix` if it isn't relevant; a choice only the user can make waits)
-  │     ─▶ report: a line per problem (fixed with its commits, won't fix, question, not done)
-  │   `feature gate`
-  └── REVIEW_AGAIN
-      OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; the human merges
-      NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
-      NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
-      a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
-      MERGED ─▶ Skill(ship:close)
+  │ ┌▶ take in what the PR raised: a failed check, an unanswered review comment ─▶ `feature problem add`
+  │ │   (a flake ─▶ rerun; a question ─▶ answered); the base moved on ─▶ `feature sync`
+  │ │ Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
+  │ │   commit (apart from other work), push, `feature problem resolve <#> --commit <sha>`
+  │ │   (or `feature problem wontfix` if it isn't relevant; a choice only the user can make waits);
+  │ │   resolves a conflict `feature sync` stopped at
+  │ │   ─▶ report: a line per problem (fixed with its commits, won't fix, question, not done)
+  │ │ each filed comment answered in its thread, the thread resolved
+  │ │ `feature gate`
+  └─┼─ REVIEW_AGAIN
+    │  OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; then babysit:
+    │    ready (checks green, threads resolved, no review pending, base current) ─▶ READY; the human merges
+    └─── not ready ─▶ `watch_pull_request`, end the turn; T3 Code's wake
+       NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
+       NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
+       a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
+       MERGED ─▶ Skill(ship:close)
 ```
 
-It ends only at an end state: `OPEN`, `MERGED`, `NEEDS_DECISION` escalated, a problem escalated
-for the user's call, or a run released on the record (`feature release`: the user stopped it, or
-Sol can't run). The caller drives the loop and the forks do the heavy work, so the caller's
+It ends only at an end state: `READY`, `MERGED`, `NEEDS_DECISION` escalated, a question for the
+user's call, or a run released on the record (`feature release`: the user stopped it, or Sol
+can't run). The caller drives the loop and the forks do the heavy work, so the caller's
 thread keeps their reports, not their reading. The finder, the triager and the fixer are three
 separate agents: Sol starts each round in a new thread with the PR number, a fresh fork dedups and
 files its findings with no memory of the fixes, and another fork fixes them. The fixer starts with
 none of the caller's conversation, so the caller hands it what the code and the issues don't say
 (what the user asked of the change, a constraint they set, a fix they turned down). Why the fixes
 left the caller's thread: motivation.md #16.
+
+### Babysitting
+
+An `OPEN` gate is not yet a PR ready to merge: CI can still fail, people and review bots comment,
+and the base moves on. So the run doesn't end there. It takes in what the PR raised, and waits for
+more with T3 Code's `watch_pull_request`, which wakes the session when a check fails or the
+required ones pass, someone comments or reviews, or the branch conflicts.
+
+What needs fixing goes through the same problems as the review's: a failed check this PR causes,
+and a reviewer's requested change or finding, are filed with `feature problem add`, quoting the
+source. The fixer fork fixes them like any other, the gate decides whether a fix needs a review (a
+`low` one's doesn't), and a later Sol round dedups against them. Once its problem closes, the
+caller answers the comment with the fix commit or the `wontfix` reason, and resolves the thread. A
+reply disputing that reason reopens the problem (`feature problem block`), and a fixer still
+unconvinced puts it to the user with both sides. Questions are answered in the thread, flakes
+rerun, and a base that moved on synced with `feature sync`; a conflict it stops at is the fixer's.
+
+CI and review threads stay out of the gate. The gate holds the session's turn (the Stop hook), and
+waiting for CI or a reviewer needs the turn to end, so the run watches only once the gate is
+`OPEN`, where nothing holds. Ready is the skill's own check: the required checks pass, the review
+bots the repo uses have reviewed the head, every thread is resolved, no requested review is
+pending, and the base hasn't moved on. Why babysitting joined the run: motivation.md #18.
 
 ### Driving the loop to the end
 

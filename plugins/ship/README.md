@@ -12,7 +12,10 @@ records what shipped and closes the tracking issue, and never reviews.
 
 A ship run doesn't stop at the review. It fixes every problem the review files and reviews again
 until the gate settles. Each round runs in a fresh fork, where Sol finds blind, and each round's
-fixes run in another, so the caller's thread keeps only their reports. A Stop hook keeps the session from ending its turn with the gate shut, and a guard refuses
+fixes run in another, so the caller's thread keeps only their reports. Then it babysits the PR
+until it's ready to merge: a failed check or a reviewer's comment becomes a problem like the
+review's, a flake is rerun, the branch is synced when its base moves on, and T3 Code's PR watch
+wakes the run for each. A Stop hook keeps the session from ending its turn with the gate shut, and a guard refuses
 `gh pr merge` of a tracked PR until the gate opens.
 
 Before the merge the gate has three verdicts, because "review until a run finds nothing" never
@@ -191,7 +194,7 @@ See "Driving the loop to the end" and "The merge guard" in [docs/design.md](docs
 ## Claude skills
 
 `skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (review, fix, review
-again, to the gate); `skills/review/SKILL.md` is one round of that (Sol review at a sized depth,
+again to the gate, then babysit it to ready); `skills/review/SKILL.md` is one round of that (Sol review at a sized depth,
 triage, filing, in a fork); `skills/close/SKILL.md` closes it out after the merge. Keep them in sync with the
 CLI: when you add or change a command, update the SKILL.md files in the same commit.
 

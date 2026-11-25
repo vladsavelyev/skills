@@ -1,6 +1,6 @@
 ---
 name: fix
-description: Use when `Skill(ship:ship)` fixes the open problems a review round filed.
+description: Use when `Skill(ship:ship)` fixes the open problems of its run.
 context: fork
 background: false
 ---
@@ -14,8 +14,10 @@ edits and test runs stay out of the caller's thread: it sees only your report, s
 carry everything it needs, and nothing more.
 
 Your arguments name the feature worktree and the PR, and may name the problems to take (else every
-open one: `feature problem list --open`) and what the caller knows that the code and the issues
-don't say: what the user asked of the change, a constraint they set, a fix they turned down.
+open one: `feature problem list --open`), a merge conflict `feature sync` stopped at, and what the
+caller knows that the code and the issues don't say: what the user asked of the change, a
+constraint they set, a fix they turned down. A problem may come from Sol's review, a failed check
+or a reviewer's comment on the PR; its body quotes the source.
 
 **Never ship debt.** Every problem, at every severity including `low`, is fixed or, if it isn't
 relevant, closed as `wontfix` with the reason.
@@ -25,9 +27,10 @@ reading or editing there gives wrong answers and edits the base branch. Prefix e
 `cd <worktree> &&` (the shell's cwd resets between calls), and give Read, Edit and Write absolute
 paths under the worktree.
 
-`feature` picks the gh account by itself. Your own `gh` and `git push` calls follow the same rule:
-the active account for a repo owned by it or one of its orgs, else prefix
-`GH_TOKEN=$(gh auth token --user <personal login>)`.
+## A merge conflict
+
+Resolve it first, in the worktree, keeping what each side meant. Then `git add` the files and
+`git town continue`, which finishes the sync and pushes.
 
 ## Each problem
 
@@ -47,7 +50,8 @@ Take them highest severity first.
 Not relevant (wrong, by design, out of this PR's scope): `feature problem wontfix <#> --reason
 "<evidence>"`, changing no code. A choice only the user can make, which neither the code nor their
 request settles: leave it open, and put the question, its options and your recommendation in the
-report.
+report. So is a `wontfix` a reviewer disputed (the problem's last comment), when the evidence still
+says it isn't relevant: give both sides.
 
 Before the report, wait for every test run you started, and leave the worktree clean: every fix
 committed and pushed. Uncommitted changes that were there before you started aren't yours: leave
@@ -55,7 +59,8 @@ them, and say so.
 
 ## Rules
 
-- Never review, escalate, release, merge, or change the budget: those are the caller's.
+- Never review, escalate, release, merge, post on the PR, or change the budget: those are the
+  caller's.
 - Never lower a severity to make a problem cheaper to close. `wontfix` is only for a problem that
   isn't relevant, never for a real one you couldn't fix.
 - The CLI fails fast. Report its errors, don't work around them.
@@ -70,5 +75,6 @@ Fixed: #<n> <title> — <sha>…: <the root cause, and what shows the fix works>
 Won't fix: #<n> <title> — <why it isn't relevant>
 Question: #<n> <title> — <the question>; options: <…>; recommend: <…>
 Not done: #<n> <title> — <what stopped you>
+Conflict: resolved in <sha> | <what stopped you>   (only when the caller named one)
 Worktree: clean | <what's left uncommitted, and whose>
 ```
