@@ -272,7 +272,9 @@ def test_t3s_merge_tool_merges_at_an_open_gate(monkeypatch, capsys):
 
 def test_t3s_merge_input_names_the_pr():
     call = merge_guard.t3_merge_call({"number": 7, "repository": "org/app", "auto": True}, "/repo")
-    assert call == MergeCall(target="7", repo="org/app", cwd="/repo", override=None, auto=True, method="merge")
+    assert call == MergeCall(
+        target="7", repo="org/app", cwd="/repo", override=None, auto=True, method="merge", origin="t3"
+    )
 
 
 @pytest.mark.parametrize("tool_input", [{"expectedHeadSha": "abc"}, {"number": 7}, {"environmentId": "laptop"}])

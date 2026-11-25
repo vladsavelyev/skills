@@ -27,6 +27,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from . import feature, github, prbody, problems, shellscan
 from .gitwiring import fetch_pr_head, has_object
@@ -55,7 +56,8 @@ class MergeCall:
     """One merge: the PR it names (None: the current branch's), its repo, the directory it runs in
     (after a command's own `cd`s), the `SHIP_PAST_GATE` reason if given, whether it auto-merges,
     whether it skips a merge queue (`gh pr merge --admin`), the head it pins (None: whatever the
-    PR's head is), and a T3 call's merge method (None: a `gh pr merge`, whose own flags carry it)."""
+    PR's head is), its merge method (None: none named), and whether it is a `gh pr merge` in Bash or
+    a call of T3's `pull_request_merge`."""
 
     target: str | None
     repo: str | None
@@ -65,6 +67,7 @@ class MergeCall:
     admin: bool = False
     head: str | None = None
     method: str | None = None
+    origin: Literal["gh", "t3"] = "gh"
 
 
 def _gh_args(words: list[str]) -> tuple[list[str], dict[str, str | bool], list[str]]:
@@ -136,6 +139,7 @@ def _gh_merge(words: list[str], cwd: str, env: dict[str, str]) -> MergeCall | No
             auto=flags.get("auto") is True,
             admin=flags.get("admin") is True,
             head=flags.get("match-head-commit") or None,
+            method=next((m for m in _GH_METHODS if flags.get(m) is True), None),
         )
     return None
 
@@ -210,13 +214,14 @@ def t3_merge_call(tool_input: dict, cwd: str) -> MergeCall:
         auto=tool_input.get("auto") is True,
         head=tool_input.get("expectedHeadSha"),
         method=tool_input.get("method") or "merge",
+        origin="t3",
     )
 
 
 def _past_gate(call: MergeCall, pr: dict, head: str) -> str:
     """How the user's merge runs past the gate: its `gh pr merge` with the reason in front, or for a
     T3 call, the `gh pr merge` that makes it, pinned to the head the gate was judged at."""
-    if call.method is None:
+    if call.origin == "gh":
         how = f're-run the command with `{OVERRIDE}="<their reason>"` in front of `gh`'
     else:
         flag = _GH_METHODS.get(call.method, "--merge|--squash|--rebase")
