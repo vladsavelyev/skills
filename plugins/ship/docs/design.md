@@ -484,7 +484,8 @@ the plugin holds the session instead (`hold.py`):
   end is a `SubagentStop`, so it never holds a round itself. For each branch the session holds it
   first looks for the branch's round among the session's in-flight background tasks, which Claude
   Code lists in the hook's input (`background_tasks`): a `subagent` task whose description is the
-  one `feature round` printed (`ship review <branch>` or `ship fix <branch>`). If one runs, the turn
+  one `feature round` printed (`ship review <branch> in <main checkout>`, or `ship fix …`): it names the
+  repo too, since a hold is a branch of one repo. If one runs, the turn
   may end, since the subagent's completion wakes the session, and nothing is judged yet (the first
   round tracks the branch as it runs). Reading Claude Code's own list, not a flag the run sets and
   clears, is what keeps a crashed or cancelled round from switching the hold off. An input without

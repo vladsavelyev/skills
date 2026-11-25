@@ -48,19 +48,23 @@ def _task(description: str, type: str = "subagent") -> dict:
     return {"id": "a1", "type": type, "status": "running", "description": description, "agent_type": "general-purpose"}
 
 
+_FIX_IT = hold.Hold(branch="fix-it", checkout="/a/repo")
+
+
 @pytest.mark.parametrize("kind", hold.ROUND_KINDS)
-def test_a_round_of_the_branch_runs_while_its_subagent_is_in_flight(kind):
-    assert hold.round_running([_task(hold.round_description(kind, "fix-it"))], "fix-it")
+def test_a_round_of_the_hold_runs_while_its_subagent_is_in_flight(kind):
+    assert _FIX_IT.round_running([_task(_FIX_IT.round_description(kind))])
 
 
 @pytest.mark.parametrize(
     "tasks",
     [
         [],
-        [_task(hold.round_description("review", "fix-it-2"))],
-        [_task("ship review"), _task("review fix-it")],
-        [_task(hold.round_description("review", "fix-it"), type="shell")],
+        [_task(hold.Hold(branch="fix-it-2", checkout="/a/repo").round_description("review"))],
+        [_task(hold.Hold(branch="fix-it", checkout="/b/repo").round_description("review"))],
+        [_task("ship review"), _task("ship review fix-it")],
+        [_task(_FIX_IT.round_description("review"), type="shell")],
     ],
 )
-def test_no_round_of_the_branch_runs_without_its_subagent(tasks):
-    assert not hold.round_running(tasks, "fix-it")
+def test_no_round_of_the_hold_runs_without_its_subagent(tasks):
+    assert not _FIX_IT.round_running(tasks)

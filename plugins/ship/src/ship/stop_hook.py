@@ -46,7 +46,7 @@ def main() -> None:
             continue
         # Claude Code leaves `background_tasks` out when it can't reach its task registry. There's no
         # telling then whether a round runs, so the hook fails rather than guess either way.
-        if hold.round_running(payload["background_tasks"], branch):
+        if held.round_running(payload["background_tasks"]):
             continue
         os.chdir(checkout)
         if not own_token:

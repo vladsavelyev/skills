@@ -674,9 +674,9 @@ def cmd_round(args: argparse.Namespace) -> None:
     session = hold.current_session()
     if session is None:
         sys.exit("`feature round` holds the Claude session driving the ship run, and this command isn't in one.")
-    hold.hold(session, branch=branch, checkout=main_checkout_root())
+    held = hold.hold(session, branch=branch, checkout=main_checkout_root())
     print(f"Holding '{branch}'. Start the {args.kind} round as a background subagent with this description:")
-    print(f"  {hold.round_description(args.kind, branch)}")
+    print(f"  {held.round_description(args.kind)}")
     print("While it runs you may end your turn: its completion wakes you.")
 
 

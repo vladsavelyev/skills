@@ -5,7 +5,7 @@ PR #5355 the caller never fixed the problem the round filed, and the PR was admi
 Now the session driving the ship run holds the feature from its first round (`feature round`): the
 plugin's Stop hook (`stop_hook.py`) refuses to let that session end its turn until the gate is OPEN
 or MERGED, except while a round runs. Each round is a background subagent whose description names
-the branch (`round_description`); the Stop hook finds it among the session's in-flight tasks, so the
+the hold (`Hold.round_description`); the Stop hook finds it among the session's in-flight tasks, so the
 session may end its turn and answer the user meanwhile, and the round's completion wakes it to take
 in the report. A held session leaves the loop early in two recorded ways only: `feature escalate`
 (the budget is spent with every problem closed, or a problem needs the user's call) and `feature
@@ -27,6 +27,8 @@ from pathlib import Path
 # The id Claude Code gives every Bash command of a session, subagents and forked skills included;
 # the Stop hook's input names the session the same way.
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+ROUND_KINDS = ("review", "fix")
 
 
 def holds_dir() -> Path:
@@ -52,6 +54,19 @@ class Hold:
     def same(self, branch: str, checkout: str) -> bool:
         # A branch name alone isn't a feature: two repos can each have a `fix-tests`.
         return self.branch == branch and self.checkout == checkout
+
+    def round_description(self, kind: str) -> str:
+        """The description of the background subagent running a `kind` round of this hold's ship run:
+        the Stop hook knows the round runs by finding it among the session's in-flight tasks. It names
+        the checkout too, so a round of one repo's `fix-tests` never lets another repo's go unjudged."""
+        return f"ship {kind} {self.branch} in {self.checkout}"
+
+    def round_running(self, tasks: list[dict]) -> bool:
+        """Whether a round of this hold is among `tasks`, the session's in-flight background tasks (the
+        Stop hook's `background_tasks`). A held session may end its turn then: the round's completion
+        wakes it."""
+        rounds = {self.round_description(kind) for kind in ROUND_KINDS}
+        return any(t["type"] == "subagent" and t["description"] in rounds for t in tasks)
 
 
 def _decode(entry: object, path: Path) -> Hold:
@@ -87,12 +102,11 @@ def _write(session: str, holds: list[Hold]) -> None:
     tmp.replace(path)
 
 
-def hold(session: str, *, branch: str, checkout: str) -> None:
+def hold(session: str, *, branch: str, checkout: str) -> Hold:
     """Hold `branch` of the repo whose main checkout is `checkout`, for `session`."""
-    _write(
-        session,
-        [*(h for h in held(session) if not h.same(branch, checkout)), Hold(branch=branch, checkout=checkout)],
-    )
+    new = Hold(branch=branch, checkout=checkout)
+    _write(session, [*(h for h in held(session) if not h.same(branch, checkout)), new])
+    return new
 
 
 def holds(session: str, *, branch: str, checkout: str) -> bool:
@@ -105,22 +119,6 @@ def release(session: str, *, branch: str, checkout: str) -> bool:
     kept = [h for h in before if not h.same(branch, checkout)]
     _write(session, kept)
     return len(kept) != len(before)
-
-
-ROUND_KINDS = ("review", "fix")
-
-
-def round_description(kind: str, branch: str) -> str:
-    """The description of the background subagent running a `kind` round of `branch`'s ship run: the
-    Stop hook knows the round runs by finding it among the session's in-flight tasks."""
-    return f"ship {kind} {branch}"
-
-
-def round_running(tasks: list[dict], branch: str) -> bool:
-    """Whether a round of `branch` is among `tasks`, the session's in-flight background tasks (the Stop
-    hook's `background_tasks`). A held session may end its turn then: the round's completion wakes it."""
-    rounds = {round_description(kind, branch) for kind in ROUND_KINDS}
-    return any(t["type"] == "subagent" and t["description"] in rounds for t in tasks)
 
 
 def work() -> str:

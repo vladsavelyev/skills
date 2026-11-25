@@ -427,9 +427,10 @@ def test_a_round_holds_the_session_and_names_the_subagent_the_stop_hook_looks_fo
     cli.main(["round", kind, "--branch", "add-oauth"])
     assert hold.held("s1") == [hold.Hold(branch="add-oauth", checkout="/repo")]
     out = capsys.readouterr().out
-    assert f"  {hold.round_description(kind, 'add-oauth')}\n" in out
+    held = hold.Hold(branch="add-oauth", checkout="/repo")
+    assert f"  {held.round_description(kind)}\n" in out
     task = {"type": "subagent", "description": out.splitlines()[1].strip()}
-    assert hold.round_running([task], "add-oauth")
+    assert held.round_running([task])
 
 
 def test_the_next_round_keeps_one_hold(monkeypatch, tmp_path):
