@@ -51,13 +51,15 @@ _MENTIONS_MERGE = re.compile(r"\bgh\b.*\bpr\b\s+merge\b", re.DOTALL)
 @dataclass(frozen=True)
 class MergeCall:
     """One merge: the PR it names (None: the current branch's), its repo, the directory it runs in
-    (after a command's own `cd`s), the `SHIP_PAST_GATE` reason if given, and whether it auto-merges."""
+    (after a command's own `cd`s), the `SHIP_PAST_GATE` reason if given, whether it auto-merges, and
+    the head it pins (None: whatever the PR's head is)."""
 
     target: str | None
     repo: str | None
     cwd: str
     override: str | None
     auto: bool = False
+    head: str | None = None
 
 
 def _gh_args(words: list[str]) -> tuple[list[str], dict[str, str | bool]]:
@@ -109,6 +111,7 @@ def _gh_merge(words: list[str], cwd: str, env: dict[str, str]) -> MergeCall | No
             cwd=cwd,
             override=env.get(OVERRIDE) or None,
             auto=flags.get("auto") is True,
+            head=flags.get("match-head-commit") or None,
         )
     return None
 
@@ -175,7 +178,14 @@ def t3_merge_call(tool_input: dict, cwd: str) -> MergeCall:
             "a stack merge lands layers whose heads T3 reads after this check, so merge the PRs one at a time, "
             "bottom up, each with its own `expectedHeadSha`"
         )
-    return MergeCall(target=str(number), repo=repo, cwd=cwd, override=None, auto=tool_input.get("auto") is True)
+    return MergeCall(
+        target=str(number),
+        repo=repo,
+        cwd=cwd,
+        override=None,
+        auto=tool_input.get("auto") is True,
+        head=tool_input.get("expectedHeadSha"),
+    )
 
 
 def _past_gate(pr: dict) -> str:
@@ -219,7 +229,7 @@ def check(call: MergeCall) -> str | None:
             f"ship can't check the gate of PR #{pr['number']} from {call.cwd}, a checkout of {here}: run the "
             f"merge from a checkout of {pr['repo']}."
         )
-    head = pr["headRefOid"]
+    head = call.head or pr["headRefOid"]
     if not has_object(head):
         fetch_pr_head(pr["number"])
     state = parse_block(github.get_issue_body(issue))

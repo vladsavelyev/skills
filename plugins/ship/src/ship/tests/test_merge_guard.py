@@ -307,3 +307,22 @@ def test_a_t3_stack_merge_is_refused(monkeypatch, capsys):
     monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("judged a stack merge"))
     out = json.loads(_run_t3_hook(monkeypatch, capsys, {"number": 9, "repository": "org/app", "stack": True}))
     assert "merge the PRs one at a time" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def _judged_head(monkeypatch, run) -> str:
+    _stub_pr(monkeypatch, verdict=Verdict.OPEN)
+    heads = []
+    decision = GateDecision(verdict=Verdict.OPEN, reasons=[], next_step="", rounds_used=1, budget=2)
+    monkeypatch.setattr(merge_guard.feature, "decide", lambda *args, head: heads.append(head) or decision)
+    run()
+    [head] = heads
+    return head
+
+
+def test_the_gate_is_judged_at_the_head_the_merge_pins(monkeypatch, capsys):
+    """#192: the guard read the PR's head itself, not the commit T3 or gh would land."""
+    t3 = {"number": 5355, "repository": "org/app", "expectedHeadSha": "a" * 40}
+    assert _judged_head(monkeypatch, lambda: _run_t3_hook(monkeypatch, capsys, t3)) == "a" * 40
+    gh = "gh pr merge 5355 --match-head-commit " + "b" * 40
+    assert _judged_head(monkeypatch, lambda: _run_hook(monkeypatch, capsys, gh)) == "b" * 40
+    assert _judged_head(monkeypatch, lambda: _run_hook(monkeypatch, capsys, "gh pr merge 5355")) == "f" * 40
