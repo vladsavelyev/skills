@@ -58,6 +58,7 @@ relevant, closed as `wontfix` with the reason. A spent budget limits review roun
    Then answer each comment you filed or matched, once its problem is closed, and resolve the
    thread. Done when every open problem is resolved, `wontfix`, or has its question.
 4. **Gate.** `feature gate`:
+   - `MERGED`: end `MERGED`.
    - A problem left for the user: `feature escalate --problem <#>… --reason "<question, options,
      recommendation>"`, and end `YOUR CALL`.
    - `REVIEW_AGAIN`: step 1.
@@ -74,10 +75,11 @@ relevant, closed as `wontfix` with the reason. A spent budget limits review roun
      person's comments, re-request their review;
    - step 2 has nothing to take in.
 
-   Ready: end `READY`; merge only if the user asked you to. Not ready: `watch_pull_request` and end
-   your turn. On each wake go to step 2, and end a turn that needed nothing without a message. A
-   watch that stops with "could not read it" has usually spent the GraphQL rate limit (`gh api
-   rate_limit --jq .resources.graphql`): watch again once it resets.
+   Ready: end `READY`, or, if the user asked you to merge it, merge it and end `MERGED`. Not ready:
+   step 2 if it has something to take in, else `watch_pull_request` and end your turn. On each wake
+   go to step 4, and end a turn that needed nothing without a message. A watch that stops with
+   "could not read it" has usually spent the GraphQL rate limit (`gh api rate_limit --jq
+   .resources.graphql`): watch again once it resets.
 
 ## Rules
 

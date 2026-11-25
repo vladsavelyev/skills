@@ -415,15 +415,17 @@ Skill(ship:ship), in the caller's session
   │ │   resolves a conflict `feature sync` stopped at
   │ │   ─▶ report: a line per problem (fixed with its commits, won't fix, question, not done)
   │ │ each filed comment answered in its thread, the thread resolved
-  │ │ `feature gate`
-  └─┼─ REVIEW_AGAIN
-    │  OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; then babysit:
-    │    ready (checks green, threads resolved, no review pending, base current) ─▶ READY; the human merges
-    └─── not ready ─▶ `watch_pull_request`, end the turn; T3 Code's wake
-       NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
-       NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
-       a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
-       MERGED ─▶ Skill(ship:close)
+  │ │ ┌▶ `feature gate`
+  │ │ │  MERGED ─▶ Skill(ship:close)
+  └─┼─┼─ REVIEW_AGAIN
+    │ │  OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; then babysit:
+    │ │    ready (checks green, threads resolved, no review pending, base current) ─▶ READY,
+    │ │      or, asked to merge, merge it ─▶ MERGED
+    └─┼─── not ready, with something to take in
+      └─── not ready otherwise ─▶ `watch_pull_request`, end the turn; T3 Code's wake
+         NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
+         NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
+         a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
 ```
 
 It ends only at an end state: `READY`, `MERGED`, `NEEDS_DECISION` escalated, a question for the
@@ -441,7 +443,8 @@ left the caller's thread: motivation.md #16.
 An `OPEN` gate is not yet a PR ready to merge: CI can still fail, people and review bots comment,
 and the base moves on. So the run doesn't end there. It takes in what the PR raised, and waits for
 more with T3 Code's `watch_pull_request`, which wakes the session when a check fails or the
-required ones pass, someone comments or reviews, or the branch conflicts.
+required ones pass, someone comments or reviews, the branch conflicts, or the PR merges. A wake
+reads the gate first, so a merged PR ends `MERGED` before anything syncs its branch.
 
 What needs fixing goes through the same problems as the review's: a failed check this PR causes,
 and a reviewer's requested change or finding, are filed with `feature problem add`, quoting the
