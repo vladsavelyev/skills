@@ -44,8 +44,13 @@ def main() -> None:
             hold.release(session, branch=branch, checkout=checkout)
             gone.append(f"ship: stopped holding `{branch}`: its checkout {checkout} is gone.")
             continue
-        # Claude Code leaves `background_tasks` out when it can't reach its task registry. There's no
-        # telling then whether a round runs, so the hook fails rather than guess either way.
+        if "background_tasks" not in payload:
+            failed.append(
+                f"ship can't tell whether a round of `{branch}`, which this session holds, runs: this Claude Code's "
+                "Stop hook input has no `background_tasks`, so the hold can't be enforced. Update Claude Code "
+                "(`claude update`; 2.1.332 sends it)."
+            )
+            continue
         if held.round_running(payload["background_tasks"]):
             continue
         os.chdir(checkout)
@@ -67,9 +72,9 @@ def main() -> None:
             hold.release(session, branch=branch, checkout=checkout)
             continue
         blocks.append(_why(branch, issue, state, blocking, decision))
-    # A gate that can't be judged (GitHub down) holds the stop once, so the agent retries; the next
-    # stop in a row goes through, with the error shown, so an outage can't trap the session. The
-    # hold stays: once the gate can be judged again, it holds as before.
+    # A gate that can't be judged (GitHub down, or no list of the session's tasks) holds the stop once,
+    # so the agent retries; the next stop in a row goes through, with the error shown, so an outage
+    # can't trap the session. The hold stays: once the gate can be judged again, it holds as before.
     if failed and not payload.get("stop_hook_active"):
         blocks += [
             f"{why}\nRetry what you were doing; if the gate still can't be judged, say so and end the turn."

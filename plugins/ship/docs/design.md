@@ -489,7 +489,9 @@ the plugin holds the session instead (`hold.py`):
   may end, since the subagent's completion wakes the session, and nothing is judged yet (the first
   round tracks the branch as it runs). Reading Claude Code's own list, not a flag the run sets and
   clears, is what keeps a crashed or cancelled round from switching the hold off. An input without
-  the list (Claude Code couldn't reach its task registry) fails the hook rather than guess. With no
+  the list (a Claude Code older than the field) can't say whether a round runs: like a gate GitHub
+  can't answer, it holds the stop once, naming the missing field, and the next stop in a row goes
+  through with it shown. With no
   round running it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
   the stop, and Claude Code hands the agent the reason: the gate with its reasons, the open
   problems, and a pointer back to the run with its two ways out (`hold.work`). It stays that short

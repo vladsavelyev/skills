@@ -194,10 +194,17 @@ def test_a_first_round_keeps_its_hold_before_it_tracks_the_branch(monkeypatch, c
     assert [h.branch for h in hold.held("s1")] == ["untracked"]
 
 
-def test_an_input_without_the_sessions_tasks_fails_the_hook_and_keeps_the_holds(monkeypatch, capsys, tmp_path):
-    """Claude Code leaves them out when it can't reach its task registry: a round may run, or not."""
+@pytest.mark.parametrize("stop_hook_active", [False, True])
+def test_an_input_without_the_sessions_tasks_holds_the_stop_once_and_keeps_the_holds(
+    monkeypatch, capsys, tmp_path, stop_hook_active
+):
     _two_holds(monkeypatch, tmp_path, feat_error=None)
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s1", "stop_hook_active": False})))
-    with pytest.raises(KeyError, match="background_tasks"):
-        stop_hook.main()
+    monkeypatch.setattr(stop_hook.feature, "gate_for", lambda branch: pytest.fail("judged a gate"))
+    payload = {"session_id": "s1", "stop_hook_active": stop_hook_active}
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    stop_hook.main()
+    out = json.loads(capsys.readouterr().out)
+    said = out["systemMessage"] if stop_hook_active else out["reason"]
+    assert ("decision" in out) is not stop_hook_active
+    assert "`feat`" in said and "`fix-it`" in said and "no `background_tasks`" in said
     assert [h.branch for h in hold.held("s1")] == ["feat", "fix-it"]
