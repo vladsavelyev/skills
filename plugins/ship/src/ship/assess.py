@@ -13,6 +13,7 @@ for a max-effort sweep and a migration doesn't get a skim. It comes from size, r
 The mapping lives here, not in the skill, so the same inputs always buy the same depth.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatch
 
@@ -159,17 +160,20 @@ def _grade_lines(review: Review) -> list[str]:
     return [door, f"**Blast radius:** {grade['blast_radius'].strip()}", complexity]
 
 
-def render(*, issue: int, review: Review | None) -> str:
+def render(*, issue: int, review: Review | None, deployments: Sequence[tuple[str, str]] = ()) -> str:
     """The content of the PR body's ship block: one quote, with no header, so it reads as a footnote
     to the author's description. Once a review has graded the PR, it opens with Sol's latest grade;
-    then the closing reference to the feature issue, and one line per review round. A round's line
+    then the closing reference to the feature issue, a link to each environment the PR is deployed
+    to now (`deployments`, `(environment, url)` pairs, such as a preview), and one line per review round. A round's line
     lists what it found, which never changes afterwards. GitHub breaks a PR body's lines where they
     break here."""
     # `closes` is what makes GitHub close the issue on merge; a bare `#39` would only link it.
-    reference = f"**Tracking issue:** closes #{issue}"
+    head = [f"**Tracking issue:** closes #{issue}"]
+    if deployments:
+        head.append("**Deployed:** " + ", ".join(f"[{environment}]({url})" for environment, url in deployments))
     if review is None:
-        return f"> {reference}"
+        return "\n".join(f"> {line}" for line in head)
     runs = [e for e in review.history if "run" in e]
     rounds = [_round_line(e) for e in runs]
     rounds[-1] += _next_round(runs[-1], review.next_depth)
-    return "\n".join(f"> {line}" for line in [*_grade_lines(review), reference, *rounds])
+    return "\n".join(f"> {line}" for line in [*_grade_lines(review), *head, *rounds])

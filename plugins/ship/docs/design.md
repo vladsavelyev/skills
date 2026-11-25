@@ -117,6 +117,7 @@ for GitHub to close the tracking issue:
 > **Blast radius:** ship's own block in this repo's PR bodies
 > **Complexity:** low, size M (8 files, 412 lines)
 > **Tracking issue:** closes #39
+> **Deployed:** [preview](https://example.com/previews/pr-40/)
 > **Review round 1** (high). Findings: 1 low (#40).
 > **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
 > **Review round 3** (medium). Findings: none. A re-review after new commits would run at low.
@@ -139,6 +140,15 @@ what it found by severity (recorded with the round from `--found`), which never 
 round. The latest round's line ends with the depth Sol's grade buys the next round. After a round
 that found no high or med problem no round is due (low problems' fixes need none), so it reads `A
 re-review after new commits would run at <depth>` instead of `Next round would run at <depth>`.
+
+The `Deployed` line links each environment the PR is deployed to now, such as a preview, so a
+reviewer reading the block can click through what changed. It comes from GitHub, not the
+feature's state: GitHub puts each deployment of a PR's commit on the PR's timeline, and for each
+environment the latest one counts while it is active and its status gives a URL
+(`github.pr_deployments`). A repository's deploys say where they serve that way, with no
+configuration in ship: a preview workflow creates a deployment with the preview's URL, and
+deactivates or deletes it when the preview goes. The line is as fresh as the block's last write,
+and absent when nothing is deployed.
 
 Every body ship writes has exactly one block. It is created once; every later write finds it and
 rewrites what is between its tags. `feature describe` accepts the new description with or without

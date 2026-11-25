@@ -235,19 +235,21 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
 
 def _block_content(state: dict, issue: int) -> str:
     """The content of the PR body's ship block, rendered from `state`: the reference to `issue`, and
-    once a review has graded the PR, Sol's latest grade and every round so far. Every command that
-    writes the block renders it here, so the block always shows the current state."""
+    once a review has graded the PR, Sol's latest grade and every round so far, and the link to each
+    environment the PR is deployed to now. Every command that writes the block renders it here, so
+    the block always shows the current state."""
     # `feature reconcile` reads schema-1 states too; those predate grading, so they show the
     # reference alone.
     history = state["review_history"] if state["schema"] == SCHEMA else []
     grade = assess.last_grade(history)
+    deployments = github.pr_deployments(state["pr"])
     if grade is None:
-        return assess.render(issue=issue, review=None)
+        return assess.render(issue=issue, review=None, deployments=deployments)
     next_depth, size, files, lines, _ = _next_depth(state)
     review = assess.Review(
         grade=grade, size=size, changed_files=files, changed_lines=lines, history=history, next_depth=next_depth
     )
-    return assess.render(issue=issue, review=review)
+    return assess.render(issue=issue, review=review, deployments=deployments)
 
 
 def _write_block(state: dict, issue: int) -> bool:

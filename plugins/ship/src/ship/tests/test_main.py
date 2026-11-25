@@ -107,6 +107,7 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
     monkeypatch.setattr(github, "open_pr_for_branch", lambda name: pr)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
     monkeypatch.setattr(github, "set_pr_block", lambda number, quote, issue: True)
+    monkeypatch.setattr(github, "pr_deployments", lambda number: [])
     monkeypatch.setattr(github, "comment", lambda issue, text: None)
     monkeypatch.setattr(github, "init_labels", lambda: None)
     return did
