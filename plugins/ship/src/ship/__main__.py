@@ -1009,7 +1009,7 @@ def cmd_sync(args: argparse.Namespace) -> None:
     if last is None:
         print(f"Synced to {after}. No review to keep or invalidate.")
         return
-    if not feature.hand_resolved_base_merges(commits_since(last["sha"], after), state):
+    if not feature.base_merges_needing_review(commits_since(last["sha"], after), state):
         print(f"Synced to {after}. No merge of the base since the last review resolved code by hand; review kept.")
         return
 

@@ -85,8 +85,7 @@ def _base_heads(state: dict) -> list[str]:
     return heads
 
 
-def _base_merges(commits: list[tuple[str, list[str]]], state: dict) -> dict[str, str]:
-    """The merges of the base among `commits`, each with the tree git makes of it by itself."""
+def _base_merge_auto_trees(commits: list[tuple[str, list[str]]], state: dict) -> dict[str, str]:
     merges = [(sha, parents) for sha, parents in commits if len(parents) == 2]
     heads = _base_heads(state) if merges else []
     return {
@@ -100,13 +99,12 @@ def own_changes(commits: list[tuple[str, list[str]]], state: dict) -> list[tuple
     """Each of `commits` with the paths of what it adds to the PR's code: its diff from its first
     parent or, for a merge of the base, from the merge git makes by itself (so only what was resolved
     by hand)."""
-    auto = _base_merges(commits, state)
+    auto = _base_merge_auto_trees(commits, state)
     return [(sha, changed_paths(auto.get(sha, parents[0]), sha)) for sha, parents in commits]
 
 
-def hand_resolved_base_merges(commits: list[tuple[str, list[str]]], state: dict) -> list[str]:
-    """The merges of the base among `commits` that resolved code by hand (`gate.needs_review`)."""
-    changes = [(sha, changed_paths(tree, sha)) for sha, tree in _base_merges(commits, state).items()]
+def base_merges_needing_review(commits: list[tuple[str, list[str]]], state: dict) -> list[str]:
+    changes = [(sha, changed_paths(tree, sha)) for sha, tree in _base_merge_auto_trees(commits, state).items()]
     return gate.needs_review(changes, low_fixes=set(), sensitive=sensitive_patterns())
 
 
