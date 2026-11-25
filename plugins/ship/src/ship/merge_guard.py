@@ -35,9 +35,12 @@ from .state import parse_block
 OVERRIDE = "SHIP_PAST_GATE"
 # The name Claude Code gives T3 Code's merge tool; `hooks/hooks.json` matches the same name.
 T3_MERGE = "mcp__t3-code__pull_request_merge"
-# `gh pr merge` flags that take a value, so the value isn't read as the PR to merge.
-_VALUE_FLAGS = {"-A", "--author-email", "-b", "--body", "-F", "--body-file", "-t", "--subject", "--match-head-commit"}
-_REPO_FLAGS = {"-R", "--repo"}
+# The flags `gh pr merge` takes (with `gh pr`'s `--repo`) by long name: those that take a value, and
+# each short name. gh's flag parser reads a boolean's `=value` the way Go's `strconv.ParseBool` does.
+_VALUE_FLAGS = {"author-email", "body", "body-file", "match-head-commit", "repo", "subject"}
+_SHORT_FLAGS = {"A": "author-email", "b": "body", "F": "body-file", "d": "delete-branch", "h": "help", "m": "merge"}
+_SHORT_FLAGS |= {"r": "rebase", "R": "repo", "s": "squash", "t": "subject"}
+_TRUE = {"1", "t", "T", "true", "TRUE", "True"}
 # Words in front of a command that leave it the same command, in the same scope.
 _RESERVED = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "{", "}", "!", "time"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
@@ -57,40 +60,56 @@ class MergeCall:
     auto: bool = False
 
 
-def _merge_args(args: list[str]) -> tuple[str | None, str | None]:
-    """`(target, repo)` from the words after `gh pr merge`."""
-    target = repo = None
-    words = iter(args)
-    for word in words:
-        flag, eq, value = word.partition("=")
-        if flag in _REPO_FLAGS:
-            repo = value if eq else next(words, None)
-        elif flag in _VALUE_FLAGS:
-            if not eq:
-                next(words, None)
-        elif not word.startswith("-") and target is None:
-            target = word
-    return target, repo
+def _gh_args(words: list[str]) -> tuple[list[str], dict[str, str | bool]]:
+    """The positional words of a gh command line, and its flags by long name, read the way gh reads
+    them for `gh pr merge`: a value flag takes `=value`, the rest of a short cluster or the next word,
+    and a boolean takes an optional `=true` or `=false`."""
+    positional: list[str] = []
+    flags: dict[str, str | bool] = {}
+    rest = iter(words)
+    for word in rest:
+        if word == "--":
+            positional += rest
+        elif word.startswith("--"):
+            name, eq, value = word[2:].partition("=")
+            if name in _VALUE_FLAGS:
+                flags[name] = value if eq else next(rest, "")
+            else:
+                flags[name] = value in _TRUE if eq else True
+        elif word.startswith("-") and word != "-":
+            for k, letter in enumerate(word[1:], start=2):
+                name, tail = _SHORT_FLAGS.get(letter, letter), word[k:]
+                if name in _VALUE_FLAGS:
+                    flags[name] = tail.removeprefix("=") if tail else next(rest, "")
+                    break
+                if tail.startswith("="):
+                    flags[name] = tail[1:] in _TRUE
+                    break
+                flags[name] = True
+        else:
+            positional.append(word)
+    return positional, flags
 
 
-def _gh_merge(words: list[str]) -> tuple[int, list[str], str | None] | None:
-    """Where `words` run `gh pr merge`, behind whatever wrapper (`command`, `env`, `sudo`, `timeout
-    10`, `xargs`, …): the index of `gh`, the words after `merge`, and a `--repo` given before it
-    (`gh pr --repo X merge`). None if they don't."""
+def _gh_merge(words: list[str], cwd: str, env: dict[str, str]) -> MergeCall | None:
+    """The merge `words` run with `gh pr merge`, behind whatever wrapper (`command`, `env`, `sudo`,
+    `timeout 10`, `xargs`, …), or None if they run none: `--help` and `--disable-auto` merge nothing."""
     for k, word in enumerate(words):
         if Path(word).name != "gh":
             continue
-        repo, path, rest = None, [], iter(enumerate(words[k + 1 :], start=k + 1))
-        for j, arg in rest:
-            flag, eq, value = arg.partition("=")
-            if flag in _REPO_FLAGS:
-                repo = value if eq else next(rest, (None, None))[1]
-            elif not arg.startswith("-"):
-                path.append(arg)
-                if path == ["pr", "merge"]:
-                    return k, words[j + 1 :], repo
-                if path != ["pr"]:
-                    break
+        positional, flags = _gh_args(words[k + 1 :])
+        if positional[:2] != ["pr", "merge"]:
+            continue
+        if flags.get("help") is True or flags.get("disable-auto") is True:
+            return None
+        env = env | dict(w.partition("=")[::2] for w in words[:k] if _is_assignment(w))
+        return MergeCall(
+            target=next(iter(positional[2:]), None),
+            repo=flags.get("repo") or None,
+            cwd=cwd,
+            override=env.get(OVERRIDE) or None,
+            auto=flags.get("auto") is True,
+        )
     return None
 
 
@@ -130,19 +149,8 @@ def _walk(script: shellscan.Script, cwd: str) -> tuple[list[MergeCall], str]:
             calls += found
         elif (inner := _shell_script(words)) is not None:
             calls += _walk(shellscan.parse(inner), cwd)[0]
-        elif (merge := _gh_merge(words)) is not None and "--disable-auto" not in merge[1]:
-            at, args, global_repo = merge
-            env |= dict(w.partition("=")[::2] for w in words[:at] if _is_assignment(w))
-            target, repo = _merge_args(args)
-            calls.append(
-                MergeCall(
-                    target=target,
-                    repo=repo or global_repo,
-                    cwd=cwd,
-                    override=env.get(OVERRIDE) or None,
-                    auto="--auto" in args,
-                )
-            )
+        elif (call := _gh_merge(words, cwd, env)) is not None:
+            calls.append(call)
     return calls, cwd
 
 

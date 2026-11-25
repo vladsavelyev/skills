@@ -261,10 +261,45 @@ def test_the_users_reason_lets_an_auto_merge_through_on_the_record(monkeypatch):
     assert issue == 39 and "with auto-merge past the gate" in text
 
 
-def test_gh_auto_is_an_auto_merge_and_disabling_it_is_no_merge():
-    [call] = merge_calls("gh pr merge 5 --auto --squash", "/repo")
-    assert call.auto
-    assert merge_calls("gh pr merge 5 --disable-auto", "/repo") == []
+@pytest.mark.parametrize(
+    ("command", "auto"),
+    [
+        ("gh pr merge 5 --auto --squash", True),
+        ("gh pr merge 5 --auto=true --squash", True),
+        ("gh pr merge 5 --auto=false", False),
+        ('gh pr merge 5 --squash --body "--auto"', False),
+        ('gh pr merge 5 -b"--auto"', False),
+        ("gh pr merge 5 --disable-auto=false", False),
+    ],
+)
+def test_gh_auto_is_read_from_the_flag_not_the_words(command, auto):
+    """#189: `"--auto" in args` also matched a body, and missed `--auto=true`."""
+    [call] = merge_calls(command, "/repo")
+    assert call.auto is auto
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh pr merge 5 --disable-auto",
+        "gh pr merge 5 --disable-auto=true",
+        "gh pr merge --help",
+        "gh pr merge 5 -h",
+        "gh pr merge -dh 5",
+    ],
+)
+def test_disabling_auto_merge_or_asking_for_help_is_no_merge(command):
+    assert merge_calls(command, "/repo") == []
+
+
+def test_a_body_naming_disable_auto_is_still_a_merge():
+    """#189: this merged with no gate check at all."""
+    assert [c.target for c in merge_calls('gh pr merge 5355 --merge --body "--disable-auto"', "/repo")] == ["5355"]
+
+
+def test_a_short_flag_cluster_takes_its_value_from_the_next_word():
+    [call] = merge_calls("gh pr merge -dR org/app 5 -st subject", "/repo")
+    assert (call.target, call.repo) == ("5", "org/app")
 
 
 def test_a_t3_stack_merge_is_refused(monkeypatch, capsys):
