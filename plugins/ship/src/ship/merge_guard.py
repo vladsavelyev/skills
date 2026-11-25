@@ -157,24 +157,17 @@ def merge_calls(command: str, cwd: str) -> list[MergeCall]:
 
 
 def t3_merge_call(tool_input: dict, cwd: str) -> MergeCall:
-    """The merge a `pull_request_merge` call makes. Its PR defaults to the thread's branch, the
-    current branch here; in another linked environment that branch is out of sight, so the PR has to
-    be named. Raises ValueError when it isn't."""
+    """The merge a `pull_request_merge` call makes. T3's default PR is its thread's branch, which
+    this hook can't see, so the PR has to be named. Raises ValueError when it isn't, or for a stack."""
     number, repo = tool_input.get("number"), tool_input.get("repository")
-    if tool_input.get("environmentId") and (number is None or repo is None):
-        raise ValueError("this merge runs in another linked environment, so name the PR with `number` and `repository`")
+    if number is None or repo is None:
+        raise ValueError("name the PR with `number` and `repository`")
     if tool_input.get("stack") is True:
         raise ValueError(
             "a stack merge lands layers whose heads T3 reads after this check, so merge the PRs one at a time, "
             "bottom up, each with its own `expectedHeadSha`"
         )
-    return MergeCall(
-        target=None if number is None else str(number),
-        repo=repo,
-        cwd=cwd,
-        override=None,
-        auto=tool_input.get("auto") is True,
-    )
+    return MergeCall(target=str(number), repo=repo, cwd=cwd, override=None, auto=tool_input.get("auto") is True)
 
 
 def _past_gate(pr: dict) -> str:

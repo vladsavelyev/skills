@@ -221,7 +221,8 @@ def _run_t3_hook(monkeypatch, capsys, tool_input: dict) -> str:
 def test_t3s_merge_tool_is_refused_at_a_shut_gate(monkeypatch, capsys):
     """#179: T3 tells agents to merge with `pull_request_merge`, which never reached the guard."""
     _stub_pr(monkeypatch, verdict=Verdict.REVIEW_AGAIN)
-    out = json.loads(_run_t3_hook(monkeypatch, capsys, {"number": 5355, "expectedHeadSha": "f" * 40}))
+    tool_input = {"number": 5355, "repository": "org/app", "expectedHeadSha": "f" * 40}
+    out = json.loads(_run_t3_hook(monkeypatch, capsys, tool_input))
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "refuses to merge PR #5355" in reason and "#5400 [sev:med] stale cache" in reason
     assert 'SHIP_PAST_GATE="<their reason>" gh pr merge 5355 --repo org/app' in reason
@@ -229,18 +230,21 @@ def test_t3s_merge_tool_is_refused_at_a_shut_gate(monkeypatch, capsys):
 
 def test_t3s_merge_tool_merges_at_an_open_gate(monkeypatch, capsys):
     _stub_pr(monkeypatch, verdict=Verdict.OPEN)
-    assert _run_t3_hook(monkeypatch, capsys, {"expectedHeadSha": "f" * 40}) == ""
+    assert (
+        _run_t3_hook(monkeypatch, capsys, {"number": 5355, "repository": "org/app", "expectedHeadSha": "f" * 40}) == ""
+    )
 
 
-def test_t3s_merge_input_names_the_pr_or_leaves_it_to_the_branch():
+def test_t3s_merge_input_names_the_pr():
     call = merge_guard.t3_merge_call({"number": 7, "repository": "org/app", "auto": True}, "/repo")
     assert call == MergeCall(target="7", repo="org/app", cwd="/repo", override=None, auto=True)
-    assert merge_guard.t3_merge_call({"expectedHeadSha": "abc"}, "/repo").target is None
 
 
-def test_a_t3_merge_in_another_environment_must_name_the_pr(monkeypatch, capsys):
-    monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("guessed the other environment's PR"))
-    out = json.loads(_run_t3_hook(monkeypatch, capsys, {"environmentId": "laptop", "expectedHeadSha": "abc"}))
+@pytest.mark.parametrize("tool_input", [{"expectedHeadSha": "abc"}, {"number": 7}, {"environmentId": "laptop"}])
+def test_a_t3_merge_must_name_the_pr_and_its_repo(monkeypatch, capsys, tool_input):
+    """#193: T3's default is its thread's branch, not the branch of the cwd the hook sees."""
+    monkeypatch.setattr(merge_guard, "check", lambda call: pytest.fail("guessed T3's PR"))
+    out = json.loads(_run_t3_hook(monkeypatch, capsys, tool_input))
     assert "name the PR with `number` and `repository`" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
