@@ -21,10 +21,15 @@ machine_skills = ["dev-browser"]                                # ~/.claude/skil
 helpers = ["git-pr-context"]                                    # commands the hooks and statusline call
 agents_md = ".claude/plugins/marketplaces/vlad-skills/agents/AGENTS.md"  # optional, see below
 
-[[mirrors]]  # optional: another file holding a copy of a settings value, see `fleet set`
+[[mirrors]]  # optional: another copy of a settings value, see `fleet set`
 setting = "env.AWS_BEARER_TOKEN_BEDROCK"
 file = ".codex/config.toml"
 key = "model_providers.azure.http_headers.api-key"
+
+[[mirrors]]  # a T3 Code provider's sensitive environment variable
+setting = "env.AWS_BEARER_TOKEN_BEDROCK"
+t3_provider = "antigravity"
+variable = "AGY_LLM_GATEWAY_API_KEY"
 ```
 
 What it covers:
@@ -78,10 +83,17 @@ and from a no-echo prompt otherwise, and never prints it. Then:
    output says so.
 2. **Writes** it to this machine's `~/.claude/settings.json` (with a `.bak-<timestamp>` copy), then
    pushes that key, and no other, to every host through the same settings sync `fleet --apply` uses.
-   It also updates the key's `mirrors`: copies of the same value in other files, like the AI Gateway
-   key Codex sends from `~/.codex/config.toml`. A mirror is a TOML file and a dotted key in it that
-   already holds a string. Only that string literal is replaced (the stdlib can't write TOML), and the
-   file is parsed back to check nothing else changed. A machine without the file is skipped.
+   It also updates the key's `mirrors`, the other copies of the same value. There are two kinds:
+   - **A file and a dotted key in it** that already holds a string, like the AI Gateway key Codex
+     sends from `~/.codex/config.toml`. In TOML only that string literal is replaced (the stdlib
+     can't write TOML), and the file is parsed back to check nothing else changed. A JSON file is
+     parsed and written back whole. A machine without the file is skipped.
+   - **A T3 Code provider's environment variable** (`t3_provider`, `variable`) that T3 keeps in its
+     secret store, like the gateway key T3's Antigravity provider gets. T3 has no API for it, so
+     `fleet` replaces the secret's file in `~/.t3/userdata/secrets/` and then replaces T3's settings
+     file unchanged, which makes the running server reload it and restart that provider with the new
+     value. It only replaces a secret file T3 already wrote, and refuses a variable T3 keeps in plain
+     text. A machine whose T3 doesn't have the variable is skipped.
 3. **Verifies** by reading the key and its mirrors back on every machine and comparing sha256
    prefixes: `ok` or `FAILED` for each, exit 1 if any failed. Running it again with the same value
    only writes where it's missing.

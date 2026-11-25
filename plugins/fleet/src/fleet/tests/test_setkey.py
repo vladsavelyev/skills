@@ -223,7 +223,8 @@ base_url = "https://gateway.example/openai"
 http_headers = { "api-key" = "old" }  # the gateway key
 query_params = { api-version = "2025" }
 """
-MIRROR = mirrors.Mirror("env.KEY", ".codex/config.toml", "model_providers.azure.http_headers.api-key")
+MIRROR = mirrors.FileMirror("env.KEY", ".codex/config.toml", "model_providers.azure.http_headers.api-key")
+TOML = mirrors.FileMirror("env.KEY", "f.toml", "a.key")
 
 
 def _codex(home, text: str | None = CODEX):
@@ -269,23 +270,24 @@ def test_a_mirror_file_without_the_key_fails_that_machine_only(fleet, capsys):
 
 def test_mirror_with_value_keeps_a_literal_string_style_file_otherwise_intact():
     text = "[a]\n# note\nkey = 'old'\nother = 'old-ish'\n"
-    assert mirrors.with_value(text, "a.key", "new", "f") == "[a]\n# note\nkey = \"new\"\nother = 'old-ish'\n"
-    assert mirrors.with_value(text, "a.key", "old", "f") == text
+    assert TOML.with_value(text, "new", "f") == "[a]\n# note\nkey = \"new\"\nother = 'old-ish'\n"
+    assert TOML.with_value(text, "old", "f") == text
 
 
 def test_mirror_with_value_writes_any_character_as_valid_toml():
     value = 'k\U0001f600\x7f\u00e9"\\\n'
-    assert mirrors.value_in(mirrors.with_value('a = "old"\n', "a", value, "f"), "a") == value
+    top = mirrors.FileMirror("env.KEY", "f.toml", "a")
+    assert top.value_in(top.with_value('a = "old"\n', value, "f")) == value
 
 
 def test_mirror_with_value_refuses_a_value_written_twice():
     with pytest.raises(RuntimeError, match="written 2 times"):
-        mirrors.with_value('a = "old"\nb = "old"\n', "a", "new", "f")
+        mirrors.FileMirror("env.KEY", "f.toml", "a").with_value('a = "old"\nb = "old"\n', "new", "f")
 
 
 def test_mirror_with_value_refuses_what_is_not_a_string():
     with pytest.raises(RuntimeError, match="is of type int, not a string"):
-        mirrors.with_value("a = 1\n", "a", "new", "f")
+        mirrors.FileMirror("env.KEY", "f.toml", "a").with_value("a = 1\n", "new", "f")
 
 
 def test_load_config_reads_mirrors():
@@ -293,13 +295,149 @@ def test_load_config_reads_mirrors():
     sync.CONFIG_PATH.write_text(
         'hosts = ["u@h"]\n[[mirrors]]\nsetting = "env.KEY"\nfile = ".codex/config.toml"\n'
         'key = "model_providers.azure.http_headers.api-key"\n'
+        '[[mirrors]]\nsetting = "env.KEY"\nt3_provider = "antigravity"\nvariable = "AGY_KEY"\n'
     )
-    assert sync.load_config().mirrors == [MIRROR]
+    assert sync.load_config().mirrors == [MIRROR, T3]
 
 
-def test_a_mirror_must_be_toml():
-    with pytest.raises(RuntimeError, match="only TOML"):
-        mirrors.Mirror("env.KEY", ".config/x.json", "a")
+def test_a_file_mirror_must_be_toml_or_json():
+    with pytest.raises(RuntimeError, match="only a TOML or JSON file"):
+        mirrors.FileMirror("env.KEY", ".config/x.yaml", "a")
+
+
+# --- a JSON file mirror, e.g. a second key in ~/.claude/settings.json holding the same value ---
+
+JSON = mirrors.FileMirror("env.KEY", sync.SETTINGS_JSON, "env.COPY")
+
+
+def test_set_updates_a_json_mirror_in_the_settings_file_itself(fleet, capsys):
+    for home in _homes(fleet):
+        _settings(home, {**_settings(home), "env": {**_settings(home)["env"], "COPY": "old"}})
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [JSON]) == 0
+    for home in _homes(fleet):
+        assert _settings(home)["env"]["KEY"] == _settings(home)["env"]["COPY"] == SECRET
+    assert _settings(fleet[1].home)["env"]["DISPLAY"] == ":99"
+    out = capsys.readouterr().out
+    assert SECRET not in out
+    assert out.count(f"  ok      u@b: {JSON}\n") == 1
+
+
+def test_a_json_mirror_without_the_key_fails_that_machine_only(fleet, capsys):
+    for home in (Path.home(), fleet[2].home):
+        _settings(home, {**_settings(home), "env": {**_settings(home)["env"], "COPY": "old"}})
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [JSON]) == 1
+    assert _settings(fleet[2].home)["env"]["COPY"] == SECRET
+    assert "FAILED  u@a: ~/.claude/settings.json: env.COPY is not there" in capsys.readouterr().out
+
+
+# --- a T3 Code provider's sensitive environment variable ---
+
+T3 = mirrors.T3Mirror("env.KEY", "antigravity", "AGY_KEY")
+T3_SETTINGS = {
+    "providerInstances": {
+        "antigravity": {
+            "driver": "antigravity",
+            "environment": [
+                {"name": "AGY_URL", "value": "https://gw", "sensitive": False},
+                {"name": "AGY_KEY", "value": "", "sensitive": True, "valueRedacted": True},
+            ],
+        }
+    }
+}
+
+
+def _t3(home, settings: dict | None = T3_SETTINGS, secret: str | None = "old") -> Path:
+    """A T3 Code data directory as the server leaves it: settings, and the secret store's file for AGY_KEY."""
+    if settings is not None:
+        path = home / mirrors.T3_SETTINGS
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(settings, indent=2))
+    if secret is not None:
+        path = home / T3.secret
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(secret.encode())
+        path.chmod(0o600)
+    return home / T3.secret
+
+
+def test_t3_secret_file_is_named_as_t3_names_it():
+    assert T3.secret == ".t3/userdata/secrets/provider-env-YW50aWdyYXZpdHk-QUdZX0tFWQ.bin"
+
+
+def test_set_writes_a_t3_providers_secret_and_makes_t3_reload_its_settings(fleet, capsys):
+    settings_before = {}
+    for home in _homes(fleet):
+        _t3(home)
+        settings_before[home] = (home / mirrors.T3_SETTINGS).stat().st_ino
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [T3]) == 0
+    for home in _homes(fleet):
+        secret = home / T3.secret
+        assert secret.read_bytes() == SECRET.encode()
+        assert secret.stat().st_mode & 0o777 == 0o600
+        settings = home / mirrors.T3_SETTINGS
+        assert json.loads(settings.read_text()) == T3_SETTINGS
+        # Replaced, not edited in place: that is what makes the T3 server reload it.
+        assert settings.stat().st_ino != settings_before[home]
+        assert not list(settings.parent.glob("settings.json.*"))
+    out = capsys.readouterr().out
+    assert SECRET not in out
+    assert out.count(f"  ok      this machine: {T3}\n") == 1
+
+
+def test_a_t3_secret_already_set_is_left_alone(fleet, capsys):
+    for home in _homes(fleet):
+        _t3(home, secret=SECRET)
+    inodes = {home: (home / mirrors.T3_SETTINGS).stat().st_ino for home in _homes(fleet)}
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [T3]) == 0
+    assert all((home / mirrors.T3_SETTINGS).stat().st_ino == inodes[home] for home in _homes(fleet))
+    assert capsys.readouterr().out.count(f"{T3} identical") == 3
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [None, {"providerInstances": {}}, {"providerInstances": {"antigravity": {"driver": "antigravity"}}}],
+    ids=["no-t3", "no-instance", "no-variable"],
+)
+def test_a_machine_whose_t3_lacks_the_variable_is_skipped(fleet, capsys, settings):
+    for home in (Path.home(), fleet[2].home):
+        _t3(home)
+    _t3(fleet[1].home, settings, secret=None)
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [T3]) == 0
+    assert not (fleet[1].home / T3.secret).exists()
+    assert (fleet[2].home / T3.secret).read_bytes() == SECRET.encode()
+    out = capsys.readouterr().out
+    assert (
+        "u@a: no T3 Code settings" in out
+        if settings is None
+        else "u@a: T3 Code has no T3 provider antigravity AGY_KEY" in out
+    )
+
+
+def test_a_t3_variable_kept_in_plain_text_fails_that_machine(fleet, capsys):
+    plain = json.loads(json.dumps(T3_SETTINGS))
+    plain["providerInstances"]["antigravity"]["environment"][1] = {
+        "name": "AGY_KEY",
+        "value": "old",
+        "sensitive": False,
+    }
+    for home in (Path.home(), fleet[2].home):
+        _t3(home)
+    _t3(fleet[1].home, plain, secret=None)
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [T3]) == 1
+    assert (
+        "FAILED  u@a: ~/.t3/userdata/settings.json: T3 provider antigravity AGY_KEY is not kept in T3's secret store"
+        in (capsys.readouterr().out)
+    )
+    assert json.loads((fleet[1].home / mirrors.T3_SETTINGS).read_text()) == plain
+
+
+def test_a_t3_secret_file_t3_never_wrote_fails_instead_of_being_created(fleet, capsys):
+    for home in (Path.home(), fleet[2].home):
+        _t3(home)
+    _t3(fleet[1].home, secret=None)
+    assert setkey.set_key(fleet, "env.KEY", SECRET, [T3]) == 1
+    assert not (fleet[1].home / T3.secret).exists()
+    assert "T3 may have moved its secrets" in capsys.readouterr().out
 
 
 # --- the gateway validator, against a local stand-in for the gateway ---
