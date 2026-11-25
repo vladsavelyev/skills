@@ -8,8 +8,9 @@ description: Use when the user asks to ship a PR, or to babysit or watch one.
 One call of this skill is a whole ship run: it takes the PR to ready to merge. It reviews the PR,
 fixes every problem the review files and reviews again until the gate settles, then babysits the
 PR through CI, its reviewers and its base. You drive the run; every review round is
-`Skill(ship:review)` and every batch of fixes `Skill(ship:fix)`, each in a fork, so this thread
-reviews and fixes nothing itself.
+`Skill(ship:review)` and every batch of fixes `Skill(ship:fix)`, each in a T3 child thread
+(**Rounds** below), so this thread reviews and fixes nothing itself and the user can talk to you
+while a round runs.
 
 The run ends at one of these **end states**, and your reply names which. Before you end at any of
 them, `unwatch_pull_request` if you watched the PR.
@@ -25,9 +26,27 @@ them, `unwatch_pull_request` if you watched the PR.
 **Never ship debt.** Every problem, at every severity including `low`, is fixed or, if it isn't
 relevant, closed as `wontfix` with the reason. A spent budget limits review rounds, never fixes.
 
+## Rounds
+
+A round runs in a T3 child thread, never in this one: a skill called here holds this thread until
+it returns, and every message the user sends waits with it.
+
+1. **Start it.** `delegate_task` with `mode: "async"`, no `target` (the child runs as you do),
+   `role: "review"` or `"implementation"`, `title: "Review PR #<n>"` or `"Fix PR #<n>"`, and `task:
+   "Run Skill(ship:review) with args: <args>. Reply with only its report, verbatim."` (`ship:fix`
+   for a fix round).
+2. **Hold it.** `feature round --branch <the PR's head branch> --thread <childThreadId>`. While the
+   thread runs you may end your turn; once it's done, the Stop hook keeps you going until the gate
+   settles.
+3. **End your turn.** The thread's completion wakes you with its report: go on from the step that
+   started the round. Until then, answer whatever the user sends and do what they ask.
+
+A round thread that fails or is cancelled wakes you too: start it again, or end `STOPPED` if it
+fails the same way twice.
+
 ## The run
 
-1. **Review.** `Skill(ship:review)`, with `args` naming the PR and anything the user asked of the
+1. **Review.** A review round, with `args` naming the PR and anything the user asked of the
    review (a deeper one, a fresh one past an `OPEN` gate). Then `EnterWorktree` with `path:
    <worktree>` from its report (never `name:`), unless you're in it.
    - `Blocked:` no PR, or its base isn't the tracked parent: open a draft against the parent (`gh
@@ -48,11 +67,11 @@ relevant, closed as `wontfix` with the reason. A spent budget limits review roun
    File with `feature problem add --title "…" --sev <sev> --body-file -`, quoting the source with
    its URL. `high`: data loss, a security hole, a crash or a silently wrong result on a realistic
    path; `med`: a real bug on a narrower path; `low`: anything else.
-3. **Fix.** When a problem is open or a conflict waits, `Skill(ship:fix)`, with `args` naming the
+3. **Fix.** When a problem is open or a conflict waits, a fix round, with `args` naming the
    worktree, the PR, the conflict if any, and what you know that the code and the issues don't
    say: what the user asked of the change, a constraint they set, a fix they turned down.
    - `Question:` a choice only the user can make: step 4 escalates it.
-   - `Not done:`, or a `Conflict:` it couldn't resolve: call it again with what stopped it, or end
+   - `Not done:`, or a `Conflict:` it couldn't resolve: start another with what stopped it, or end
      `STOPPED` if only the user can unblock it.
 
    Then answer each comment you filed or matched, once its problem is closed, and resolve the

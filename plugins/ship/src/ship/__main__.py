@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from datetime import UTC, datetime
 
-from . import assess, budget, feature, gate, github, hold, problems, tidy
+from . import assess, budget, feature, gate, github, hold, problems, t3, tidy
 from .errors import Refusal
 from .shell import run, try_run
 from .gitwiring import (
@@ -58,17 +58,6 @@ def _now() -> str:
 def _save_state(issue: int, body: str, state: dict) -> None:
     state["updated"] = _now()
     github.set_issue_body(issue, replace_block(body, state))
-
-
-def _hold(branch: str) -> bool:
-    """Hold `branch` for the Claude session running this command, if any (`hold.py`): the session
-    recording a review or closing a problem is working the loop, so it can't end its turn until the
-    gate settles. Returns whether a session was held."""
-    session = hold.current_session()
-    if session is None:
-        return False
-    hold.hold(session, branch=branch, checkout=main_checkout_root())
-    return True
 
 
 def _blocking(issue: int) -> list[dict]:
@@ -356,9 +345,6 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     blocking = problems.blocking(subs)
     _write_block(state, issue)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
-    # The hold is a fallible write too (a file), and taking it twice is harmless, so it goes before.
-    # A round the user asked for as a review alone fixes nothing, so it holds nobody to fixing.
-    held = not decision.settled and not args.review_only and _hold(branch)
     github.comment(
         issue,
         f"🔍 Review run {run_num} ({args.sha}): {new_serious} new high/med, {new_low} new low, "
@@ -372,8 +358,6 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     print(f"Recorded review run {run_num} for #{issue}")
     print(f"GATE {decision}")
     print(f"  → {decision.next_step}")
-    if held:
-        print(f"  This session is held: it can't end its turn until the gate settles. {hold.work()}")
 
 
 def _add_problem(parent: int, title: str, sev: str, detail: str) -> int:
@@ -428,7 +412,6 @@ def cmd_problem_resolve(args: argparse.Namespace) -> None:
         _save_state(issue, body, state)
     note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
     github.close_issue(args.number, note)
-    _hold(branch)
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
@@ -449,7 +432,6 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     # and a re-run finishes the job.
     github.add_label(args.number, problems.WONTFIX)
     github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
-    _hold(branch)
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
@@ -679,6 +661,24 @@ def cmd_escalate(args: argparse.Namespace) -> None:
     if (session := hold.current_session()) is not None:
         hold.release(session, branch=branch, checkout=main_checkout_root())
     print(f"Escalated #{issue} for a human decision; status is now needs-decision.")
+
+
+def cmd_round(args: argparse.Namespace) -> None:
+    """Hold the branch for this session while T3 thread `--thread` runs a round of its ship run.
+
+    The session may end its turn while that thread runs, and the thread's completion wakes it to take
+    in the report; once it's done, the session can't end its turn until the gate settles (`hold.py`).
+    """
+    branch = args.branch or current_branch()
+    session = hold.current_session()
+    if session is None:
+        sys.exit("`feature round` holds the Claude session driving the ship run, and this command isn't in one.")
+    running = t3.thread_running(args.thread)
+    hold.hold(session, branch=branch, checkout=main_checkout_root(), round=args.thread)
+    if running:
+        print(f"Holding '{branch}' while round thread {args.thread} runs. End your turn: its completion wakes you.")
+    else:
+        print(f"Holding '{branch}'. Round thread {args.thread} has already finished: take in its report.")
 
 
 def cmd_release(args: argparse.Namespace) -> None:
@@ -1105,11 +1105,6 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--blast-radius", required=True, help="A few words: who or what a bug in the PR would reach")
     r.add_argument("--complexity", required=True, choices=assess.LEVELS, help="The reviewer's grade of its complexity")
     r.add_argument("--why", required=True, help="One or two sentences: what drives that risk and complexity")
-    r.add_argument(
-        "--review-only",
-        action="store_true",
-        help="The user asked for this review alone, without fixes: don't hold the session to fixing",
-    )
     r.add_argument("--branch")
     r.set_defaults(func=cmd_review_record)
 
@@ -1196,6 +1191,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     c.add_argument("--branch")
     c.set_defaults(func=cmd_escalate)
+
+    c = sub.add_parser("round", help="Hold the branch for this session while a T3 thread runs a round of its ship run")
+    c.add_argument("--thread", required=True, help="The child thread `delegate_task` started for the round")
+    c.add_argument("--branch")
+    c.set_defaults(func=cmd_round)
 
     c = sub.add_parser("release", help="Let this session end its turn with the gate still shut, on the record")
     c.add_argument(

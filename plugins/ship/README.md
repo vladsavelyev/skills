@@ -11,11 +11,12 @@ open problems) from GitHub. Once the PR merges, the `close` skill closes the fea
 records what shipped and closes the tracking issue, and never reviews.
 
 A ship run doesn't stop at the review. It fixes every problem the review files and reviews again
-until the gate settles. Each round runs in a fresh fork, where Sol finds blind, and each round's
-fixes run in another, so the caller's thread keeps only their reports. Then it babysits the PR
+until the gate settles. Each round runs in a T3 child thread, where Sol finds blind, and each
+round's fixes run in another, so the caller's thread keeps only their reports and stays free to
+talk to the user while a round runs. Then it babysits the PR
 until it's ready to merge: a failed check or a reviewer's comment becomes a problem like the
 review's, a flake is rerun, the branch is synced when its base moves on, and T3 Code's PR watch
-wakes the run for each. A Stop hook keeps the session from ending its turn with the gate shut, and a guard refuses
+wakes the run for each. A Stop hook keeps the session from ending its turn with the gate shut and no round running, and a guard refuses
 a merge of a tracked PR (`gh pr merge`, or T3 Code's `pull_request_merge`) until the gate opens.
 
 Before the merge the gate has three verdicts, because "review until a run finds nothing" never
@@ -131,7 +132,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
-| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t> [--review-only]` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. Holds the session to fixing (`hold.py`) unless `--review-only`: the user asked for the review alone. |
+| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with Sol's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
 | `feature problem add --title <t> --sev <high\|med\|low> [--repeats <number>]` | Add a problem sub-issue (it blocks the gate until closed, at any severity). `--repeats` names a fixed problem a root-cause fix of which would have prevented this one: a round that finds it recommends a redesign. |
 | `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue as fixed, recording its fix commits: one that fixed only low problems needs no review. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. |
@@ -140,6 +141,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking, handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto]` | Show or override the review-round budget. |
 | `feature escalate --reason <t> [--problem <#> …]` | Park at `needs-decision` with your recommendation for a human, ending the session's hold. Every open problem must be closed first, or named with `--problem` as needing the user's call, unless the gate recommends a redesign. |
+| `feature round --thread <id> [--branch <b>]` | Hold the branch for the session driving the ship run while T3 thread `<id>` runs one of its rounds (`hold.py`): the session may end its turn while the thread runs, and once it's done can't until the gate settles. |
 | `feature release --reason <t>` | Let this session end its turn with the gate still shut (the user stopped the run, or the review can't run), with the reason on the tracking issue. |
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |
 | `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via git-town; if the base advanced, invalidates the last review so the gate reopens. |

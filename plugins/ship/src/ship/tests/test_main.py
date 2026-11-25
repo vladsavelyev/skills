@@ -372,7 +372,7 @@ def _stub_escalate(
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setenv(hold.SESSION_ENV, "s1")
     monkeypatch.setattr(cli, "main_checkout_root", lambda: "/repo")
-    hold.hold("s1", branch="add-oauth", checkout="/repo")
+    hold.hold("s1", branch="add-oauth", checkout="/repo", round="t1")
     return posted
 
 
@@ -382,7 +382,7 @@ def test_escalate_refuses_while_a_problem_nobody_asked_about_is_open(monkeypatch
     with pytest.raises(SystemExit, match="#5400 still open"):
         cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="budget spent", problem=[]))
     assert posted == []
-    assert hold.held("s1") == [{"branch": "add-oauth", "checkout": "/repo"}]
+    assert hold.held("s1") == [{"branch": "add-oauth", "checkout": "/repo", "round": "t1"}]
 
 
 def test_escalate_refuses_while_review_budget_remains_and_no_problem_needs_the_user(monkeypatch, tmp_path):
@@ -414,24 +414,64 @@ def test_release_refuses_a_branch_this_session_does_not_hold(monkeypatch, tmp_pa
         cli.cmd_release(cli.argparse.Namespace(branch="other", reason="x"))
 
 
-def test_closing_a_problem_holds_the_session_that_did_it(monkeypatch, tmp_path):
-    """The session fixing problems is in the loop: it can't stop until the gate settles."""
+def _in_session(monkeypatch, tmp_path, *, running: bool = True) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setenv(hold.SESSION_ENV, "s1")
     monkeypatch.setattr(cli, "main_checkout_root", lambda: "/repo")
+    monkeypatch.setattr(cli.t3, "thread_running", lambda thread: running)
+    monkeypatch.setattr(github, "use_owner_account", lambda: None)
+
+
+def test_a_round_holds_the_session_driving_the_run_with_its_thread(monkeypatch, tmp_path, capsys):
+    _in_session(monkeypatch, tmp_path)
+    cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
+    assert hold.held("s1") == [{"branch": "add-oauth", "checkout": "/repo", "round": "t-review"}]
+    assert "End your turn" in capsys.readouterr().out
+
+
+def test_the_next_round_replaces_the_thread_the_hold_waits_on(monkeypatch, tmp_path):
+    _in_session(monkeypatch, tmp_path)
+    cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
+    cli.main(["round", "--branch", "add-oauth", "--thread", "t-fix"])
+    assert hold.held("s1") == [{"branch": "add-oauth", "checkout": "/repo", "round": "t-fix"}]
+
+
+def test_a_round_that_already_finished_still_holds_and_says_so(monkeypatch, tmp_path, capsys):
+    _in_session(monkeypatch, tmp_path, running=False)
+    cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
+    assert hold.held("s1") != [] and "already finished" in capsys.readouterr().out
+
+
+def test_a_thread_t3_doesnt_know_holds_nothing(monkeypatch, tmp_path):
+    _in_session(monkeypatch, tmp_path)
+
+    def unknown(thread):
+        raise CommandFailed(1, ["t3"], stderr="Thread t-typo is no longer available.")
+
+    monkeypatch.setattr(cli.t3, "thread_running", unknown)
+    with pytest.raises(CommandFailed):
+        cli.main(["round", "--branch", "add-oauth", "--thread", "t-typo"])
+    assert hold.held("s1") == []
+
+
+def test_a_round_outside_a_claude_session_refuses(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(github, "use_owner_account", lambda: None)
+    with pytest.raises(SystemExit, match="isn't in one"):
+        cli.main(["round", "--branch", "add-oauth", "--thread", "t-review"])
+    assert not (tmp_path / "ship").exists()
+
+
+def test_closing_a_problem_holds_nobody(monkeypatch, tmp_path):
+    """The fixer runs in a child thread of its own: holding its session made its Stop hook send it on
+    with the run, which is its caller's."""
+    _in_session(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:med"))
     monkeypatch.setattr(github, "init_labels", lambda: None)
     monkeypatch.setattr(github, "add_label", lambda number, label: None)
     monkeypatch.setattr(github, "close_issue", lambda number, note, not_planned=False: None)
     cli.cmd_problem_wontfix(cli.argparse.Namespace(branch="add-oauth", number=5, reason="by design"))
-    assert hold.held("s1") == [{"branch": "add-oauth", "checkout": "/repo"}]
-
-
-def test_outside_a_claude_session_nothing_is_held(monkeypatch, tmp_path):
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    monkeypatch.delenv(hold.SESSION_ENV, raising=False)
-    assert cli._hold("add-oauth") is False
-    assert not (tmp_path / "ship").exists()
+    assert hold.held("s1") == []
 
 
 def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
@@ -475,7 +515,6 @@ def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict]
     decision = cli.gate.GateDecision(cli.gate.Verdict.REVIEW_AGAIN, ["open"], "fix", 1, 2)
     monkeypatch.setattr(feature, "decide", lambda *a, **k: decision)
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
-    monkeypatch.setattr(cli, "_hold", lambda branch: did.append("hold") or True)
     monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment"))
     monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
@@ -483,19 +522,13 @@ def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict]
     return did
 
 
-def test_review_record_takes_the_hold_before_its_one_state_write(monkeypatch):
-    """#140: the hold came after the write, so a failed hold left the round recorded and a retry
-    spent another one."""
+def test_recording_a_review_holds_nobody(monkeypatch, tmp_path):
+    """The reviewer runs in a child thread of its own: holding its session made its Stop hook send it
+    on to fix, which is the run's, and a review the user asked for alone needed `--review-only` (#142)."""
+    _in_session(monkeypatch, tmp_path)
     did = _stub_review_record(monkeypatch)
     cli.main(_RECORD)
-    assert did.index("hold") < did.index("save")
-
-
-def test_a_review_the_user_asked_for_alone_holds_nobody_to_fixing(monkeypatch):
-    """#142: a review-only round held the session, so the Stop hook made it fix and push."""
-    did = _stub_review_record(monkeypatch)
-    cli.main([*_RECORD, "--review-only"])
-    assert "hold" not in did and "save" in did
+    assert "save" in did and hold.held("s1") == []
 
 
 def _add_args(repeats: int | None = None):
@@ -625,18 +658,3 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (3, False, []))
     cli.main(["budget", "--branch", "add-oauth", "--auto"])
     assert state["review_budget_run"] is None
-
-
-def test_review_record_tells_a_held_session_the_same_as_the_stop_hook(monkeypatch, capsys):
-    """#153: after the gate said not to fix the problems before the user's call on a redesign, the
-    held line said "Fix every open problem"."""
-    _stub_review_record(monkeypatch)
-    redesign = cli.gate.GateDecision(
-        cli.gate.Verdict.NEEDS_DECISION, ["back"], cli.gate._NEXT_REDESIGN, 2, 4, redesign=True
-    )
-    monkeypatch.setattr(feature, "decide", lambda *a, **k: redesign)
-    monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: "/wt")
-    cli.main(_RECORD)
-    out = capsys.readouterr().out
-    assert hold.work() in out and cli.gate._NEXT_REDESIGN in out
-    assert "Fix every open problem" not in out and "Fixing is part of the run" not in out

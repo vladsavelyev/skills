@@ -2,15 +2,17 @@
 
 A ship run used to end after one review round and hand the fixes to its caller as advice. On navari
 PR #5355 the caller never fixed the problem the round filed, and the PR was admin-merged with it open.
-Now the session that records a review round, or closes one of its problems, holds the feature: the
-plugin's Stop hook (`stop_hook.py`) refuses to let that session end its turn until the gate is OPEN
-or MERGED. A held session leaves the loop early in two recorded ways only: `feature escalate` (the
-budget is spent with every problem closed, or a problem needs the user's call) and `feature release`
-(the user stopped the run, or the review can't run).
+Now the session driving the ship run holds the feature from its first round: the plugin's Stop hook
+(`stop_hook.py`) refuses to let that session end its turn until the gate is OPEN or MERGED, except
+while a round runs. Each round runs in a T3 child thread (`t3.py`), and `feature round` holds the
+branch with that thread: while it runs, the session may end its turn and answer the user, and the
+thread's completion wakes it to take in the report. A held session leaves the loop early in two
+recorded ways only: `feature escalate` (the budget is spent with every problem closed, or a problem
+needs the user's call) and `feature release` (the user stopped the run, or the review can't run).
 
 One file per Claude session, under the user's state dir, listing the branches it holds, each with
 its repo's main checkout (a branch name alone could be in two repos; the main checkout outlives
-the feature's worktree). Keyed by session rather than by branch, so parallel sessions on other
+the feature's worktree) and the thread of its latest round. Keyed by session rather than by branch, so parallel sessions on other
 features in the same repo never inherit each other's holds; kept outside the repo, so the Stop hook
 finds it from whatever directory the session ends in, with one file check when nothing is held.
 `bin/feature-stop-hook` reads the same directory before it starts Python.
@@ -41,7 +43,8 @@ def _path(session: str) -> Path:
 
 
 def held(session: str) -> list[dict]:
-    """The holds of `session`: `{"branch", "checkout"}` each, oldest first."""
+    """The holds of `session`: `{"branch", "checkout", "round"}` each, oldest first, `round` being the
+    T3 thread of the branch's latest round."""
     path = _path(session)
     if not path.exists():
         return []
@@ -64,11 +67,15 @@ def _same(h: dict, branch: str, checkout: str) -> bool:
     return h["branch"] == branch and h["checkout"] == checkout
 
 
-def hold(session: str, *, branch: str, checkout: str) -> None:
-    """Hold `branch` of the repo whose main checkout is `checkout`, for `session`."""
+def hold(session: str, *, branch: str, checkout: str, round: str) -> None:
+    """Hold `branch` of the repo whose main checkout is `checkout`, for `session`, while T3 thread
+    `round` runs its round."""
     _write(
         session,
-        [*(h for h in held(session) if not _same(h, branch, checkout)), {"branch": branch, "checkout": checkout}],
+        [
+            *(h for h in held(session) if not _same(h, branch, checkout)),
+            {"branch": branch, "checkout": checkout, "round": round},
+        ],
     )
 
 
@@ -85,8 +92,8 @@ def release(session: str, *, branch: str, checkout: str) -> bool:
 
 
 def work() -> str:
-    """What keeps a held session going, for the Stop hook and `review record` alike: the ship run, and
-    its two ways out on the record. What this gate asks for is the skill's loop and the gate's next
+    """What keeps a held session going, for the Stop hook: the ship run, and its two ways out on the
+    record. What this gate asks for is the skill's loop and the gate's next
     step to say: a gate-specific text here drifted from them once (#153: a redesign round was told to
     fix every open problem), and restated the skill's loop each time the hook fired."""
     return (

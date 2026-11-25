@@ -383,7 +383,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
-| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text> [--review-only]` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Unless `--review-only` (the user asked for the review alone), holds the Claude session running it until the gate settles. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
+| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->] [--repeats <number>]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. `--repeats` names a fixed problem this one is the same kind of bug as: its body says so, and a round that finds it (high/med) tells the gate to recommend a redesign. Refuses a problem that is open or `wontfix`. |
 | `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
@@ -392,6 +392,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
 | `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), unless the gate recommends a redesign; while the gate is `REVIEW_AGAIN` and no problem is named; and at `OPEN` or `MERGED`. |
+| `feature round --thread <id> [--branch <b>]` | Hold the branch for the Claude session driving the ship run while T3 thread `<id>` runs one of its rounds (see "Driving the loop to the end"). Refuses a thread T3 doesn't know, and a command outside a Claude session. |
 | `feature release --reason <text> [--branch <b>]` | Let this session end its turn with the gate still shut: posts the reason and the gate on the tracking issue, then drops the hold. For a user who stopped the run, or a review that can't run. Refuses a branch the session doesn't hold. |
 | `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`wontfix` is newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
 | `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION`, 30 = `MERGED` (1 and 2 stay "the command itself failed"). |
@@ -402,14 +403,17 @@ All commands are `feature <cmd>` (or the `feature` console script).
 
 ## The ship run
 
-One call of the `ship` skill is a whole run, and it runs inline, in the agent's own session:
+One call of the `ship` skill is a whole run, and it runs inline, in the agent's own session. Each
+round runs in a T3 child thread (`delegate_task`, async) that calls the round's skill, and the
+session holds the branch with that thread (`feature round`), then ends its turn; the thread's
+completion wakes it with the report:
 
 ```
 Skill(ship:ship), in the caller's session
-  ┌─▶ Skill(ship:review) ─▶ one round in a fresh fork (below) ─▶ report: gate + open problems
+  ┌─▶ child thread: Skill(ship:review) ─▶ one round in a fresh fork (below) ─▶ report: gate + open problems
   │ ┌▶ take in what the PR raised: a failed check, an unanswered review comment ─▶ `feature problem add`
   │ │   (a flake ─▶ rerun; a question ─▶ answered); the base moved on ─▶ `feature sync`
-  │ │ Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
+  │ │ child thread: Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
   │ │   commit (apart from other work), push, `feature problem resolve <#> --commit <sha>`
   │ │   (or `feature problem wontfix` if it isn't relevant; a choice only the user can make waits);
   │ │   resolves a conflict `feature sync` stopped at
@@ -436,7 +440,8 @@ separate agents: Sol starts each round in a new thread with the PR number, a fre
 files its findings with no memory of the fixes, and another fork fixes them. The fixer starts with
 none of the caller's conversation, so the caller hands it what the code and the issues don't say
 (what the user asked of the change, a constraint they set, a fix they turned down). Why the fixes
-left the caller's thread: motivation.md #16.
+left the caller's thread: motivation.md #16. Why the rounds run in child threads, not as skills the
+caller calls: motivation.md #19.
 
 ### Babysitting
 
@@ -466,14 +471,19 @@ pending, and the base hasn't moved on. Why babysitting joined the run: motivatio
 The skill saying "now fix them" is still advice, and advice is what failed (motivation.md #14). So
 the plugin holds the session instead (`hold.py`):
 
-- `feature review record`, `feature problem resolve` and `feature problem wontfix` hold the branch
-  for the Claude session that ran them (`CLAUDE_CODE_SESSION_ID`, which Claude Code gives every
-  Bash command of a session, its subagents and forked skills included). The hold is a file per
-  session under `$XDG_STATE_HOME/ship/holds/`, naming each branch with its repo's main checkout:
-  it survives the worktree's removal, the same branch name in two repos is two holds, and parallel
-  sessions never share one.
+- `feature round`, run as each round starts, holds the branch for the Claude session driving the
+  run (`CLAUDE_CODE_SESSION_ID`, which Claude Code gives every Bash command of a session), naming
+  the round's T3 thread. The rounds' own commands (`feature review record`, `feature problem
+  resolve`) hold nobody: they run in the child's session, whose turn is the round's, not the run's.
+  The hold is a file per session under `$XDG_STATE_HOME/ship/holds/`, naming each branch with its
+  repo's main checkout and its latest round's thread: it survives the worktree's removal, the same
+  branch name in two repos is two holds, and parallel sessions never share one.
 - The Stop hook (`stop_hook.py`) runs whenever the agent is about to end its turn. For each branch
-  the session holds it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
+  the session holds it first asks T3 whether the round's thread still runs (`t3 thread show`, via
+  `$T3CODE_CLI_PATH`): if it does, the turn may end, since the thread's completion wakes the
+  session, and nothing is judged yet (the first round tracks the branch as it runs). Asking T3,
+  not a flag the run sets and clears, is what keeps a crashed or cancelled round from switching the
+  hold off. Once the round is done it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
   the stop, and Claude Code hands the agent the reason: the gate with its reasons, the open
   problems, and a pointer back to the run with its two ways out (`hold.work`). It stays that short
   because it lands in the agent's context each time it fires, and the skill's loop already says
@@ -486,7 +496,7 @@ the plugin holds the session instead (`hold.py`):
   around a fix. A gate recommending a redesign is the exception: that call covers every open
   problem, and fixing them first is the work a redesign throws away. `feature release` takes any reason, on the record.
 
-A gate the hook can't judge (a `gh` outage) blocks the stop once, with the error, and keeps the
+A gate the hook can't judge (a `gh` outage, or T3 not answering about the round) blocks the stop once, with the error, and keeps the
 hold; the next stop in a row (`stop_hook_active`) goes through with the error shown, since a session
 trapped by an outage is worse than a missed reminder, and the merge guard below still holds the
 line. Once the gate can be judged again, the hold holds as before.
@@ -540,14 +550,14 @@ own, and so is one from a T3 thread running Codex, which Claude Code's hooks don
 
 ## The review round
 
-Each review round is one call of the `review` skill, which runs as a forked subagent
-(`context: fork`) inside the agent's own Claude Code process, not as a spawned `claude`
-subprocess. The caller (the ship run) never loads the skill's instructions; it gets back a short
-report with the gate verdict and the open problems. A fresh fork per round is what keeps the
-finder blind:
+Each review round is one call of the `review` skill, made by a T3 child thread the ship run starts
+for it. The skill runs as a forked subagent (`context: fork`) inside the child's Claude Code
+process, not as a spawned `claude` subprocess. The caller (the ship run) never loads the skill's
+instructions; the child's completion hands it a short report with the gate verdict and the open
+problems. A fresh fork per round is what keeps the finder blind:
 
 ```
-Skill(ship:ship) ─▶ Skill(ship:review) ─▶ forked subagent, fresh context
+Skill(ship:ship) ─▶ child thread ─▶ Skill(ship:review) ─▶ forked subagent, fresh context
    1. track the PR: worktree for its branch; `feature adopt` if untracked (links the open PR,
       takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
       PR's base isn't the tracked parent

@@ -3,17 +3,25 @@
 import io
 import json
 
-from ship import github, hold, stop_hook
+import pytest
+
+from ship import github, hold, stop_hook, t3
 from ship.errors import Refusal
 from ship import gate
 from ship.gate import GateDecision, Verdict
+
+
+@pytest.fixture(autouse=True)
+def _rounds_done(monkeypatch):
+    """Every round thread has finished unless a test says otherwise."""
+    monkeypatch.setattr(t3, "thread_running", lambda thread: False)
 
 
 def _run(
     monkeypatch, capsys, tmp_path, verdict: Verdict, *, checkout: str | None = None, redesign: bool = False
 ) -> str:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    hold.hold("s1", branch="fix-it", checkout=checkout or str(tmp_path))
+    hold.hold("s1", branch="fix-it", checkout=checkout or str(tmp_path), round="t-fix")
     decision = GateDecision(
         verdict=verdict,
         reasons=["1 problem(s) open, every one blocking"],
@@ -83,8 +91,8 @@ def test_a_session_holding_nothing_stops(monkeypatch, capsys, tmp_path):
 
 def _two_holds(monkeypatch, tmp_path, *, feat_error: Exception | None, stop_hook_active: bool = False):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    hold.hold("s1", branch="feat", checkout=str(tmp_path))
-    hold.hold("s1", branch="fix-it", checkout=str(tmp_path))
+    hold.hold("s1", branch="feat", checkout=str(tmp_path), round="t-feat")
+    hold.hold("s1", branch="fix-it", checkout=str(tmp_path), round="t-fix")
     decision = GateDecision(verdict=Verdict.REVIEW_AGAIN, reasons=[], next_step="", rounds_used=1, budget=2)
 
     def gate_for(branch):
@@ -103,7 +111,7 @@ def _two_holds(monkeypatch, tmp_path, *, feat_error: Exception | None, stop_hook
 def test_a_hold_whose_branch_isnt_tracked_is_dropped_and_the_others_still_hold(monkeypatch, capsys, tmp_path):
     """#137: a stray hold on an untracked branch ended the hook before it checked the real one."""
     _two_holds(monkeypatch, tmp_path, feat_error=None)
-    hold.hold("s1", branch="untracked", checkout=str(tmp_path))
+    hold.hold("s1", branch="untracked", checkout=str(tmp_path), round="t-untracked")
     stop_hook.main()
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "block" and "`fix-it`" in out["reason"]
@@ -126,4 +134,50 @@ def test_a_second_stop_in_a_row_with_github_down_goes_through_with_the_error_sho
     stop_hook.main()
     out = json.loads(capsys.readouterr().out)
     assert "decision" not in out and "HTTP 503" in out["systemMessage"]
+    assert [h["branch"] for h in hold.held("s1")] == ["feat"]
+
+
+def test_a_held_session_ends_its_turn_while_its_round_runs(monkeypatch, capsys, tmp_path):
+    """A review round held the user's thread for its whole length, so nothing they sent was read until
+    it returned. Now the round runs in a T3 child thread, and the turn may end while it does."""
+    _two_holds(monkeypatch, tmp_path, feat_error=None)
+    monkeypatch.setattr(t3, "thread_running", lambda thread: True)
+    monkeypatch.setattr(stop_hook.feature, "gate_for", lambda branch: pytest.fail("judged a gate"))
+    stop_hook.main()
+    assert capsys.readouterr().out == ""
+    assert [h["branch"] for h in hold.held("s1")] == ["feat", "fix-it"]
+
+
+def test_only_the_branch_whose_round_runs_may_wait(monkeypatch, capsys, tmp_path):
+    _two_holds(monkeypatch, tmp_path, feat_error=None)
+    monkeypatch.setattr(t3, "thread_running", lambda thread: thread == "t-feat")
+    stop_hook.main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "`fix-it`" in out["reason"] and "`feat`" not in out["reason"]
+    assert "no round of it is running" in out["reason"]
+
+
+def test_a_first_round_keeps_its_hold_before_it_tracks_the_branch(monkeypatch, capsys, tmp_path):
+    """The first round adopts the branch as it runs: an untracked branch says nothing until it's done."""
+    _two_holds(monkeypatch, tmp_path, feat_error=None)
+    hold.release("s1", branch="feat", checkout=str(tmp_path))
+    hold.release("s1", branch="fix-it", checkout=str(tmp_path))
+    hold.hold("s1", branch="untracked", checkout=str(tmp_path), round="t-untracked")
+    monkeypatch.setattr(t3, "thread_running", lambda thread: True)
+    stop_hook.main()
+    assert capsys.readouterr().out == ""
+    assert [h["branch"] for h in hold.held("s1")] == ["untracked"]
+
+
+def test_a_round_t3_cant_answer_for_holds_the_stop_once(monkeypatch, capsys, tmp_path):
+    _two_holds(monkeypatch, tmp_path, feat_error=None)
+    hold.release("s1", branch="fix-it", checkout=str(tmp_path))
+
+    def down(thread):
+        raise Refusal("T3 server not running")
+
+    monkeypatch.setattr(t3, "thread_running", down)
+    stop_hook.main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "T3 server not running" in out["reason"]
     assert [h["branch"] for h in hold.held("s1")] == ["feat"]
