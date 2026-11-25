@@ -63,9 +63,10 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
      diff: Sol's spec check reads the PR's intent from these sentences.
    - The evidence that it works, carried over from the existing description or the commits: a
      before and after, as a screencast or screenshots for a change users see, otherwise the test
-     or command that failed before and passes now, with its output. Only what was run, and never
-     a suite's pass count or a list of test names. A change with nothing to run or see (docs,
-     comments) needs none.
+     or command that failed before and passes now, with its output. Open each half with the word
+     in bold (`**Before**: …`, `**After**: …`) so a reader finds them at a glance. Only what was
+     run, and never a suite's pass count or a list of test names. A change with nothing to run or
+     see (docs, comments) needs none.
 
    The title says what the PR does, in plain words. End the description with your signature
    line if your harness asks for one. `feature describe` takes the text with or without ship's

@@ -88,8 +88,9 @@ the same way twice.
      commits, then `feature budget --set <n>` and ship again.
    - `OPEN`: step 5.
 5. **Babysit.** If the description shows no proof the change works and it can be run or seen, run
-   it and add the before and after with `feature describe`. If the user asked to ship it and it's a
-   draft, `gh pr ready <PR#>`. The PR is **ready** when, at its head:
+   it and add the before and after with `feature describe`, laid out as review's step 2 says. If
+   the user asked to ship it and it's a draft, `gh pr ready <PR#>`. The PR is **ready** when, at
+   its head:
    - the required checks pass, and the review bots the repo uses have reviewed it;
    - every review thread is resolved, and no requested review is pending: once you've answered a
      person's comments, re-request their review;
