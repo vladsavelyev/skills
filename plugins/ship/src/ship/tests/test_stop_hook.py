@@ -13,7 +13,6 @@ from ship.gate import GateDecision, Verdict
 
 @pytest.fixture(autouse=True)
 def _rounds_done(monkeypatch):
-    """Every round thread has finished unless a test says otherwise."""
     monkeypatch.setattr(t3, "thread_running", lambda thread: False)
 
 
@@ -138,8 +137,6 @@ def test_a_second_stop_in_a_row_with_github_down_goes_through_with_the_error_sho
 
 
 def test_a_held_session_ends_its_turn_while_its_round_runs(monkeypatch, capsys, tmp_path):
-    """A review round held the user's thread for its whole length, so nothing they sent was read until
-    it returned. Now the round runs in a T3 child thread, and the turn may end while it does."""
     _two_holds(monkeypatch, tmp_path, feat_error=None)
     monkeypatch.setattr(t3, "thread_running", lambda thread: True)
     monkeypatch.setattr(stop_hook.feature, "gate_for", lambda branch: pytest.fail("judged a gate"))

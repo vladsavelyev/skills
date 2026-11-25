@@ -463,8 +463,6 @@ def test_a_round_outside_a_claude_session_refuses(monkeypatch, tmp_path):
 
 
 def test_closing_a_problem_holds_nobody(monkeypatch, tmp_path):
-    """The fixer runs in a child thread of its own: holding its session made its Stop hook send it on
-    with the run, which is its caller's."""
     _in_session(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:med"))
     monkeypatch.setattr(github, "init_labels", lambda: None)
@@ -523,8 +521,6 @@ def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict]
 
 
 def test_recording_a_review_holds_nobody(monkeypatch, tmp_path):
-    """The reviewer runs in a child thread of its own: holding its session made its Stop hook send it
-    on to fix, which is the run's, and a review the user asked for alone needed `--review-only` (#142)."""
     _in_session(monkeypatch, tmp_path)
     did = _stub_review_record(monkeypatch)
     cli.main(_RECORD)
