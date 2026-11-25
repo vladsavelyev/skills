@@ -1,8 +1,6 @@
 #!/bin/sh
-# PreToolUse hook on Bash and on T3 Code's pull_request_merge. It runs before every Bash command of
-# every session, so only input that mentions a merge pays for Python; ship's src/ship/merge_guard.py
-# reads it properly.
 input=$(cat)
 case "$input" in
+# Runs before every Bash command of every session, so only input that mentions a merge pays for Python.
 *merge*) printf '%s' "$input" | exec uv run --quiet --frozen --no-dev --project "$(dirname "$0")/.." feature-merge-guard "$@" ;;
 esac
