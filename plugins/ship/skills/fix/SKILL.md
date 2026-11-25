@@ -25,8 +25,8 @@ worktree.
 
 ## A merge conflict
 
-Resolve it first, keeping what each side meant, then `git add` the files and `git town continue`,
-which finishes the sync and pushes.
+Resolve it first, keeping what each side meant, then `git add` the files, `git town continue`, which
+finishes the sync and pushes, and `feature sync` again: only it records the merge for the review.
 
 ## Each problem
 
