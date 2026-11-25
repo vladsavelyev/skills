@@ -158,13 +158,16 @@ def test_render_links_the_preview_before_the_reference():
         review=_review(grade, history, next_depth="low"),
         deployments=[("rio-preview", "https://v.test/pr-7/")],
     )
-    assert out.splitlines()[2:4] == ["> [Preview](https://v.test/pr-7/)", "> **Tracking issue:** closes #39"]
+    assert out.splitlines()[2:4] == [
+        "> **Deployed preview**: [https://v.test/pr-7/](https://v.test/pr-7/)",
+        "> **Tracking issue:** closes #39",
+    ]
 
 
 def test_render_names_each_preview_for_its_environment_when_there_are_several():
     deployments = [("rio-preview", "https://v.test/pr-7/"), ("staging", "https://staging.test/")]
     assert assess.render(issue=39, review=None, deployments=deployments).splitlines() == [
-        "> [Preview: rio-preview](https://v.test/pr-7/)",
-        "> [Preview: staging](https://staging.test/)",
+        "> **Deployed preview** (rio-preview): [https://v.test/pr-7/](https://v.test/pr-7/)",
+        "> **Deployed preview** (staging): [https://staging.test/](https://staging.test/)",
         "> **Tracking issue:** closes #39",
     ]

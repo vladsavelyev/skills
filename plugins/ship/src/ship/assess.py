@@ -163,12 +163,15 @@ def _grade_lines(review: Review) -> list[str]:
 def render(*, issue: int, review: Review | None, deployments: Sequence[tuple[str, str]] = ()) -> str:
     """The content of the PR body's ship block: one quote, with no header, so it reads as a footnote
     to the author's description. Once a review has graded the PR, it opens with Sol's latest grade;
-    then a `Preview` link to each environment the PR is deployed to now (`deployments`,
-    `(environment, url)` pairs), named for its environment when there are several, the closing
-    reference to the feature issue, and one line per review round. A round's line lists what it
-    found, which never changes afterwards. GitHub breaks a PR body's lines where they break here."""
+    then the URL of each environment the PR is deployed to now (`deployments`, `(environment, url)`
+    pairs), named for its environment when there are several, the closing reference to the feature
+    issue, and one line per review round. A round's line lists what it found, which never changes
+    afterwards. GitHub breaks a PR body's lines where they break here."""
     several = len(deployments) > 1
-    head = [f"[Preview{f': {environment}' if several else ''}]({url})" for environment, url in deployments]
+    head = [
+        f"**Deployed preview**{f' ({environment})' if several else ''}: [{url}]({url})"
+        for environment, url in deployments
+    ]
     # `closes` is what makes GitHub close the issue on merge; a bare `#39` would only link it.
     head.append(f"**Tracking issue:** closes #{issue}")
     if review is None:
