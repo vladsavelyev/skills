@@ -1,5 +1,5 @@
 """The commit walk behind the gate's coverage rule, on real git repositories: which commits since
-the last review still need one, and which merges `feature sync` invalidates the review for."""
+the last review still need one."""
 
 import subprocess
 from argparse import Namespace
@@ -154,8 +154,6 @@ def test_a_review_of_the_head_needs_no_walk(repo, monkeypatch):
 
 @pytest.fixture
 def sync(repo, monkeypatch):
-    """`feature sync` of `feat`, reviewed in one round at its tip, with `git town sync` replaced by
-    the function it's given."""
     record_review(repo, sha=git("rev-parse", "HEAD"), new_blocking=0, new_low=0, regressions=0, summary="clean")
     monkeypatch.setattr(feature, "load_state", lambda branch: (7, repo, ""))
     monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
@@ -175,8 +173,6 @@ def stop_at_conflict():
 
 
 def test_a_rerun_after_a_conflicted_sync_invalidates_the_review(repo, sync):
-    """git-town stops at the conflict, `git town continue` commits the resolved merge, and running
-    `feature sync` again records it, once."""
     commit("shared.py", "b\n", "edit shared.py")
     advance_main("shared.py", "c\n")
     with pytest.raises(CommandFailed):

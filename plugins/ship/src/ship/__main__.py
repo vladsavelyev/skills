@@ -997,9 +997,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
 def cmd_sync(args: argparse.Namespace) -> None:
     """Sync the branch with its base (recursively, via git-town). If a merge of the base since the
     last review resolved code by hand, invalidate that review, so the next round starts a fresh
-    budget. Judging every merge since the review, not only this sync's, is what records a merge
-    git-town stopped at with a conflict: once it's resolved and `git town continue`d, a rerun sees it.
-    Delegates the actual sync to git-town; does not auto-resolve conflicts."""
+    budget. Delegates the actual sync to git-town; does not auto-resolve conflicts."""
     branch = args.branch or current_branch()
     issue, state, _ = feature.load_state(branch)
 
