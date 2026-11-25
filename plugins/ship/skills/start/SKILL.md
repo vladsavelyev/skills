@@ -19,6 +19,5 @@ later, when the user asks to ship it (`Skill(ship:ship)`).
    message says what to do.
 4. **Move in**: `EnterWorktree` with `path: <worktree>` from the output (never `name:`). Editing
    from the main checkout edits the base branch.
-5. Link the draft PR in T3 if the harness offers it (`link_pull_request`).
 
 Then do the work, committing and pushing as you go.

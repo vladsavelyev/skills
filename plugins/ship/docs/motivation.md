@@ -279,7 +279,9 @@ decides whether its fix needs a review (a `low` one's doesn't, which keeps a lin
 round: #12), and a later round dedups against it. The run watches only at `OPEN`, since a gate
 holding the turn would keep it from ending to wait. The three skills' copies of the gh account rule
 went too: `feature` applies it to its own calls, and the agent rules every session and fork read
-carry it for the agent's.
+carry it for the agent's. So did what a model does unprompted (rerun a flake, act on the latest
+push, answer a question), and what the CLI already says: the ship skill leaves each
+`NEEDS_DECISION`'s options to the gate's next step, and the merge override to the guard's refusal.
 
 ## Deliberately deferred
 

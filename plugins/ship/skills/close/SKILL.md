@@ -33,7 +33,6 @@ hasn't merged, stop and say so; reviewing and the merge gate are `ship`'s job.
    shipped without their PR merging. The command writes what the gate still had outstanding (an
    unreviewed tail, the problems handed off) into the record; pass that on in the report.
 5. **Tidy up.**
-   - If the harness is watching the PR (T3's `watch_pull_request`), unwatch it.
    - If your session is in the feature's checkout, leave it (`ExitWorktree`, `action: "keep"`).
    - `feature tidy --branch <branch>` removes the checkout and the local branch, once they hold
      nothing the PR doesn't. It removes nothing while the checkout holds any of these, and lists
