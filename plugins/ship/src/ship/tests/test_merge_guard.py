@@ -13,7 +13,7 @@ from ship.merge_guard import MergeCall, merge_calls
 
 def test_a_bare_merge_names_the_current_branchs_pr():
     assert merge_calls("gh pr merge --admin --squash", "/repo") == [
-        MergeCall(target=None, repo=None, cwd="/repo", override=None)
+        MergeCall(target=None, repo=None, cwd="/repo", override=None, admin=True)
     ]
 
 
@@ -34,7 +34,9 @@ def test_commands_that_only_mention_a_merge_are_not_merges(command):
     assert merge_calls(command, "/repo") == []
 
 
-def _stub_pr(monkeypatch, *, verdict: Verdict, body: str = "> **Tracking issue:** closes #39") -> list[tuple[int, str]]:
+def _stub_pr(
+    monkeypatch, *, verdict: Verdict, body: str = "> **Tracking issue:** closes #39", queue: bool = False
+) -> list[tuple[int, str]]:
     posted: list[tuple[int, str]] = []
     pr = {
         "number": 5355,
@@ -51,6 +53,7 @@ def _stub_pr(monkeypatch, *, verdict: Verdict, body: str = "> **Tracking issue:*
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.setattr(github, "pr_view", lambda target, repo: pr)
     monkeypatch.setattr(github, "current_repo", lambda: "org/app")
+    monkeypatch.setattr(github, "merge_queue_enabled", lambda number, repo: queue)
     monkeypatch.setattr(merge_guard, "has_object", lambda sha: True)
     monkeypatch.setattr(github, "get_issue_body", lambda n: "")
     monkeypatch.setattr(merge_guard, "parse_block", lambda body: {"pr": 5355})
@@ -251,14 +254,14 @@ def test_a_t3_merge_must_name_the_pr_and_its_repo(monkeypatch, capsys, tool_inpu
 def test_auto_merge_of_a_tracked_pr_is_refused_even_at_an_open_gate(monkeypatch):
     posted = _stub_pr(monkeypatch, verdict=Verdict.OPEN)
     refusal = merge_guard.check(MergeCall(target="5355", repo=None, cwd="/repo", override=None, auto=True))
-    assert "refuses to auto-merge PR #5355" in refusal and posted == []
+    assert "refuses to merge PR #5355 with auto-merge" in refusal and posted == []
 
 
 def test_the_users_reason_lets_an_auto_merge_through_on_the_record(monkeypatch):
     posted = _stub_pr(monkeypatch, verdict=Verdict.OPEN)
     assert merge_guard.check(MergeCall(target="5355", repo=None, cwd="/repo", override="ok", auto=True)) is None
     [(issue, text)] = posted
-    assert issue == 39 and "with auto-merge past the gate" in text
+    assert issue == 39 and "PR #5355 with auto-merge past the gate" in text
 
 
 @pytest.mark.parametrize(
@@ -326,3 +329,21 @@ def test_the_gate_is_judged_at_the_head_the_merge_pins(monkeypatch, capsys):
     gh = "gh pr merge 5355 --match-head-commit " + "b" * 40
     assert _judged_head(monkeypatch, lambda: _run_hook(monkeypatch, capsys, gh)) == "b" * 40
     assert _judged_head(monkeypatch, lambda: _run_hook(monkeypatch, capsys, "gh pr merge 5355")) == "f" * 40
+
+
+def test_a_merge_into_a_queue_is_refused_even_at_an_open_gate(monkeypatch, capsys):
+    """#191: T3 and gh join a merge queue by auto-merge, which lands a head pushed after the check."""
+    posted = _stub_pr(monkeypatch, verdict=Verdict.OPEN, queue=True)
+    refusal = "refuses to merge PR #5355 through its base's merge queue"
+    assert refusal in merge_guard.check(_call())
+    t3 = {"number": 5355, "repository": "org/app", "expectedHeadSha": "f" * 40}
+    assert (
+        refusal in json.loads(_run_t3_hook(monkeypatch, capsys, t3))["hookSpecificOutput"]["permissionDecisionReason"]
+    )
+    assert posted == []
+
+
+def test_an_admin_merge_skips_the_queue_so_merges_at_an_open_gate(monkeypatch):
+    _stub_pr(monkeypatch, verdict=Verdict.OPEN, queue=True)
+    [call] = merge_calls("gh pr merge 5355 --admin", "/repo")
+    assert merge_guard.check(call) is None

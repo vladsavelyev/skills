@@ -51,14 +51,16 @@ _MENTIONS_MERGE = re.compile(r"\bgh\b.*\bpr\b\s+merge\b", re.DOTALL)
 @dataclass(frozen=True)
 class MergeCall:
     """One merge: the PR it names (None: the current branch's), its repo, the directory it runs in
-    (after a command's own `cd`s), the `SHIP_PAST_GATE` reason if given, whether it auto-merges, and
-    the head it pins (None: whatever the PR's head is)."""
+    (after a command's own `cd`s), the `SHIP_PAST_GATE` reason if given, whether it auto-merges,
+    whether it skips a merge queue (`gh pr merge --admin`), and the head it pins (None: whatever
+    the PR's head is)."""
 
     target: str | None
     repo: str | None
     cwd: str
     override: str | None
     auto: bool = False
+    admin: bool = False
     head: str | None = None
 
 
@@ -111,6 +113,7 @@ def _gh_merge(words: list[str], cwd: str, env: dict[str, str]) -> MergeCall | No
             cwd=cwd,
             override=env.get(OVERRIDE) or None,
             auto=flags.get("auto") is True,
+            admin=flags.get("admin") is True,
             head=flags.get("match-head-commit") or None,
         )
     return None
@@ -205,11 +208,22 @@ def _refusal(pr: dict, issue: int, decision, blocking: list[dict]) -> str:
     )
 
 
-def _auto_refusal(pr: dict, issue: int) -> str:
+def _deferral(call: MergeCall, pr: dict) -> str | None:
+    """How GitHub defers the merge to whenever CI passes, or None if it merges now. A base that
+    requires a merge queue is joined by auto-merge (T3 always enables it there, `gh pr merge` when
+    checks are pending), and a push needn't take a PR back out of either."""
+    if call.auto:
+        return "with auto-merge"
+    if not call.admin and github.merge_queue_enabled(pr["number"], pr["repo"]):
+        return "through its base's merge queue"
+    return None
+
+
+def _deferred_refusal(pr: dict, issue: int, deferral: str, call: MergeCall) -> str:
+    wait = "Wait for the checks, then merge without auto. " if call.auto else ""
     return (
-        f"ship refuses to auto-merge PR #{pr['number']} (feature #{issue}): auto-merge lands whichever head "
-        f"passes CI, even one pushed after the gate was judged. Wait for the checks, then merge without auto. "
-        f"{_past_gate(pr)}"
+        f"ship refuses to merge PR #{pr['number']} {deferral} (feature #{issue}): GitHub then lands whichever "
+        f"head passes CI, even one pushed after the gate was judged. {wait}{_past_gate(pr)}"
     )
 
 
@@ -235,12 +249,17 @@ def check(call: MergeCall) -> str | None:
     state = parse_block(github.get_issue_body(issue))
     subs = github.sub_issues(issue)
     decision = feature.decide(pr["headRefName"], state, subs, False, head=head)
-    if decision.settled and not call.auto:
+    deferral = _deferral(call, pr)
+    if decision.settled and deferral is None:
         return None
     blocking = problems.blocking(subs)
     if call.override is None:
-        return _auto_refusal(pr, issue) if decision.settled else _refusal(pr, issue, decision, blocking)
-    how = " with auto-merge" if call.auto else ""
+        return (
+            _deferred_refusal(pr, issue, deferral, call)
+            if decision.settled
+            else _refusal(pr, issue, decision, blocking)
+        )
+    how = f" {deferral}" if deferral else ""
     github.comment(
         issue,
         f"⚠️ **Merging PR #{pr['number']}{how} past the gate**, at the user's request: {call.override}\n\n"
