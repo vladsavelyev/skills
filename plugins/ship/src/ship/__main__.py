@@ -995,9 +995,9 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
-    """Sync the branch with its base (recursively, via git-town). If a merge since the last review
-    resolved code by hand (`gate.needs_review`), invalidate that review, so the next round starts a
-    fresh budget. Judging every merge since the review, not only this sync's, is what records a merge
+    """Sync the branch with its base (recursively, via git-town). If a merge of the base since the
+    last review resolved code by hand, invalidate that review, so the next round starts a fresh
+    budget. Judging every merge since the review, not only this sync's, is what records a merge
     git-town stopped at with a conflict: once it's resolved and `git town continue`d, a rerun sees it.
     Delegates the actual sync to git-town; does not auto-resolve conflicts."""
     branch = args.branch or current_branch()
@@ -1011,9 +1011,8 @@ def cmd_sync(args: argparse.Namespace) -> None:
     if last is None:
         print(f"Synced to {after}. No review to keep or invalidate.")
         return
-    merges = [(sha, parents) for sha, parents in commits_since(last["sha"], after) if len(parents) > 1]
-    if not gate.needs_review(feature.own_changes(merges, state), low_fixes=set(), sensitive=sensitive_patterns()):
-        print(f"Synced to {after}. No merge since the last review added code it must see, so it still covers it.")
+    if not feature.hand_resolved_base_merges(commits_since(last["sha"], after), state):
+        print(f"Synced to {after}. No merge of the base since the last review resolved code by hand; review kept.")
         return
 
     # The marker in the history is load-bearing: the gate counts review rounds and reads the

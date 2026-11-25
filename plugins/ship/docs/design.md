@@ -285,10 +285,11 @@ anyone can check. `problem add --repeats` refuses a problem that was never fixed
 open one is more of the same before any fix, and one like a `wontfix` either answers its reason
 (`problem block`) or isn't a bug.
 
-When a merge since the last review resolved code by hand, `feature sync` clears `last_review` and
-appends an invalidation marker to `review_history`: the gate reopens, and the round count resets to
-the runs after the marker (hand-merged code deserves a fresh budget). It judges every merge since the
-review, not only its own, so rerun after a conflict it stopped at, it records the resolved merge.
+When a merge of the base since the last review resolved code by hand, `feature sync` clears
+`last_review` and appends an invalidation marker to `review_history`: the gate reopens, and the
+round count resets to the runs after the marker (hand-merged code deserves a fresh budget). It judges
+every merge of the base since the review, not only its own, so rerun after a conflict it stopped at,
+it records the resolved merge. A merge of any other branch is left to the coverage rule.
 
 The gate is still a pure query: `feature gate` never mutates state. Parking a feature at
 `needs-decision` is an explicit act — `feature escalate --reason "…"` — which posts the current gate
@@ -397,7 +398,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature merge [--branch <b>] [--force]` | Final transition: verify **that the PR actually merged**, record what the gate still had outstanding, set status `merged`, close the feature issue (or just comment, if the PR's `Closes` reference already closed it). Does not merge the PR itself; `--force` records a feature that shipped without its PR merging. |
 | `feature tidy [--branch <b>] [--accept <path> …]` | Once the PR has merged, remove the feature's checkout and local branch, if they hold nothing the PR doesn't: no modified or untracked file, no commit the PR lacks, no repository inside it and no ignored path that neither the main checkout has nor a cache explains (unless `--accept`ed), and no folder you can't empty (checked before anything is removed). Keeps a branch another is stacked on. |
 | `feature reconcile [--branch <b>] [--dry-run]` | Repo-wide sweep for features the close-out never reached: closes out every feature whose PR merged, closes as `abandoned` those whose PR was closed unmerged (unless the branch has a newer open PR, which it reports instead), and repairs ship's block on still-open PRs (a stale reference, or duplicate blocks merged into one). GitHub-only (no git), so it reaches features whose branch is long deleted. |
-| `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If a merge since the last review resolved code by hand (rerun it after resolving a conflict it stopped at), invalidates that review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
+| `feature sync [--branch <b>] [--stack]` | Sync the branch with its base via `git town sync` (recursive over ancestors; `--stack` for the whole stack). If a merge of the base since the last review resolved code by hand (rerun it after resolving a conflict it stopped at), invalidates that review so the gate reopens and a fresh review + `review record` is required. Delegates to git-town; does not auto-resolve conflicts. |
 
 ## The ship run
 

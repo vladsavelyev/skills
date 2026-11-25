@@ -131,11 +131,15 @@ def test_the_tail_of_a_squash_merged_parent_counts_as_base(repo, monkeypatch):
     assert unreviewed(repo) == []
 
 
-def test_a_merge_of_a_branch_other_than_the_base_needs_review(repo):
+def merge_another_branch() -> str:
     git("checkout", "-q", "-b", "other", "main")
     commit("other.py", "unreviewed code\n", "another branch's work")
     git("checkout", "-q", "feat")
-    merged = merge("other")
+    return merge("other")
+
+
+def test_a_merge_of_a_branch_other_than_the_base_needs_review(repo):
+    merged = merge_another_branch()
     assert unreviewed(repo) == [merged]
 
 
@@ -150,7 +154,6 @@ def sync(repo, monkeypatch):
     the function it's given."""
     record_review(repo, sha=git("rev-parse", "HEAD"), new_blocking=0, new_low=0, regressions=0, summary="clean")
     monkeypatch.setattr(feature, "load_state", lambda branch: (7, repo, ""))
-    monkeypatch.setattr(cli, "sensitive_patterns", lambda: [])
     monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
     monkeypatch.setattr(github, "comment", lambda issue, note: None)
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
@@ -187,3 +190,10 @@ def test_a_clean_merge_of_the_base_keeps_the_review(repo, sync):
     sync(lambda: merge("origin/main"))
     assert repo["last_review"] is not None
     assert len(repo["review_history"]) == 1
+
+
+def test_sync_leaves_a_merge_of_another_branch_to_the_coverage_rule(repo, sync):
+    merged = merge_another_branch()
+    sync(lambda: "")
+    assert len(repo["review_history"]) == 1
+    assert unreviewed(repo) == [merged]
