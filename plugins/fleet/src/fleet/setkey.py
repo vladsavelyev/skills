@@ -4,8 +4,8 @@ The value comes from stdin, or a prompt that doesn't echo it, and is never print
 key names and a sha256 prefix only. It's validated first when the key has a validator (VALIDATORS),
 written here with a `.bak-<timestamp>` copy of the old file, pushed to the hosts through the
 settings sync with only that key selected, and read back from every machine to compare hashes. The
-key's mirrors (copies in other files, e.g. Codex's config: mirrors.py) get the value on every machine
-too, and are checked the same way.
+key's mirrors (copies elsewhere, e.g. Codex's config or a T3 Code provider's secret: mirrors.py) get the
+value on every machine too, and are checked the same way.
 """
 
 import getpass
@@ -16,7 +16,7 @@ from collections.abc import Callable
 from functools import partial
 
 from . import mirrors, validators
-from .mirrors import Mirror
+from .mirrors import FileMirror, Mirror, T3Mirror
 from .sync import (
     SETTINGS_JSON,
     Config,
@@ -90,15 +90,53 @@ def read_settings(machine: Machine) -> dict:
 
 
 def set_mirror(machine: Machine, mirror: Mirror, value: str, report: Report) -> None:
+    match mirror:
+        case FileMirror():
+            set_file_mirror(machine, mirror, value, report)
+        case T3Mirror():
+            set_t3_mirror(machine, mirror, value, report)
+
+
+def set_file_mirror(machine: Machine, mirror: FileMirror, value: str, report: Report) -> None:
     text = machine.read(mirror.file)
     if text is None:
         report.note(f"{machine.name}: no ~/{mirror.file}, so no {mirror.key} to update")
         return
-    new = mirrors.with_value(text, mirror.key, value, f"{machine.name}: ~/{mirror.file}")
+    new = mirror.with_value(text, value, f"{machine.name}: ~/{mirror.file}")
     if new == text:
         report.ok(f"{machine.name}: {mirror} identical")
         return
     backup = machine.write(mirror.file, new)
+    report.fixed(f"{machine.name}: set {mirror}{kept(backup)}")
+
+
+def t3_configured(machine: Machine, mirror: T3Mirror, report: Report) -> bool:
+    """Whether this machine's T3 has the mirror's variable; a machine without it is skipped with a note."""
+    text = machine.read(mirrors.T3_SETTINGS)
+    if text is None:
+        report.note(f"{machine.name}: no T3 Code settings, so no {mirror} to update")
+        return False
+    if not mirror.configured(text, f"{machine.name}: ~/{mirrors.T3_SETTINGS}"):
+        report.note(f"{machine.name}: T3 Code has no {mirror} to update")
+        return False
+    return True
+
+
+def set_t3_mirror(machine: Machine, mirror: T3Mirror, value: str, report: Report) -> None:
+    if not t3_configured(machine, mirror, report):
+        return
+    old = machine.read(mirror.secret)
+    if old is None:
+        raise RuntimeError(
+            f"{machine.name}: T3's settings keep {mirror} in its secret store, but ~/{mirror.secret} "
+            "is not there: T3 may have moved its secrets, so `fleet` can't update it"
+        )
+    if old == value:
+        report.ok(f"{machine.name}: {mirror} identical")
+        return
+    backup = machine.write(mirror.secret, value)
+    # Replacing the settings file, unchanged, makes the T3 server reload it and restart the provider.
+    machine.run(["sh", "-c", 'cp -p "$1" "$1.fleet-new" && mv -f "$1.fleet-new" "$1"', "sh", mirrors.T3_SETTINGS])
     report.fixed(f"{machine.name}: set {mirror}{kept(backup)}")
 
 
@@ -135,11 +173,16 @@ class Rollout:
     def verify(self, machine: Machine, key: str, copies: list[Mirror]) -> None:
         self.check(machine, key, flatten(read_settings(machine)).get(key))
         for mirror in copies:
-            text = machine.read(mirror.file)
-            if text is None:
-                self.report.note(f"{machine.name}: no ~/{mirror.file}")
-            else:
-                self.check(machine, str(mirror), mirrors.value_in(text, mirror.key))
+            match mirror:
+                case FileMirror():
+                    text = machine.read(mirror.file)
+                    if text is None:
+                        self.report.note(f"{machine.name}: no ~/{mirror.file}")
+                    else:
+                        self.check(machine, str(mirror), mirror.value_in(text))
+                case T3Mirror():
+                    if t3_configured(machine, mirror, self.report):
+                        self.check(machine, str(mirror), machine.read(mirror.secret))
 
 
 def set_key(machines: list[Machine], key: str, value: str, copies: list[Mirror]) -> int:

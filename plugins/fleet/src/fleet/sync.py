@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from . import mirrors
 from .mirrors import Mirror
 from .shell import out, run, try_out
 
@@ -71,7 +72,7 @@ def load_config() -> Config:
             '  agents_md = ".claude/plugins/marketplaces/<m>/agents/AGENTS.md"  # optional, see README'
         )
     raw = tomllib.loads(CONFIG_PATH.read_text())
-    config = Config(**{**raw, "mirrors": [Mirror(**m) for m in raw.get("mirrors", [])]})
+    config = Config(**{**raw, "mirrors": [mirrors.parse(m) for m in raw.get("mirrors", [])]})
     if not config.hosts:
         raise RuntimeError(f"{CONFIG_PATH}: `hosts` is empty, so there is no fleet to sync")
     return config

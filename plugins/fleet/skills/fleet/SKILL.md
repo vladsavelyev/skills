@@ -36,8 +36,11 @@ the next Claude Code session.
 To rotate a secret, get it with T3's `request_secret` using `delivery: "file"`, then run
 `fleet set <key> < "$file"`, and never ask for it in chat. It validates the value where it can
 (`env.AWS_BEARER_TOKEN_BEDROCK` against the gateway), writes it on every machine along with its
-`mirrors` from the fleet config (e.g. Codex's copy of the gateway key in `~/.codex/config.toml`), and
-reports `ok` or `FAILED` per machine by hash, never the value.
+`mirrors` from the fleet config, and reports `ok` or `FAILED` per machine by hash, never the value. A
+mirror is either a string in a TOML or JSON file (e.g. Codex's copy of the gateway key in
+`~/.codex/config.toml`) or a T3 Code provider's sensitive environment variable (e.g. Antigravity's
+`AGY_LLM_GATEWAY_API_KEY`), which T3 picks up without a restart. When a secret turns up somewhere new,
+add it as a mirror rather than keep it by hand, so the next rotation reaches it.
 
 Something machine-specific showing up as drift is not a reason to sync it: add it to
 `machine_settings` / `machine_skills` in the config, or move CLAUDE.md text below the marker.
