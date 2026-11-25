@@ -16,7 +16,7 @@ fixes run in another, so the caller's thread keeps only their reports. Then it b
 until it's ready to merge: a failed check or a reviewer's comment becomes a problem like the
 review's, a flake is rerun, the branch is synced when its base moves on, and T3 Code's PR watch
 wakes the run for each. A Stop hook keeps the session from ending its turn with the gate shut, and a guard refuses
-`gh pr merge` of a tracked PR until the gate opens.
+a merge of a tracked PR (`gh pr merge`, or T3 Code's `pull_request_merge`) until the gate opens.
 
 Before the merge the gate has three verdicts, because "review until a run finds nothing" never
 terminates — a real reviewer always finds *something*. After it, a fourth ends the loop:
@@ -185,9 +185,11 @@ The plugin's `hooks/hooks.json` runs three:
   context injected.
 - Stop, `feature-stop-hook`: a session that recorded a review or closed a problem can't end its
   turn until the gate is `OPEN` or `MERGED`, short of `feature escalate` or `feature release`.
-- PreToolUse on Bash, `feature-merge-guard`: `gh pr merge` of a tracked PR is refused while its
-  gate is shut. A user who has been told and still wants it gets it with
-  `SHIP_PAST_GATE="<their reason>"` before `gh`, and the reason goes on the tracking issue.
+- PreToolUse on Bash and on T3 Code's `pull_request_merge`, `feature-merge-guard`: a merge of a
+  tracked PR is refused while its gate is shut, and so is an auto-merge or a merge-queue merge of
+  one at any gate, and a T3 stack merge of any PR. A user who has been told and still wants it gets it with
+  `SHIP_PAST_GATE="<their reason>"` in front of the `gh pr merge` (for a T3 merge, the one its refusal
+  prints), and the reason goes on the tracking issue.
 
 See "Driving the loop to the end" and "The merge guard" in [docs/design.md](docs/design.md).
 

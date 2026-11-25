@@ -253,6 +253,15 @@ def pr_view(target: str | None, *, repo: str | None) -> dict:
     return {**pr, "repo": f"{owner}/{name}"}
 
 
+def merge_queue_enabled(number: int, repo: str) -> bool:
+    """Whether PR `number` of `repo` (`OWNER/NAME`) merges into a base that requires a merge queue."""
+    owner, name = repo.split("/")
+    q = "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isMergeQueueEnabled}}}"
+    query = ["-f", f"query={q}", "-f", f"o={owner}", "-f", f"r={name}", "-F", f"n={number}"]
+    out = run(["gh", "api", "graphql", *query, "--jq", ".data.repository.pullRequest.isMergeQueueEnabled"])
+    return {"true": True, "false": False}[out]
+
+
 def current_repo() -> str:
     """`OWNER/NAME` of the repo the current directory is a checkout of."""
     return "/".join(_owner_repo())
