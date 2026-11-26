@@ -5,6 +5,7 @@ from ship.problems import (
     blocking,
     handed_off,
     is_blocking,
+    low_fix_commits,
     recurring,
     repeated,
     severity,
@@ -92,3 +93,9 @@ def test_the_issue_body_carries_the_link():
     # Prose that mentions a repeat is not the link the CLI wrote.
     assert repeated("Repeats #10 maybe, but I'm not sure") is None
     assert repeated("repro") is None
+
+
+def test_low_fix_commits_counts_a_fix_of_an_unlinked_problem_as_not_low():
+    """A problem unlinked at GitHub's sub-issue limit has no severity left to read."""
+    subs = [sub(1, sev="sev:low", state="CLOSED")]
+    assert low_fix_commits({"a": [1], "b": [1, 2], "c": [2]}, subs) == {"a"}
