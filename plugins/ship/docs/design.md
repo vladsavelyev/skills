@@ -572,8 +572,9 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
       PR's base isn't the tracked parent
    2. `feature describe` ─▶ title + description from the motivation and commit messages
    3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
-   4. the reviewer the user named, else `feature reviewer` ─▶ provider + model family
-      delegate_task(<reviewer>, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
+   4. `feature reviewer --depth <depth>` (the one the user named, else the default)
+      ─▶ provider + model family + the options that set its effort (`reviewer.EFFORTS`)
+      delegate_task(<reviewer>, <options>, "review PR #<n>, read only under <worktree>")
       ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
          (the reviewer gets the recorded request as intent, never tracked state)
    5. NOW load tracked state, and for each finding decide (real code + problems):

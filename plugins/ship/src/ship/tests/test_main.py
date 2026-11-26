@@ -642,6 +642,26 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
     assert state["review_budget_run"] is None
 
 
-def test_reviewer_prints_the_default_provider_and_model_family(capsys):
-    cli.main(["reviewer"])
-    assert capsys.readouterr().out == "Default reviewer: provider codex, model family sol\n"
+def test_reviewer_prints_the_default_and_the_options_that_set_its_effort(capsys):
+    cli.main(["reviewer", "--depth", "high"])
+    assert capsys.readouterr().out == (
+        'Reviewer: provider codex, model family sol\ndelegate_task options: {"reasoningEffort": "high"}\n'
+    )
+
+
+@pytest.mark.parametrize(("depth", "value"), [("max", "max"), ("ultra", "ultrathink")])
+def test_a_named_claude_reviewer_takes_its_effort_in_its_own_option(capsys, depth, value):
+    # Claude rejects `reasoningEffort` ("Unknown option reasoningEffort; supported options: effort, …")
+    # and calls Codex's `ultra` tier `ultrathink`.
+    cli.main(["reviewer", "--provider", "claudeAgent", "--family", "opus", "--depth", depth])
+    assert capsys.readouterr().out.splitlines()[1] == f'delegate_task options: {{"effort": "{value}"}}'
+
+
+def test_reviewer_refuses_a_provider_whose_effort_option_it_does_not_know():
+    with pytest.raises(SystemExit, match="cursor"):
+        cli.main(["reviewer", "--provider", "cursor", "--family", "composer", "--depth", "high"])
+
+
+def test_reviewer_refuses_a_provider_without_a_family():
+    with pytest.raises(SystemExit, match="together"):
+        cli.main(["reviewer", "--provider", "claudeAgent", "--depth", "high"])

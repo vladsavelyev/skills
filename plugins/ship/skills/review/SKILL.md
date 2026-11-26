@@ -35,7 +35,7 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] [--attach <file>]… --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
-| Default reviewer | `feature reviewer` |
+| Reviewer and its options | `feature reviewer --depth <depth> [--provider <p> --family <f>]` |
 | Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
 | Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
@@ -75,19 +75,22 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    grade. Don't read the diff to second-guess it. Go higher only when your arguments ask for a
    deeper review (`ultra` only on request), and say so in the report.
 4. **Have the reviewer find, blind.** The reviewer is the one your arguments name ("review with
-   Claude"), else the default `feature reviewer` prints: a T3 provider instance and a model
-   family. Load the T3 tools with ToolSearch, call `orchestrator_capabilities` with `search:
-   "<the name or family>"`, and take the provider that offers it and the newest model of that
-   family it lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`, `timeoutMs:
-   3600000`, and
-   `target: {providerInstanceId: "<provider>", model: <model>, options: {reasoningEffort: <depth>}}`.
+   Claude"), else the default: a T3 provider instance and a model family. Load the T3 tools with
+   ToolSearch. For a named reviewer, call `orchestrator_capabilities` with `search: "<the
+   name>"` and take the provider that offers it and the model family it means. Then `feature
+   reviewer --depth <depth>` (add `--provider <provider> --family <family>` for a named one)
+   prints the reviewer and the `delegate_task` options that set its effort, since each provider
+   names that option its own way. Call `orchestrator_capabilities` with `search: "<family>"` and
+   take the newest model of that family the provider lists. Then `delegate_task` with `mode:
+   "wait"`, `role: "review"`, `timeoutMs: 3600000`, and `target: {providerInstanceId:
+   "<provider>", model: <model>, options: <the printed options>}`.
    The `task` is the brief below, with the user's request filled in from the `Last prompt` line
    of `feature status`, and nothing about tracked problems or earlier rounds: the reviewer must
    find without them. If the wait times out, keep waiting (`t3_thread_wait` on the child thread)
-   until it finishes; never cancel it or review yourself instead. If no model of the family is
-   listed, or its task comes back failed (an auth or gateway error, a crash), stop: record no
-   review, put the reviewer's error verbatim in the report, and don't substitute another
-   reviewer.
+   until it finishes; never cancel it or review yourself instead. If `feature reviewer` refuses
+   the provider, no model of the family is listed, or its task comes back failed (an auth or
+   gateway error, a crash), stop: record no review, put the reviewer's error verbatim in the
+   report, and don't substitute another reviewer.
    ```
    Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>` (over 300 files that
    fails; then run `git fetch origin <base>` and use `git diff origin/<base>...HEAD` in the

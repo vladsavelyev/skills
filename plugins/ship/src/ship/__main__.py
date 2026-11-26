@@ -256,8 +256,13 @@ def cmd_describe(args: argparse.Namespace) -> None:
     print(f"Updated the description of PR #{state['pr']}")
 
 
-def cmd_reviewer(_args: argparse.Namespace) -> None:
-    print(f"Default reviewer: provider {reviewer.DEFAULT.provider}, model family {reviewer.DEFAULT.family}")
+def cmd_reviewer(args: argparse.Namespace) -> None:
+    if (args.provider is None) != (args.family is None):
+        sys.exit("Pass --provider and --family together, or neither for the default reviewer.")
+    chosen = reviewer.Reviewer(args.provider, args.family) if args.provider else reviewer.DEFAULT
+    options = chosen.options(args.depth)
+    print(f"Reviewer: provider {chosen.provider}, model family {chosen.family}")
+    print(f"delegate_task options: {json.dumps(options)}")
 
 
 def cmd_depth(args: argparse.Namespace) -> None:
@@ -1080,7 +1085,13 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_depth)
 
-    c = sub.add_parser("reviewer", help="T3 provider and model family that review a PR when the user names none")
+    c = sub.add_parser(
+        "reviewer",
+        help="The reviewer (the default, or the one named) and the delegate_task options for its depth",
+    )
+    c.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="The round's depth")
+    c.add_argument("--provider", help="T3 provider instance of the reviewer the user named")
+    c.add_argument("--family", help="Model family of the reviewer the user named")
     c.set_defaults(func=cmd_reviewer)
 
     # The `ship` skill has the reviewer (a T3 delegate: the one the user named, else `feature
