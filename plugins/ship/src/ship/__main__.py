@@ -1094,11 +1094,6 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--family", help="Model family of the reviewer the user named")
     c.set_defaults(func=cmd_reviewer)
 
-    # The `ship` skill has the reviewer (a T3 delegate: the one the user named, else `feature
-    # reviewer`'s) review the PR, dedups its findings against tracked problems, files new ones via
-    # `problem add`, and records the run here. There is no headless
-    # `review run` — spawning a second long-lived `claude` subprocess got reaped by the session
-    # manager.
     c = sub.add_parser("review", help="Review subcommands")
     rsub = c.add_subparsers(dest="review_command", required=True)
     r = rsub.add_parser("record", help="Record an in-session review run (moves the gate)")
