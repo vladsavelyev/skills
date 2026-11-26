@@ -31,7 +31,8 @@ finishes the sync and pushes, and `feature sync` again: only it records the merg
 ## Each problem
 
 1. Fix it at its root cause, not the symptom. Prefer deleting or narrowing over new code. Show the
-   fix works: the repro or a test that fails before it and passes after.
+   fix works: the repro or a test that fails before it and passes after. Put its output before and
+   after in the fix's commit message, from which the PR's description takes its evidence.
    Never run `sudo`, not even `sudo -n`: it stops for the user's approval. To make a file owned by
    root or by a uid the host doesn't know, chown it from a container (`docker run --rm -v <dir>:/d
    alpine chown -R <uid>:<gid> /d/<path>`), and hand it back the same way once done, so the scratch

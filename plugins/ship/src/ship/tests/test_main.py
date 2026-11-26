@@ -1,5 +1,7 @@
 """Tests for the command-layer logic worth pinning: the merge close-out's ordering and wording."""
 
+import json
+
 import pytest
 
 from ship import __main__ as cli
@@ -403,8 +405,8 @@ def test_escalate_asks_on_each_named_problem_then_releases_the_session(monkeypat
 
 def test_release_puts_the_reason_on_the_tracking_issue_and_drops_the_hold(monkeypatch, tmp_path):
     posted = _stub_escalate(monkeypatch, tmp_path, cli.gate.Verdict.REVIEW_AGAIN, [_problem(5400, "sev:med")])
-    cli.cmd_release(cli.argparse.Namespace(branch="add-oauth", reason="Sol is down"))
-    assert posted[0][0] == 7 and "Sol is down" in posted[0][1] and "#5400 [sev:med]" in posted[0][1]
+    cli.cmd_release(cli.argparse.Namespace(branch="add-oauth", reason="the reviewer is down"))
+    assert posted[0][0] == 7 and "the reviewer is down" in posted[0][1] and "#5400 [sev:med]" in posted[0][1]
     assert hold.held("s1") == []
 
 
@@ -640,3 +642,48 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (3, False, []))
     cli.main(["budget", "--branch", "add-oauth", "--auto"])
     assert state["review_budget_run"] is None
+
+
+def test_reviewer_prints_the_default(capsys):
+    cli.main(["reviewer"])
+    assert capsys.readouterr().out == "Default reviewer: provider codex, model family sol\n"
+
+
+# Each model's `options` as `orchestrator_capabilities` listed them on 2026-11-26.
+SOL = [
+    {"id": "reasoningEffort", "values": ["low", "medium", "high", "xhigh", "max", "ultra"], "default": "low"},
+    {"id": "serviceTier", "values": ["default", "priority"], "default": "default"},
+]
+FABLE = [
+    {"id": "effort", "values": ["low", "medium", "high", "xhigh", "max", "ultrathink"], "default": "medium"},
+    {"id": "ultracode", "values": [False, True]},
+    {"id": "fastMode", "values": [False, True]},
+]
+BEDROCK_FABLE = [{"id": "effort", "values": ["default", "low", "medium", "high", "xhigh", "max"], "default": "default"}]
+
+
+@pytest.mark.parametrize(
+    ("options", "depth", "printed"),
+    [
+        (SOL, "high", {"reasoningEffort": "high"}),
+        (SOL, "ultra", {"reasoningEffort": "ultra"}),
+        (FABLE, "max", {"effort": "max"}),
+        # Claude rejects `reasoningEffort` ("Unknown option reasoningEffort; supported options: effort, …").
+        (FABLE, "ultra", {"effort": "ultrathink"}),
+        (BEDROCK_FABLE, "low", {"effort": "low"}),
+    ],
+)
+def test_effort_sets_the_option_the_model_lists_for_it(capsys, options, depth, printed):
+    cli.main(["effort", "--depth", depth, "--model-options", json.dumps(options)])
+    assert json.loads(capsys.readouterr().out) == printed
+
+
+def test_effort_refuses_ultra_for_a_model_with_nothing_above_max():
+    with pytest.raises(SystemExit, match="nothing above max"):
+        cli.main(["effort", "--depth", "ultra", "--model-options", json.dumps(BEDROCK_FABLE)])
+
+
+def test_effort_refuses_a_model_without_an_effort_option():
+    no_effort = [{"id": "serviceTier", "values": ["default", "priority"]}]
+    with pytest.raises(SystemExit, match="no option"):
+        cli.main(["effort", "--depth", "high", "--model-options", json.dumps(no_effort)])
