@@ -1,12 +1,12 @@
 """How deep a PR's review should go — pure sizing logic.
 
-The depth is the reasoning effort the reviewer (Sol) runs at, so a two-line docs fix doesn't pay
+The depth is the reasoning effort the reviewer runs at, so a two-line docs fix doesn't pay
 for a max-effort sweep and a migration doesn't get a skim. It comes from size, risk and complexity:
 
 - Before any review, nobody has read the change, so nothing is guessed from the diff's content:
   size comes from the diff stats and risk from which paths it touches (`path_risk`). Reading a
   whole diff just to pick an effort cost more than it bought, and did not scale to big PRs.
-- After a review, Sol has read every line, so its grade of risk and complexity (recorded with the
+- After a review, the reviewer has read every line, so its grade of risk and complexity (recorded with the
   round, and written into the PR body) sets the depth of the next round. A first guess that was
   too low gets corrected by the reviewer that found out.
 
@@ -21,7 +21,7 @@ LEVELS = ("low", "med", "high")
 # Whether reverting the PR undoes what a bug in it did: a two-way door can be walked back through,
 # a one-way door can't (stored data rewritten, data sent out, a cutover others now depend on).
 DOORS = ("one-way", "two-way")
-# Reviewer reasoning efforts, cheapest first. Sol also offers `ultra`; it's never picked
+# Reviewer reasoning efforts, cheapest first. A reviewer may also offer `ultra`; it's never picked
 # automatically, only when the user asks for it.
 DEPTHS = ("low", "medium", "high", "xhigh", "max")
 
@@ -143,7 +143,7 @@ def _next_round(last: dict, depth: str) -> str:
 
 
 def _grade_lines(review: Review) -> list[str]:
-    """Sol's grade of the risk, read as its two halves (the door: whether a revert undoes what a bug
+    """The reviewer's grade of the risk, read as its two halves (the door: whether a revert undoes what a bug
     did; the blast radius: who or what a bug reaches), then of the complexity, with the PR's size."""
     grade = review.grade
     risk, why = _SPELLED[grade["risk"]], grade["why"].strip()
@@ -161,7 +161,7 @@ def _grade_lines(review: Review) -> list[str]:
 
 def render(*, issue: int, review: Review | None) -> str:
     """The content of the PR body's ship block: one quote, with no header, so it reads as a footnote
-    to the author's description. Once a review has graded the PR, it opens with Sol's latest grade;
+    to the author's description. Once a review has graded the PR, it opens with the reviewer's latest grade;
     then the closing reference to the feature issue, and one line per review round. A round's line
     lists what it found, which never changes afterwards. GitHub breaks a PR body's lines where they
     break here."""

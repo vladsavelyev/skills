@@ -20,8 +20,8 @@ them, `unwatch_pull_request` if you watched the PR.
   recommendation.
 - `YOUR CALL`: something only the user can decide, asked with its options and your recommendation.
 - `MERGED`: the PR is in; `Skill(ship:close)` closes it out.
-- `STOPPED`: Sol can't run, the fix waits on something only the user has, or the user stopped
-  the run; released on the record (`feature release --reason "…"`).
+- `STOPPED`: the reviewer can't run, the fix waits on something only the user has, or the user
+  stopped the run; released on the record (`feature release --reason "…"`).
 
 **Never ship debt.** Every problem, at every severity including `low`, is fixed or, if it isn't
 relevant, closed as `wontfix` with the reason. A spent budget limits review rounds, never fixes.
@@ -53,8 +53,8 @@ the same way twice.
    - `Blocked:` no PR, or its base isn't the tracked parent: open a draft against the parent (`gh
      pr create --draft --base <parent>`) or retarget it (`gh pr edit <PR#> --base <parent>`), and
      review again.
-   - `Blocked:` Sol unavailable or failing: end `STOPPED` with Sol's error, releasing the branch
-     if this session holds it.
+   - `Blocked:` the reviewer unavailable or failing: end `STOPPED` with its error, releasing the
+     branch if this session holds it.
    - `Gate: MERGED`: end `MERGED`.
    - `Gate: NEEDS_DECISION` recommending a redesign: step 4, fixing nothing.
 2. **Take in what the PR raised.**
@@ -88,8 +88,10 @@ the same way twice.
      commits, then `feature budget --set <n>` and ship again.
    - `OPEN`: step 5.
 5. **Babysit.** If the description shows no proof the change works and it can be run or seen, run
-   it and add the before and after with `feature describe`, laid out as review's step 2 says. If
-   the user asked to ship it and it's a draft, `gh pr ready <PR#>`. The PR is **ready** when, at
+   it and add the before and after, laid out as "Prove the PR works" in your instructions says,
+   with `feature describe`: place each screencast or screenshot as `![](./<file>)` in the body and
+   pass `--attach ./<file>` for it, which uploads it to GitHub. If the user asked to ship it and
+   it's a draft, `gh pr ready <PR#>`. The PR is **ready** when, at
    its head:
    - the required checks pass, and the review bots the repo uses have reviewed it;
    - every review thread is resolved, and no requested review is pending: once you've answered a
@@ -104,7 +106,7 @@ the same way twice.
 
 ## Rules
 
-- Never lower a severity, or Sol's grade, to buy a cheaper review.
+- Never lower a severity, or the reviewer's grade, to buy a cheaper review.
 - Pre-existing bugs (ones the review lists, a check that fails on the base too) aren't this PR's
   and don't hold its gate. Ask the user, for each, whether to fix it in a separate PR
   (`Skill(ship:start)` off the base branch) or file an issue for it (`gh issue create`, with the

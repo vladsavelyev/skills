@@ -7,7 +7,7 @@ background: false
 
 # review
 
-You run in a forked subagent and do one review round of a PR: Sol finds, blind; you verify, dedup
+You run in a forked subagent and do one review round of a PR: the reviewer finds, blind; you verify, dedup
 and file what it found, and record the round. Then end with the **report** below: the caller,
 usually `Skill(ship:ship)`, sees only that. Your arguments name the PR (else take the current
 branch's) and anything the user asked of this round (a deeper review, a fresh one past an OPEN
@@ -33,9 +33,10 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 | Resume | `feature status` |
 | Record the user's request | `feature prompt "<request>"` |
 | Link the PR | `feature pr <number>` |
-| Rewrite the PR description | `feature describe [--title "<t>"] --body-file - <<'EOF' … EOF` |
+| Rewrite the PR description | `feature describe [--title "<t>"] [--attach <file>]… --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
-| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort Sol ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
+| Who reviews | `feature reviewer` |
+| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
 | Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
@@ -60,34 +61,31 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    them. It runs in this order, with no headers:
    - The motivation, in one to three informal sentences, from the original motivation in the PR
      body and the commit messages (`git log --format='%s%n%b' origin/<base>..HEAD`), not from the
-     diff: Sol's spec check reads the PR's intent from these sentences.
-   - The evidence that it works, carried over from the existing description or the commits: a
-     before and after, as a screencast or screenshots for a change users see, otherwise the test
-     or command that failed before and passes now, with its output. Open each half with the word
-     in bold (`**Before**: …`, `**After**: …`) so a reader finds them at a glance. Only what was
-     run, and never a suite's pass count or a list of test names. A change with nothing to run or
-     see (docs, comments) needs none.
+     diff: the reviewer's spec check reads the PR's intent from these sentences.
+   - The evidence that it works, carried over from the existing description or the commits, laid
+     out as "Prove the PR works" in your instructions says. Keep its attachments' links as they
+     are: they already point at GitHub.
 
    The title says what the PR does, in plain words. End the description with your signature
    line if your harness asks for one. `feature describe` takes the text with or without ship's
-   block (editing the fetched body is fine) and writes exactly one, above that signature. Sol and
-   step 6 read this description to know the PR's intent, so it comes first.
+   block (editing the fetched body is fine) and writes exactly one, above that signature. The
+   reviewer and step 6 read this description to know the PR's intent, so it comes first.
 3. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
    review it comes from the diff stats and the paths touched; after one, from the last review's
    grade. Don't read the diff to second-guess it. Go higher only when your arguments ask for a
    deeper review (`ultra` only on request), and say so in the report.
-4. **Have Sol find, blind.** Sol is the Codex provider's Sol model in T3. Load the T3 tools with
-   ToolSearch, call `orchestrator_capabilities` with `search: "sol"`, and take the newest Sol
-   model the `codex` provider lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`,
-   `timeoutMs: 3600000`, and
-   `target: {providerInstanceId: "codex", model: <sol model>, options: {reasoningEffort: <depth>}}`.
+4. **Have the reviewer find, blind.** `feature reviewer` names it: a T3 provider instance and a
+   model family. Load the T3 tools with ToolSearch, call `orchestrator_capabilities` with
+   `search: "<family>"`, and take the newest model of that family the provider lists. Then
+   `delegate_task` with `mode: "wait"`, `role: "review"`, `timeoutMs: 3600000`, and
+   `target: {providerInstanceId: "<provider>", model: <model>, options: {reasoningEffort: <depth>}}`.
    The `task` is the brief below, with the user's request filled in from the `Last prompt` line
-   of `feature status`, and nothing about tracked problems or earlier rounds: Sol must find
-   without them. If the wait times out, keep
-   waiting (`t3_thread_wait` on the child thread) until it finishes; never cancel it or review
-   yourself instead. If Sol isn't listed, or its task comes back failed (an auth or gateway
-   error, a crash), stop: record no review, put Sol's error verbatim in the report, and don't
-   substitute another reviewer.
+   of `feature status`, and nothing about tracked problems or earlier rounds: the reviewer must
+   find without them. If the wait times out, keep waiting (`t3_thread_wait` on the child thread)
+   until it finishes; never cancel it or review yourself instead. If no model of the family is
+   listed, or its task comes back failed (an auth or gateway error, a crash), stop: record no
+   review, put the reviewer's error verbatim in the report, and don't substitute another
+   reviewer.
    ```
    Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>` (over 300 files that
    fails; then run `git fetch origin <base>` and use `git diff origin/<base>...HEAD` in the
@@ -204,18 +202,18 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
      human: escalate with both sides.
    - Not caused by this PR → not a problem of this PR, so don't `problem add` it and it doesn't hold
      the gate. If it survives the same verification, list it under `Pre-existing` in the report.
-   - Re-judge severity yourself, whatever Sol said: `high` = data loss, security hole, crash, or
+   - Re-judge severity yourself, whatever the reviewer said: `high` = data loss, security hole, crash, or
      silently wrong result on a realistic path; `med` = real bug on a narrower path; `low` =
      everything else. Always pass `--sev`. Severity orders the work and feeds the churn trend; it
      doesn't decide what blocks. Every filed problem blocks until it's closed.
    - Spec, design and comment findings go through the same dedup, then `--sev low`, always. They
      block like any other problem. Their evidence is a citation, not a trace: drop a spec gap whose
-     quoted intent doesn't say what Sol claims, a rule breach the cited rule doesn't cover, a smell
+     quoted intent doesn't say what the reviewer claims, a rule breach the cited rule doesn't cover, a smell
      outside the PR's own code, a comment the PR didn't add or rewrite, and one the brief's keep
      list covers (read the code for the external constraint or the runtime read it claims). Title
      them `Spec: …`, `Design: …` or `Comments: …`. A comment that covers a flaw is a design
      finding: file it as `Design: …` on the code it names, with the comment quoted in the body, and
-     merge it with any smell or rule finding on the same code. If Sol proposed only deleting a
+     merge it with any smell or rule finding on the same code. If the reviewer proposed only deleting a
      comment that explains our own code or justifies a workaround, file the flaw it covers
      instead, with its redesign. A constraint to enforce is a `Comments: …` problem of its own.
      The comments that only need deleting go in one `Comments: …` problem, listing each
@@ -227,19 +225,19 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    root-cause fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
-   the CLI counts them by severity and lists them on the round's line in the PR body. Write `--summary` as a real
-   sentence about what was reviewed and found, never a bare "clean pass"; name any spec, design and
-   comment findings in it. Pass the effort Sol ran
-   at as `--depth`, and Sol's grade as `--risk`, `--door`, `--blast-radius`, `--complexity` and
-   `--why`, never lowered. Raise complexity when the findings show the change was harder to get
-   right than Sol graded. Raise risk only when a finding shows a bug costs more than Sol graded: it
-   reaches further (widen the blast radius) or is harder to undo (the door turns one-way). Many findings in a low-risk change still mean low risk. The CLI writes the
-   grade into the PR body and sizes the next round's depth from it: low risk always reviews at
-   low.
+   the CLI counts them by severity and lists them on the round's line in the PR body. Write
+   `--summary` as a real sentence about what was reviewed and found, never a bare "clean pass";
+   name any spec, design and comment findings in it. Pass the effort the reviewer ran at as
+   `--depth`, and its grade as `--risk`, `--door`, `--blast-radius`, `--complexity` and `--why`,
+   never lowered. Raise complexity when the findings show the change was harder to get right than
+   the reviewer graded. Raise risk only when a finding shows a bug costs more than it graded: it
+   reaches further (widen the blast radius) or is harder to undo (the door turns one-way). Many
+   findings in a low-risk change still mean low risk. The CLI writes the grade into the PR body
+   and sizes the next round's depth from it: low risk always reviews at low.
 
 ## Rules
 
-- Never lower a severity, or Sol's risk or complexity grade, to buy a cheaper review.
+- Never lower a severity, or the reviewer's risk or complexity grade, to buy a cheaper review.
 - Never ship debt. `wontfix` is only for a problem that isn't relevant (a false positive, by design,
   outside this PR's scope), never for a real problem nobody has fixed yet.
 - Never fix, commit, close a feature out or merge here.
@@ -253,9 +251,9 @@ End with only this, filled in:
 ```
 Feature: <name>  Branch: <branch>  PR: <url or none>  Worktree: <abs path>
 Did: <one line>
-Review: Sol <model> at <depth>; graded risk <…> (<door> door, blast radius <…>), complexity <…>; next round at <depth>   (or not run: <why>, with Sol's error verbatim if it failed)
+Review: <provider> <model> at <depth>; graded risk <…> (<door> door, blast radius <…>), complexity <…>; next round at <depth>   (or not run: <why>, with the reviewer's error verbatim if it failed)
 Gate: <the gate line from `feature review record` or `feature gate`, its reasons included, or not run>
 Open: #<n> [sev] <title> — <file:line>, fix: <root-cause fix>   (every open problem, low included, one per line; or none)
 Pre-existing: [sev] <title> — <file:line>, <failure scenario>, fix: <root-cause fix>   (bugs this PR didn't cause, one per line; or none)
-Blocked: <only when the round couldn't run: no PR, the PR's base isn't the tracked parent, Sol unavailable or failed; what it needs>
+Blocked: <only when the round couldn't run: no PR, the PR's base isn't the tracked parent, the reviewer unavailable or failed; what it needs>
 ```

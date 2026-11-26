@@ -187,6 +187,25 @@ def sensitive_patterns(cwd: str | None = None) -> list[str]:
     return raw.splitlines() if raw else []
 
 
+# The reviewer when the repo or the user names none: T3 provider instance, model family.
+DEFAULT_REVIEWER = ("codex", "sol")
+
+
+def reviewer(cwd: str | None = None) -> tuple[str, str]:
+    """The T3 provider instance and the model family that review PRs, from git config (local or
+    `--global`), each falling back to `DEFAULT_REVIEWER` on its own:
+
+        git config feature.reviewer-provider <provider instance id>
+        git config feature.reviewer-model <model family>
+
+    A family, not a model id, so the review picks up the provider's newest release of it without
+    a config change. An unset key means "the default", as with `feature.sensitive-path`.
+    """
+    provider = try_run(["git", "config", "--get", "feature.reviewer-provider"], cwd=cwd)
+    model = try_run(["git", "config", "--get", "feature.reviewer-model"], cwd=cwd)
+    return provider or DEFAULT_REVIEWER[0], model or DEFAULT_REVIEWER[1]
+
+
 def create_branch_and_worktree(name: str, base: str, start_point: str, cwd: str | None = None) -> str:
     """Create branch `name` at `start_point` in a worktree under WORKTREE_ROOT/<name>, with `base`
     as its git-town parent.

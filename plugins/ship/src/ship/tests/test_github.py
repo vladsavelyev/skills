@@ -174,3 +174,14 @@ def test_personal_account_aborts_unless_exactly_one(others):
     ]
     with pytest.raises(Refusal):
         github.personal_account(accounts)
+
+
+def test_set_pr_description_uploads_each_attachment(monkeypatch):
+    # A screencast placed with `![](./demo.mp4)` reaches GitHub only through `gh pr edit --attach`;
+    # without it the body links a file on the agent's disk.
+    calls: list[tuple[list[str], str]] = []
+    monkeypatch.setattr(github, "run", lambda cmd, *, input_text=None: calls.append((cmd, input_text)) or "")
+    github.set_pr_description(7, "Why.\n\n**After**: ![](./demo.mp4)", None, QUOTE, ["./before.png", "./demo.mp4"])
+    [(cmd, body)] = calls
+    assert cmd == ["gh", "pr", "edit", "7", "--body-file", "-", "--attach", "./before.png", "--attach", "./demo.mp4"]
+    assert body.startswith("Why.\n\n**After**: ![](./demo.mp4)")

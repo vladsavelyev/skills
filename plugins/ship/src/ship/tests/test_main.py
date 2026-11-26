@@ -403,8 +403,8 @@ def test_escalate_asks_on_each_named_problem_then_releases_the_session(monkeypat
 
 def test_release_puts_the_reason_on_the_tracking_issue_and_drops_the_hold(monkeypatch, tmp_path):
     posted = _stub_escalate(monkeypatch, tmp_path, cli.gate.Verdict.REVIEW_AGAIN, [_problem(5400, "sev:med")])
-    cli.cmd_release(cli.argparse.Namespace(branch="add-oauth", reason="Sol is down"))
-    assert posted[0][0] == 7 and "Sol is down" in posted[0][1] and "#5400 [sev:med]" in posted[0][1]
+    cli.cmd_release(cli.argparse.Namespace(branch="add-oauth", reason="the reviewer is down"))
+    assert posted[0][0] == 7 and "the reviewer is down" in posted[0][1] and "#5400 [sev:med]" in posted[0][1]
     assert hold.held("s1") == []
 
 
