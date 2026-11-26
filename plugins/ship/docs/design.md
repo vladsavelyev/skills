@@ -572,8 +572,9 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
       PR's base isn't the tracked parent
    2. `feature describe` ─▶ title + description from the motivation and commit messages
    3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
-   4. `feature reviewer --depth <depth>` (the one the user named, else the default)
-      ─▶ provider + model family + the options that set its effort (`reviewer.EFFORTS`)
+   4. the reviewer the user named, else `feature reviewer` ─▶ provider + model family
+      orchestrator_capabilities ─▶ its newest model and that model's options
+      `feature effort --depth <depth> --model-options <json>` ─▶ the option that sets its effort
       delegate_task(<reviewer>, <options>, "review PR #<n>, read only under <worktree>")
       ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
          (the reviewer gets the recorded request as intent, never tracked state)
@@ -637,7 +638,11 @@ thread that is handed only the PR number and worktree path, so run 1 and run 5 f
 rigor. The default reviewer is also a different model family from the agent that writes the code,
 so it doesn't share the author's blind spots. The default is a constant (`reviewer.DEFAULT`);
 the user overrides it for one run by naming a reviewer when they ask to ship, and the ship skill
-passes that name to every round of the run.
+passes that name to every round of the run. T3 lists each model's options, and models differ in
+what they call their effort and whether it goes above `max`, so `feature effort` finds the effort
+option by its values (`low`…`max`) rather than by a provider's name for it. A table of each
+provider's spelling broke twice in review: a provider-wide entry gave one model a value it didn't
+list.
 
 **Why the depth is sized, and by whom.** A review round used to cost the same for a two-line docs
 fix and a migration, so the reviewer's reasoning effort is sized per round (`assess.py`). The first version

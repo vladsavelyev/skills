@@ -256,13 +256,12 @@ def cmd_describe(args: argparse.Namespace) -> None:
     print(f"Updated the description of PR #{state['pr']}")
 
 
-def cmd_reviewer(args: argparse.Namespace) -> None:
-    if (args.provider is None) != (args.family is None):
-        sys.exit("Pass --provider and --family together, or neither for the default reviewer.")
-    chosen = reviewer.Reviewer(args.provider, args.family) if args.provider else reviewer.DEFAULT
-    options = chosen.options(args.depth)
-    print(f"Reviewer: provider {chosen.provider}, model family {chosen.family}")
-    print(f"delegate_task options: {json.dumps(options)}")
+def cmd_reviewer(_args: argparse.Namespace) -> None:
+    print(f"Default reviewer: provider {reviewer.DEFAULT.provider}, model family {reviewer.DEFAULT.family}")
+
+
+def cmd_effort(args: argparse.Namespace) -> None:
+    print(json.dumps(reviewer.effort_options(json.loads(args.model_options), args.depth)))
 
 
 def cmd_depth(args: argparse.Namespace) -> None:
@@ -1085,14 +1084,17 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_depth)
 
-    c = sub.add_parser(
-        "reviewer",
-        help="The reviewer (the default, or the one named) and the delegate_task options for its depth",
-    )
-    c.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="The round's depth")
-    c.add_argument("--provider", help="T3 provider instance of the reviewer the user named")
-    c.add_argument("--family", help="Model family of the reviewer the user named")
+    c = sub.add_parser("reviewer", help="T3 provider and model family that review a PR when the user names none")
     c.set_defaults(func=cmd_reviewer)
+
+    c = sub.add_parser("effort", help="The delegate_task options that run the reviewer's model at a depth")
+    c.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="The round's depth")
+    c.add_argument(
+        "--model-options",
+        required=True,
+        help="The model's `options` array, as JSON, from T3's orchestrator_capabilities",
+    )
+    c.set_defaults(func=cmd_effort)
 
     c = sub.add_parser("review", help="Review subcommands")
     rsub = c.add_subparsers(dest="review_command", required=True)

@@ -92,8 +92,9 @@ chmod +x ~/.local/bin/feature
 Reviews are run by the **reviewer**, delegated through T3 Code (`delegate_task`) at the reasoning
 effort `feature depth` picked: a T3 provider instance and a model family, of which a round takes
 the newest model the provider lists. The default is in code (`reviewer.DEFAULT`, printed by
-`feature reviewer` with the options that set its effort); the user picks another for one run by naming it: "ship it, review with
-Claude". The reviewer gets the **PR by number** and nothing about
+`feature reviewer`); the user picks another for one run by naming it: "ship it, review with
+Claude". Models name their effort option differently and not all go above `max`, so `feature
+effort` reads it from the chosen model's options as T3 lists them. The reviewer gets the **PR by number** and nothing about
 earlier rounds, so each re-run finds blind; the `review` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run
 via this CLI. A linked PR is required — the PR diff defines the review scope (correct even for
 stacked branches), and `feature review record` refuses to run without one. There is no headless
@@ -134,7 +135,8 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking: tracking issue, linked PR. |
 | `feature describe --body-file <f\|-> [--title <t>] [--attach <file>]…` | Replace the PR's description (and title). Pass it with or without ship's block (e.g. the fetched body, edited); the PR keeps exactly one. Each `--attach` uploads a screencast or screenshot, and `![](./<file>)` in the body becomes it. |
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
-| `feature reviewer --depth <d> [--provider <p> --family <f>]` | The reviewer (the default, or the one named) and the `delegate_task` options that set its effort to `<d>`: each T3 provider names that option its own way. |
+| `feature reviewer` | The T3 provider and model family that review a PR when the user names none. |
+| `feature effort --depth <d> --model-options <json>` | The `delegate_task` options that run a model at `<d>`, from its `options` as `orchestrator_capabilities` lists them: the option whose values run `low`…`max`, and for `ultra` the value listed after `max`. Refuses a model that has neither. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
 | `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with the reviewer's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
