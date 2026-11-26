@@ -90,8 +90,8 @@ the same way twice.
      commits, then `feature budget --set <n>` and ship again.
    - `OPEN`: step 5.
 5. **Babysit.** If the description shows no proof the change works and it can be run or seen, run
-   it and add the before and after, laid out as "Prove the PR works" in your instructions says,
-   with `feature describe`: place each screencast or screenshot as `![](./<file>)` in the body and
+   it and add the evidence "Prove the PR works" in your instructions asks for, with `feature
+   describe`: place each screencast or screenshot as `![](./<file>)` in the body and
    pass `--attach ./<file>` for it, which uploads it to GitHub. If the user asked to ship it and
    it's a draft, `gh pr ready <PR#>`. The PR is **ready** when, at
    its head:
