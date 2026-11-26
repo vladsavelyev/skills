@@ -11,7 +11,7 @@ You run in a forked subagent and do one review round of a PR: the reviewer finds
 and file what it found, and record the round. Then end with the **report** below: the caller,
 usually `Skill(ship:ship)`, sees only that. Your arguments name the PR (else take the current
 branch's) and anything the user asked of this round (a deeper review, a fresh one past an OPEN
-gate).
+gate, another reviewer).
 
 **Never ship debt.** Every problem a review files, at every severity including `low`, is closed
 before the PR ships: fixed, or closed as `wontfix` because it isn't relevant. The gate stays shut
@@ -35,7 +35,7 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] [--attach <file>]… --body-file - <<'EOF' … EOF` |
 | Depth for the next round | `feature depth` |
-| Who reviews | `feature reviewer` |
+| Default reviewer | `feature reviewer` |
 | Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
 | Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
@@ -74,10 +74,12 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    review it comes from the diff stats and the paths touched; after one, from the last review's
    grade. Don't read the diff to second-guess it. Go higher only when your arguments ask for a
    deeper review (`ultra` only on request), and say so in the report.
-4. **Have the reviewer find, blind.** `feature reviewer` names it: a T3 provider instance and a
-   model family. Load the T3 tools with ToolSearch, call `orchestrator_capabilities` with
-   `search: "<family>"`, and take the newest model of that family the provider lists. Then
-   `delegate_task` with `mode: "wait"`, `role: "review"`, `timeoutMs: 3600000`, and
+4. **Have the reviewer find, blind.** The reviewer is the one your arguments name ("review with
+   Claude"), else the default `feature reviewer` prints: a T3 provider instance and a model
+   family. Load the T3 tools with ToolSearch, call `orchestrator_capabilities` with `search:
+   "<the name or family>"`, and take the provider that offers it and the newest model of that
+   family it lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`, `timeoutMs:
+   3600000`, and
    `target: {providerInstanceId: "<provider>", model: <model>, options: {reasoningEffort: <depth>}}`.
    The `task` is the brief below, with the user's request filled in from the `Last prompt` line
    of `feature status`, and nothing about tracked problems or earlier rounds: the reviewer must

@@ -123,7 +123,7 @@ anyone thought about review. Starting a feature now needs only a branch, a workt
 **reviewer** from another provider, delegated through T3, at a reasoning effort sized per round. A
 reviewer from another model family doesn't share the author's blind spots, and sizing the depth
 stops a docs fix and a migration from costing the same review. The fork still triages; the
-reviewer finds. Which model reviews is git config, read by `feature reviewer`.
+reviewer finds.
 
 The first sizing had the fork read the whole diff to judge risk and complexity, then pick the
 effort. We dropped it within the same PR: it spent a full read of the diff by the author's model

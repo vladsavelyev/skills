@@ -572,7 +572,7 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
       PR's base isn't the tracked parent
    2. `feature describe` ─▶ title + description from the motivation and commit messages
    3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
-   4. `feature reviewer` ─▶ provider + model family
+   4. the reviewer the user named, else `feature reviewer` ─▶ provider + model family
       delegate_task(<reviewer>, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
       ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
          (the reviewer gets the recorded request as intent, never tracked state)
@@ -634,8 +634,9 @@ of rediscovering issues blind it drifts into "confirm #12 and #14 got fixed" —
 mindset that misses bugs the fixes themselves introduced. Each round delegates to a new reviewer
 thread that is handed only the PR number and worktree path, so run 1 and run 5 find with equal
 rigor. The default reviewer is also a different model family from the agent that writes the code,
-so it doesn't share the author's blind spots; `feature reviewer` reads it from git config, so a
-repo or a user can name another one without a code change.
+so it doesn't share the author's blind spots. The default is a constant (`assess.DEFAULT_REVIEWER`);
+the user overrides it for one run by naming a reviewer when they ask to ship, and the ship skill
+passes that name to every round of the run.
 
 **Why the depth is sized, and by whom.** A review round used to cost the same for a two-line docs
 fix and a migration, so the reviewer's reasoning effort is sized per round (`assess.py`). The first version

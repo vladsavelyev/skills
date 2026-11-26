@@ -48,8 +48,10 @@ the same way twice.
 ## The run
 
 1. **Review.** A review round, with `args` naming the PR and anything the user asked of the
-   review (a deeper one, a fresh one past an `OPEN` gate). Then `EnterWorktree` with `path:
-   <worktree>` from its report (never `name:`), unless you're in it.
+   review (a deeper one, a fresh one past an `OPEN` gate). If the user named a reviewer ("ship
+   it, review with Claude"), name it in every round's `args` for the whole run; otherwise the
+   round takes the default. Then `EnterWorktree` with `path: <worktree>` from its report (never
+   `name:`), unless you're in it.
    - `Blocked:` no PR, or its base isn't the tracked parent: open a draft against the parent (`gh
      pr create --draft --base <parent>`) or retarget it (`gh pr edit <PR#> --base <parent>`), and
      review again.

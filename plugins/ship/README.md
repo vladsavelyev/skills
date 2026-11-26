@@ -90,16 +90,10 @@ chmod +x ~/.local/bin/feature
   ```
 
 Reviews are run by the **reviewer**, delegated through T3 Code (`delegate_task`) at the reasoning
-effort `feature depth` picked. `feature reviewer` names it: a T3 provider instance and a model
-family, of which the review takes the newest model the provider lists. A repo, or the user with
-`--global`, picks another one:
-
-```sh
-git config feature.reviewer-provider codex   # the default
-git config feature.reviewer-model sol        # the default
-```
-
-The reviewer gets the **PR by number** and nothing about
+effort `feature depth` picked: a T3 provider instance and a model family, of which a round takes
+the newest model the provider lists. The default is in code (`assess.DEFAULT_REVIEWER`, printed by
+`feature reviewer`); the user picks another for one run by naming it: "ship it, review with
+Claude". The reviewer gets the **PR by number** and nothing about
 earlier rounds, so each re-run finds blind; the `review` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run
 via this CLI. A linked PR is required — the PR diff defines the review scope (correct even for
 stacked branches), and `feature review record` refuses to run without one. There is no headless
@@ -140,7 +134,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking: tracking issue, linked PR. |
 | `feature describe --body-file <f\|-> [--title <t>] [--attach <file>]…` | Replace the PR's description (and title). Pass it with or without ship's block (e.g. the fetched body, edited); the PR keeps exactly one. Each `--attach` uploads a screencast or screenshot, and `![](./<file>)` in the body becomes it. |
 | `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
-| `feature reviewer` | The T3 provider and model family that review PRs, from git config `feature.reviewer-provider` and `feature.reviewer-model`. |
+| `feature reviewer` | The T3 provider and model family that review a PR when the user names no other. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
 | `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with the reviewer's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |

@@ -27,7 +27,6 @@ from .gitwiring import (
     parent_branch,
     remote_ref,
     run_head_sha,
-    reviewer,
     sensitive_patterns,
     set_feature_issue,
     set_parent_branch,
@@ -258,8 +257,8 @@ def cmd_describe(args: argparse.Namespace) -> None:
 
 
 def cmd_reviewer(_args: argparse.Namespace) -> None:
-    provider, model = reviewer()
-    print(f"Reviewer: provider {provider}, model {model}")
+    provider, family = assess.DEFAULT_REVIEWER
+    print(f"Default reviewer: provider {provider}, model family {family}")
 
 
 def cmd_depth(args: argparse.Namespace) -> None:
@@ -1082,15 +1081,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_depth)
 
-    c = sub.add_parser(
-        "reviewer",
-        help="T3 provider and model family that review PRs (git config feature.reviewer-provider and "
-        "feature.reviewer-model; default codex, sol)",
-    )
+    c = sub.add_parser("reviewer", help="T3 provider and model family that review a PR when the user names none")
     c.set_defaults(func=cmd_reviewer)
 
-    # The `ship` skill has the reviewer (a T3 delegate, see `feature reviewer`) review the PR, dedups its findings against tracked
-    # problems, files new ones via `problem add`, and records the run here. There is no headless
+    # The `ship` skill has the reviewer (a T3 delegate: the one the user named, else `feature
+    # reviewer`'s) review the PR, dedups its findings against tracked problems, files new ones via
+    # `problem add`, and records the run here. There is no headless
     # `review run` — spawning a second long-lived `claude` subprocess got reaped by the session
     # manager.
     c = sub.add_parser("review", help="Review subcommands")
