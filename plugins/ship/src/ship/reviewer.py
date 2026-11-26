@@ -17,7 +17,6 @@ class Reviewer:
     family: str
 
 
-# A round takes the newest model of the family that the provider lists.
 DEFAULT = Reviewer(provider="codex", family="sol")
 
 
