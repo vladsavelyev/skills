@@ -687,3 +687,32 @@ def test_effort_refuses_a_model_without_an_effort_option():
     no_effort = [{"id": "serviceTier", "values": ["default", "priority"]}]
     with pytest.raises(SystemExit, match="no option"):
         cli.main(["effort", "--depth", "high", "--model-options", json.dumps(no_effort)])
+
+
+def _stub_filing(monkeypatch, subs: list[dict]) -> list[tuple[str, int]]:
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(github, "sub_issues", lambda parent: subs)
+    monkeypatch.setattr(github, "unlink_sub_issue", lambda parent, child: calls.append(("unlink", child)))
+    monkeypatch.setattr(github, "create_issue", lambda title, detail, labels: 200)
+    monkeypatch.setattr(github, "link_sub_issue", lambda parent, child: calls.append(("link", child)))
+    return calls
+
+
+def test_add_problem_at_the_sub_issue_limit_unlinks_the_oldest_closed_one_first(monkeypatch):
+    subs = [_problem(n, "sev:low", state="OPEN" if n % 2 else "CLOSED") for n in range(101, 101 + cli.SUB_ISSUE_LIMIT)]
+    calls = _stub_filing(monkeypatch, subs)
+    assert cli._add_problem(7, "t", "low", "d") == 200
+    assert calls == [("unlink", 102), ("link", 200)]
+
+
+def test_add_problem_under_the_limit_unlinks_nothing(monkeypatch):
+    calls = _stub_filing(monkeypatch, [_problem(5, "sev:low", state="CLOSED")])
+    cli._add_problem(7, "t", "low", "d")
+    assert calls == [("link", 200)]
+
+
+def test_add_problem_at_the_limit_with_every_problem_open_refuses_before_filing(monkeypatch):
+    calls = _stub_filing(monkeypatch, [_problem(n, "sev:low") for n in range(cli.SUB_ISSUE_LIMIT)])
+    with pytest.raises(SystemExit, match="GitHub's limit"):
+        cli._add_problem(7, "t", "low", "d")
+    assert calls == []
