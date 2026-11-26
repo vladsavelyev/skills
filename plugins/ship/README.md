@@ -91,7 +91,7 @@ chmod +x ~/.local/bin/feature
 
 Reviews are run by the **reviewer**, delegated through T3 Code (`delegate_task`) at the reasoning
 effort `feature depth` picked: a T3 provider instance and a model family, of which a round takes
-the newest model the provider lists. The default is in code (`assess.DEFAULT_REVIEWER`, printed by
+the newest model the provider lists. The default is in code (`reviewer.DEFAULT`, printed by
 `feature reviewer`); the user picks another for one run by naming it: "ship it, review with
 Claude". The reviewer gets the **PR by number** and nothing about
 earlier rounds, so each re-run finds blind; the `review` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run

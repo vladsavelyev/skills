@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from datetime import UTC, datetime
 
-from . import assess, budget, feature, gate, github, hold, problems, tidy
+from . import assess, budget, feature, gate, github, hold, problems, reviewer, tidy
 from .errors import Refusal
 from .shell import run, try_run
 from .gitwiring import (
@@ -257,8 +257,7 @@ def cmd_describe(args: argparse.Namespace) -> None:
 
 
 def cmd_reviewer(_args: argparse.Namespace) -> None:
-    provider, family = assess.DEFAULT_REVIEWER
-    print(f"Default reviewer: provider {provider}, model family {family}")
+    print(f"Default reviewer: provider {reviewer.DEFAULT.provider}, model family {reviewer.DEFAULT.family}")
 
 
 def cmd_depth(args: argparse.Namespace) -> None:

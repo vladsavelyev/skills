@@ -634,7 +634,7 @@ of rediscovering issues blind it drifts into "confirm #12 and #14 got fixed" —
 mindset that misses bugs the fixes themselves introduced. Each round delegates to a new reviewer
 thread that is handed only the PR number and worktree path, so run 1 and run 5 find with equal
 rigor. The default reviewer is also a different model family from the agent that writes the code,
-so it doesn't share the author's blind spots. The default is a constant (`assess.DEFAULT_REVIEWER`);
+so it doesn't share the author's blind spots. The default is a constant (`reviewer.DEFAULT`);
 the user overrides it for one run by naming a reviewer when they ask to ship, and the ship skill
 passes that name to every round of the run.
 

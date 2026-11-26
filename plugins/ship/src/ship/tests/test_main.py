@@ -640,3 +640,8 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (3, False, []))
     cli.main(["budget", "--branch", "add-oauth", "--auto"])
     assert state["review_budget_run"] is None
+
+
+def test_reviewer_prints_the_default_provider_and_model_family(capsys):
+    cli.main(["reviewer"])
+    assert capsys.readouterr().out == "Default reviewer: provider codex, model family sol\n"

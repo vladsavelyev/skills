@@ -24,9 +24,6 @@ DOORS = ("one-way", "two-way")
 # Reviewer reasoning efforts, cheapest first. A reviewer may also offer `ultra`; it's never picked
 # automatically, only when the user asks for it.
 DEPTHS = ("low", "medium", "high", "xhigh", "max")
-# Who reviews when the user doesn't name a reviewer ("ship it, review with Claude" names one): a
-# T3 provider instance and a model family, of which a round takes the newest model listed.
-DEFAULT_REVIEWER = ("codex", "sol")
 
 # (max files, max changed lines) per size bucket; anything beyond L is XL. M's ceiling matches
 # budget.py's "large diff" threshold, so the size label and the extra review round agree.
