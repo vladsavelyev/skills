@@ -27,7 +27,7 @@ terminates — a real reviewer always finds *something*. After it, a fourth ends
 | --- | --- | --- |
 | `OPEN` | 0 | No open problems, and nothing since the last review needs one (low fixes, base merges, docs and tests don't). Ship it. |
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code left, review budget remains. |
-| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign. When a kind of bug came back after its fix, the gate recommends the redesign, and the problems wait for that call. |
+| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign. When a kind of bug came back after its fix, the gate recommends the redesign, once the problems are fixed. |
 | `MERGED` | 30 | The PR is in. Nothing left to review; close the feature out. |
 
 **Nothing ships as debt.** Every open problem blocks the gate, at every severity including `low`.
@@ -147,7 +147,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature problem block <number> --reason <why>` | Reopen a closed problem (a regression, or a `wontfix` overturned) so it blocks again. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking, handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto]` | Show or override the review-round budget. |
-| `feature escalate --reason <t> [--problem <#> …]` | Park at `needs-decision` with your recommendation for a human, ending the session's hold. Every open problem must be closed first, or named with `--problem` as needing the user's call, unless the gate recommends a redesign. |
+| `feature escalate --reason <t> [--problem <#> …]` | Park at `needs-decision` with your recommendation for a human, ending the session's hold. Every open problem must be closed first, or named with `--problem` as needing the user's call, even when the gate recommends a redesign. |
 | `feature round <review\|fix> [--branch <b>]` | Hold the branch for the session driving the ship run (`hold.py`), and print the description to give the round's background subagent: the session may end its turn while that subagent runs, and once it's done can't until the gate settles. |
 | `feature release --reason <t>` | Let this session end its turn with the gate still shut (the user stopped the run, or the review can't run), with the reason on the tracking issue. |
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |

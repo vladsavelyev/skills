@@ -10,7 +10,8 @@ The gate has **three** outcomes, because a review loop has three real endings:
   NEEDS_DECISION  — the loop is not converging on its own: the budget is spent, or the trend
                     says another round won't help. A human decides whether to buy another round,
                     merge the fixes unreviewed, split the PR, or redesign. When a kind of bug came
-                    back after its fix, the gate recommends the redesign.
+                    back after its fix, the gate recommends the redesign. Either way the open
+                    problems are fixed first.
 
 Once the PR has merged none of them applies, so a fourth verdict ends the loop for good:
 
@@ -47,17 +48,19 @@ _NEXT_DECISION = (
     "whether to review the fixes in another round (`feature budget --set <n>`), merge with them "
     "unreviewed, or split/redesign the PR."
 )
-# A bug back after its fix means the design keeps producing it, so another fix-and-review round only
-# finds the next one, and patching the open problems first is work a redesign throws away. Why:
-# docs/motivation.md #15.
+# A bug back after its fix means the design keeps producing it, so another fix-and-review round
+# would likely find the next one: the gate recommends a redesign over another round. The open problems
+# still get fixed first. They once waited for the human's call ("Don't fix the open problems yet"), and
+# on navari-stack #23 nine sat open while the PR body listed them; the user wants problems fixed as
+# they're found, and a redesign that follows can still replace the patches. Why: docs/motivation.md #15.
 _NEXT_REDESIGN = (
-    "STOP patching: the same kind of bug came back after its fix, so the design keeps producing it, "
-    "and another round of fixes and review will find the next one. Don't fix the open problems yet. "
-    "`feature escalate --reason '<what the recurring bugs have in common>'`, recommending a redesign "
-    "over another round: a few competing designs, each critiqued blind by a separate agent, then one "
-    "settled from the critiques. A human decides: redesign, fix the problems one by one, or split the "
-    "PR. Either way every open problem is closed before the PR ships, and `feature budget --set <n>` "
-    "buys the round that reviews the result."
+    "STOP reviewing, but first close every open problem (`Skill(ship:fix)`: it fixes each at its root cause, "
+    "or closes it as `wontfix` if it isn't relevant). Then `feature escalate --reason '<what the recurring "
+    "bugs have in common>'`: the same kind of bug came back after its fix, so the design keeps producing it, "
+    "and another round of review would likely find the next one. Recommend a redesign over another round: a "
+    "few competing designs, each critiqued blind by a separate agent, then one settled from the critiques. A "
+    "human decides: redesign (replacing the fixes where it must), review the fixes in another round "
+    "(`feature budget --set <n>`, which also buys the round that reviews a redesign), or split the PR."
 )
 
 
@@ -82,9 +85,6 @@ class GateDecision:
     next_step: str
     rounds_used: int
     budget: int
-    # NEEDS_DECISION because a kind of bug came back after its fix (`recurrence_reason`): the gate
-    # recommends a redesign, and the open problems wait for the human's call on it.
-    redesign: bool = False
 
     @property
     def open(self) -> bool:
@@ -209,11 +209,11 @@ def escalation_refusal(decision: GateDecision, *, open_problems: list[int], name
     """Why `feature escalate` must not hand this feature to a human yet, or None if it may.
 
     Escalating ends a held ship run (`hold.py`), so it is only for what a human really has to decide:
-    whether to review the fixes again once the budget is spent (every problem closed first: the budget
-    limits reviews, not fixes), a problem that needs the user's call, named with `--problem`, or
-    whether to redesign, when a kind of bug came back after its fix. That last call covers every open
-    problem, since fixing them first is the work a redesign throws away. Everything else stays in the
-    loop, or escalating would be the way around fixing.
+    whether to review the fixes again once the budget is spent or the loop churns, or to redesign when
+    a kind of bug came back after its fix, and a problem that needs the user's call, named with
+    `--problem`. Every other open problem is closed first, whatever the gate recommends: the budget
+    limits reviews, not fixes, and a redesign that follows can still replace the patches. Everything
+    else stays in the loop, or escalating would be the way around fixing.
     """
     if decision.verdict is Verdict.OPEN:
         return "the gate is OPEN: there is nothing to decide. Tell the user it's safe to merge."
@@ -221,13 +221,12 @@ def escalation_refusal(decision: GateDecision, *, open_problems: list[int], name
         return "the PR has merged: close the feature out with `Skill(ship:close)` instead."
     if stray := sorted(set(named) - set(open_problems)):
         return f"{', '.join(f'#{n}' for n in stray)} is not an open problem of this feature."
-    if decision.redesign:
-        return None
     if unnamed := sorted(set(open_problems) - set(named)):
         return (
             f"{', '.join(f'#{n}' for n in unnamed)} still open. Fix each (`feature problem resolve <#> --commit "
-            f"<sha>`) or close it as not relevant (`feature problem wontfix <#> --reason '<why>'`) first; the "
-            f"budget limits reviews, not fixes. Name with `--problem` only a problem that needs the user's call."
+            f"<sha>`) or close it as not relevant (`feature problem wontfix <#> --reason '<why>'`) first: the "
+            f"budget limits reviews, not fixes, and a redesign can still replace a fix. Name with `--problem` "
+            f"only a problem that needs the user's call."
         )
     if decision.verdict is Verdict.REVIEW_AGAIN and not named:
         return "review budget remains: review the fixes again (`Skill(ship:ship)`) instead of escalating."
@@ -293,9 +292,7 @@ def evaluate(
         # The recurrence goes first, ahead of a spent budget too: it is the one signal that says what
         # to do instead of another round.
         if recurring := recurrence_reason(rounds):
-            return GateDecision(
-                Verdict.NEEDS_DECISION, [*reasons, recurring], _NEXT_REDESIGN, used, budget, redesign=True
-            )
+            return GateDecision(Verdict.NEEDS_DECISION, [*reasons, recurring], _NEXT_REDESIGN, used, budget)
         if rising := rising_reason(rounds):
             return GateDecision(Verdict.NEEDS_DECISION, [*reasons, rising], _NEXT_DECISION, used, budget)
     if used >= budget:

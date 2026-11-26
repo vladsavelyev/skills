@@ -584,9 +584,10 @@ def test_review_record_keeps_the_rounds_high_and_med_finds_filed_as_repeating_a_
     assert state["review_history"][-1]["repeats"] == {"41": 31}
 
 
-def test_escalating_a_recurring_bug_recommends_a_redesign_with_its_problems_still_open(monkeypatch, tmp_path):
+def test_escalating_a_recurring_bug_recommends_a_redesign_once_its_problems_are_fixed(monkeypatch, tmp_path):
     """navari #5176: each escalation recommended fixing them all and one more round, five rounds
-    running. Patching first is the work a redesign throws away, so the problems wait for the call."""
+    running. navari-stack #23: escalating before the fixes left nine problems open. Now the problems are
+    fixed first, and the escalation still recommends the redesign over reviewing those fixes."""
     history = [
         {"run": 1, "sha": "a1", "new_blocking": 1, "new_low": 0, "regressions": 0, "summary": "", "repeats": {}},
         {
@@ -599,8 +600,15 @@ def test_escalating_a_recurring_bug_recommends_a_redesign_with_its_problems_stil
             "repeats": {"12": 10},
         },
     ]
-    decision = cli.gate.evaluate(blocking_open=1, last_review=history[-1], history=history, budget=3, unreviewed=[])
-    posted = _stub_escalate(monkeypatch, tmp_path, decision.verdict, [_problem(12, "sev:high")], decision=decision)
+    unfixed = cli.gate.evaluate(blocking_open=1, last_review=history[-1], history=history, budget=3, unreviewed=[])
+    posted = _stub_escalate(monkeypatch, tmp_path, unfixed.verdict, [_problem(12, "sev:high")], decision=unfixed)
+    with pytest.raises(SystemExit, match="#12 still open"):
+        cli.cmd_escalate(
+            cli.argparse.Namespace(branch="add-oauth", reason="Both say checked of unread data.", problem=[])
+        )
+    assert posted == []
+    fixed = cli.gate.evaluate(blocking_open=0, last_review=history[-1], history=history, budget=3, unreviewed=["c3"])
+    posted = _stub_escalate(monkeypatch, tmp_path, fixed.verdict, [], decision=fixed)
     cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="Both say checked of unread data.", problem=[]))
     comment = posted[-1][1]
     assert "#12 like #10" in comment
@@ -637,7 +645,7 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
     assert decide().verdict is cli.gate.Verdict.REVIEW_AGAIN
     state["review_history"].append(_round(3, {"20": 12}))
     state["review_runs"], state["last_review"] = 3, state["review_history"][-1]
-    assert decide().redesign
+    assert decide().next_step == cli.gate._NEXT_REDESIGN
 
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (3, False, []))
     cli.main(["budget", "--branch", "add-oauth", "--auto"])

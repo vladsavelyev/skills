@@ -58,7 +58,6 @@ the same way twice.
    - `Blocked:` the reviewer unavailable or failing: end `STOPPED` with its error, releasing the
      branch if this session holds it.
    - `Gate: MERGED`: end `MERGED`.
-   - `Gate: NEEDS_DECISION` recommending a redesign: step 4, fixing nothing.
 2. **Take in what the PR raised.**
    - A check this PR fails: file it.
    - A requested change or a finding in a review comment, from a person or a bot: file it, unless
@@ -84,10 +83,11 @@ the same way twice.
    - A problem left for the user: `feature escalate --problem <#>… --reason "<question, options,
      recommendation>"`, and end `YOUR CALL`.
    - `REVIEW_AGAIN`: step 1.
-   - `NEEDS_DECISION`: follow its next step and end `NEEDS_DECISION`. Recommending a redesign, name
-     the cause the recurring bugs share, not a design of your own. If the user picks the redesign,
-     run its arena with agents, build what it settles on, close each open problem with its
-     commits, then `feature budget --set <n>` and ship again.
+   - `NEEDS_DECISION`: once step 3 has closed every open problem, a redesign recommended or not,
+     follow its next step and end `NEEDS_DECISION`. Recommending a redesign, name the cause the
+     recurring bugs share, not a design of your own. If the user picks the redesign, run its arena
+     with agents, build what it settles on, replacing the fixes where it must, then `feature budget
+     --set <n>` and ship again.
    - `OPEN`: step 5.
 5. **Babysit.** If the description shows no proof the change works and it can be run or seen, run
    it and add the before and after, laid out as "Prove the PR works" in your instructions says,

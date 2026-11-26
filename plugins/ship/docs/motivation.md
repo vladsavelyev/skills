@@ -232,8 +232,14 @@ What settled it, by hand, was several competing designs, each critiqued blind by
 and one approach settled from the critiques. Now the review files a problem with `--repeats` when
 a root-cause fix of an already-fixed one would have prevented it, and a round with such a
 high/med find, or a regression, gets a next step that says to stop patching and recommends that
-arena over another round. `feature escalate` takes it with the problems still open, since fixing
-them first is the work a redesign throws away. On #5176 that is round 2, not after round 5.
+arena over another round. On #5176 that is round 2, not after round 5.
+
+That first version escalated with the problems still open, on the theory that fixing them first is
+the work a redesign throws away. On navari-stack #23 round 2 filed a `--repeats` find, so
+the run escalated at once, fixing nothing, and nine problems sat open while the PR body already
+listed them. The user wants problems fixed as soon as they're found. So now the fixes come first at
+every verdict, and the recurrence only shapes the escalation that follows: the fixes' review is the
+round it recommends against, and a redesign the user picks can still replace the patches.
 
 **16. Fixing in the caller's thread → in a fixer fork.** #14 kept the fixes inline, so the user saw
 them and the agent that knew the code made them. Measured on navari's first two inline runs (#5172

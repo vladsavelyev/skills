@@ -193,7 +193,7 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
 | --- | --- | --- |
 | `OPEN` | 0 | Zero problems open, at any severity, and nothing since the last valid review needs one. |
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code outstanding, review budget remains, and the trend is converging. |
-| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human. When a kind of bug came back after its fix, the gate recommends a redesign and the open problems wait for the human's call; otherwise they still get closed, since the budget limits reviews, not fixes. |
+| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human. The open problems still get closed first, since the budget limits reviews, not fixes. When a kind of bug came back after its fix, the escalation that follows recommends a redesign. |
 | `MERGED` | 30 | The PR has merged. Checked first, so it outranks the other three; its reasons still name what was outstanding when it went in. |
 
 The codes skip 1 and 2 deliberately: those already mean "the command failed" (`sys.exit(message)`
@@ -268,11 +268,12 @@ design is wrong.
 - **A kind of bug came back after its fix** (`gate.recurrence_reason`): the last round re-opened a
   fixed problem (a regression), or filed a new one as repeating a fixed one (`problem add
   --repeats`: a fix at the root of that one's cause would have prevented it too). The fix patched an
-  instance and the design still produces the bug, so another round of fixes and review only finds
-  the next one. The next step says to stop patching and recommends a redesign over another round:
-  a few competing designs, each critiqued blind by a separate agent, then one settled from the
-  critiques. The human still decides. This outranks a spent budget, being the one signal that says
-  what to do instead of another round. Why: motivation.md #15.
+  instance and the design still produces the bug, so another round of review would likely find
+  the next one. The next step still has the open problems fixed first, then recommends a redesign
+  over another round: a few competing designs, each critiqued blind by a separate agent, then one
+  settled from the critiques. The human still decides, and a redesign they pick can replace the
+  fixes. This outranks a spent budget, being the one signal that says what to do instead of
+  another round. Why: motivation.md #15.
 - **High/med findings are rising** round over round (`gate.rising_reason`). More findings can also
   mean a PR too big for one round to cover, so the next step leaves the choice open.
 
@@ -391,7 +392,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. Refuses an open problem, which already blocks. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
-| `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), unless the gate recommends a redesign; while the gate is `REVIEW_AGAIN` and no problem is named; and at `OPEN` or `MERGED`. |
+| `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), whatever the gate recommends; while the gate is `REVIEW_AGAIN` and no problem is named; and at `OPEN` or `MERGED`. |
 | `feature round <review\|fix> [--branch <b>]` | Hold the branch for the Claude session driving the ship run, and print the description to give the round's background subagent, by which the Stop hook knows it runs (see "Driving the loop to the end"). Refuses a command outside a Claude session. |
 | `feature release --reason <text> [--branch <b>]` | Let this session end its turn with the gate still shut: posts the reason and the gate on the tracking issue, then drops the hold. For a user who stopped the run, or a review that can't run. Refuses a branch the session doesn't hold. |
 | `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`wontfix` is newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
@@ -428,8 +429,8 @@ Skill(ship:ship), in the caller's session
     │ │      or, asked to merge, merge it ─▶ MERGED
     └─┼─── not ready, with something to take in
       └─── not ready otherwise ─▶ `watch_pull_request`, end the turn; T3 Code's wake
-         NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
-         NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
+         NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first; a redesign
+           recommended or not)
          a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
 ```
 
@@ -502,8 +503,8 @@ the plugin holds the session instead (`hold.py`):
 - The two ways out short of `OPEN` both write to the tracking issue and drop the hold.
   `feature escalate` refuses while an open problem isn't named with `--problem` (asked of the user)
   and, with budget left, unless one is: escalating is for what a human must decide, never a way
-  around a fix. A gate recommending a redesign is the exception: that call covers every open
-  problem, and fixing them first is the work a redesign throws away. `feature release` takes any reason, on the record.
+  around a fix. That holds when the gate recommends a redesign too: the problems are fixed as
+  they're found, and a redesign the human picks can still replace the fixes. `feature release` takes any reason, on the record.
 
 A gate the hook can't judge (a `gh` outage) blocks the stop once, with the error, and keeps the
 hold; the next stop in a row (`stop_hook_active`) goes through with the error shown, since a session
@@ -594,8 +595,8 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
                              --regressions <high/med reopened> --depth --risk --door --blast-radius --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
    7. report ─▶ the ship run: the verdict and every open problem, which it fixes before the next round
-      (when the gate recommends a redesign, it escalates without fixing; a merged PR stops at step 1:
-      the ship run hands it to Skill(ship:close))
+      or an escalation, whatever the verdict (a merged PR stops at step 1: the ship run hands it to
+      Skill(ship:close))
 ```
 
 **Why scope the review through the PR.** The finder is handed the **PR number**, not a diff

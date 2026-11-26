@@ -178,8 +178,14 @@ def test_a_new_bug_of_a_kind_already_fixed_asks_for_a_redesign_not_another_round
 def test_the_redesign_step_points_to_an_arena_and_leaves_the_call_to_a_human():
     assert "competing designs" in _NEXT_REDESIGN and "critiqued blind" in _NEXT_REDESIGN
     assert "human decides" in _NEXT_REDESIGN and "feature escalate" in _NEXT_REDESIGN
-    # Patching the open problems before the human picks is the work a redesign would throw away.
-    assert "Don't fix the open problems yet" in _NEXT_REDESIGN
+
+
+def test_the_redesign_step_fixes_the_open_problems_before_it_escalates():
+    """navari-stack #23: round 2 filed a repeat, the step said "Don't fix the open problems
+    yet", and nine problems sat open while the PR body listed them. The user wants them fixed now; a
+    redesign that follows can still replace the patches."""
+    assert "Don't fix" not in _NEXT_REDESIGN
+    assert _NEXT_REDESIGN.index("Skill(ship:fix)") < _NEXT_REDESIGN.index("feature escalate")
 
 
 def test_a_round_whose_finds_repeat_nothing_is_not_a_recurrence():
@@ -387,11 +393,13 @@ def test_there_is_nothing_to_escalate_once_the_gate_is_open_or_the_pr_merged():
     assert "ship:close" in _refusal(Verdict.MERGED, [], [])
 
 
-def test_a_redesign_is_the_users_call_so_it_escalates_with_its_problems_still_open():
-    """Fixing them first is the work a redesign throws away; any other escalation still waits for fixes."""
+def test_a_redesign_waits_for_the_fixes_like_any_other_escalation():
+    """navari-stack #23: a recurrence used to let the run escalate with every problem still open."""
     history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
     d = gate(blocking_open=1, last_review=history[-1], history=history)
-    assert escalation_refusal(d, open_problems=[12], named=[]) is None
-    rising = [run(1, blocking=1), run(2, blocking=2)]
-    d = gate(blocking_open=2, last_review=rising[-1], history=rising)
-    assert "still open" in escalation_refusal(d, open_problems=[12, 13], named=[])
+    assert "#12 still open" in escalation_refusal(d, open_problems=[12], named=[])
+    # Once they're fixed, the fixes need a review the human hasn't bought, and the redesign is still
+    # what the gate recommends.
+    fixed = gate(blocking_open=0, last_review=history[-1], history=history, unreviewed=["fix12"])
+    assert fixed.next_step == _NEXT_REDESIGN
+    assert escalation_refusal(fixed, open_problems=[], named=[]) is None
