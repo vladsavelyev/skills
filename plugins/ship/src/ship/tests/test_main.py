@@ -271,7 +271,9 @@ def test_a_low_problem_left_open_keeps_the_gate_shut(monkeypatch):
 
 def _stub_problem_edits(monkeypatch, sub: dict) -> list[str]:
     did: list[str] = []
-    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: sub)
+    monkeypatch.setattr(cli, "_feature_problems", lambda branch, number: (sub, [sub]))
+    # No round found it, so the PR's block stays as it is.
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
     monkeypatch.setattr(github, "init_labels", lambda: did.append("init_labels"))
     monkeypatch.setattr(github, "add_label", lambda number, label: did.append(f"add {label}"))
     monkeypatch.setattr(github, "remove_label", lambda number, label: did.append(f"remove {label}"))
@@ -452,7 +454,8 @@ def test_a_round_outside_a_claude_session_refuses(monkeypatch, tmp_path):
 
 def test_closing_a_problem_holds_nobody(monkeypatch, tmp_path):
     _in_session(monkeypatch, tmp_path)
-    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:med"))
+    monkeypatch.setattr(cli, "_feature_problems", lambda branch, number: (_problem(number, "sev:med"), []))
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
     monkeypatch.setattr(github, "init_labels", lambda: None)
     monkeypatch.setattr(github, "add_label", lambda number, label: None)
     monkeypatch.setattr(github, "close_issue", lambda number, note, not_planned=False: None)
@@ -464,7 +467,7 @@ def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
     """The gate reads a low problem's fix commits from the state block to let them through unreviewed."""
     did: list[str] = []
     state = _merged_state()
-    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:low"))
+    monkeypatch.setattr(cli, "_feature_problems", lambda branch, number: (_problem(number, "sev:low"), []))
     monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
     monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, "body"))
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, s: did.append(f"save {s['fixes']}"))
@@ -476,8 +479,9 @@ def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
 
 def test_resolve_without_a_commit_records_no_fix(monkeypatch):
     did: list[str] = []
-    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: _problem(number, "sev:low"))
-    monkeypatch.setattr(feature, "load_state", lambda branch: pytest.fail("touched the state"))
+    monkeypatch.setattr(cli, "_feature_problems", lambda branch, number: (_problem(number, "sev:low"), []))
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
+    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: pytest.fail("wrote the state"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(note))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=[]))
     assert did == ["Resolved."]
@@ -489,7 +493,9 @@ _RECORD = (
 ).split()
 
 
-def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict] | None = None) -> list[str]:
+def _stub_review_record(
+    monkeypatch, state: dict | None = None, subs: list[dict] | None = None, *, stub_block: bool = True
+) -> list[str]:
     did: list[str] = []
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     state = state or _merged_state()
@@ -497,7 +503,8 @@ def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict]
     monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
     monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [_problem(8, "sev:med")])
-    monkeypatch.setattr(cli, "_write_block", lambda state, issue: did.append("block"))
+    if stub_block:
+        monkeypatch.setattr(cli, "_write_block", lambda *args: did.append("block"))
     decision = cli.gate.GateDecision(cli.gate.Verdict.REVIEW_AGAIN, ["open"], "fix", 1, 2)
     monkeypatch.setattr(feature, "decide", lambda *a, **k: decision)
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
@@ -695,3 +702,79 @@ def test_effort_refuses_a_model_without_an_effort_option():
     no_effort = [{"id": "serviceTier", "values": ["default", "priority"]}]
     with pytest.raises(SystemExit, match="no option"):
         cli.main(["effort", "--depth", "high", "--model-options", json.dumps(no_effort)])
+
+
+# navari-stack #23 in small: round 1's #30 is fixed; round 2 filed #36 (med) and #38 (low).
+_ROUND_2 = "**Review round 2** (high). Findings: 1 med (#36), 1 low (#38)."
+
+
+def _graded_state() -> dict:
+    state = _merged_state()
+    grade = {"risk": "med", "door": "two-way", "blast_radius": "b", "complexity": "med", "why": "w"}
+    state["review_history"] = [
+        {"run": 1, "sha": "a1", "depth": "high", "found": {"med": [30]}, "new_blocking": 1, "regressions": 0},
+        {"run": 2, "sha": "b2", "depth": "high", "found": {"med": [36], "low": [38]}, "new_blocking": 1},
+    ]
+    state["review_history"][-1] |= {"new_low": 1, "regressions": 0, "summary": "", "grade": grade}
+    state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
+    return state
+
+
+def _stub_pr_block(monkeypatch, state: dict, subs: list[dict]) -> list[str]:
+    """GitHub as `feature problem …` sees it on a PR whose round 2 filed `subs`; returns each block written."""
+    blocks: list[str] = []
+    monkeypatch.setattr(github, "use_owner_account", lambda: None)
+    monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
+    monkeypatch.setattr(github, "sub_issues", lambda issue: subs)
+    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
+    monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: blocks.append(content) or True)
+    for name in ("init_labels", "add_label", "remove_label", "comment", "reopen_issue", "close_issue"):
+        monkeypatch.setattr(github, name, lambda *a, **k: None)
+    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
+    monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
+    return blocks
+
+
+def test_a_round_is_recorded_without_its_line_while_its_problems_are_open(monkeypatch):
+    """navari-stack #23: the line listed nine problems before any was fixed."""
+    state = _graded_state()
+    state["review_history"].pop()
+    state["review_runs"], state["last_review"] = 1, state["review_history"][-1]
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(8, "sev:med")]
+    _stub_review_record(monkeypatch, state, subs, stub_block=False)
+    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
+    written: list[str] = []
+    monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: written.append(content) or True)
+    cli.main(_RECORD)
+    assert "Review round 1" in written[-1] and "Review round 2" not in written[-1]
+
+
+def test_closing_a_rounds_last_open_problem_shows_its_line(monkeypatch):
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED"), _problem(38, "sev:low")]
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
+    assert _ROUND_2 in blocks[-1]
+
+
+def test_resolving_a_rounds_last_open_problem_shows_its_line(monkeypatch):
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med"), _problem(38, "sev:low", state="CLOSED")]
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    cli.main(["problem", "resolve", "36", "--commit", "c3", "--branch", "add-oauth"])
+    assert _ROUND_2 in blocks[-1]
+
+
+def test_reopening_a_rounds_problem_takes_its_line_down(monkeypatch):
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED")]
+    subs.append(_problem(38, "sev:low", state="CLOSED"))
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    cli.main(["problem", "block", "36", "--reason", "back again", "--branch", "add-oauth"])
+    assert "Review round 2" not in blocks[-1] and "Review round 1" in blocks[-1]
+
+
+def test_closing_a_problem_no_round_found_leaves_the_block_alone(monkeypatch):
+    """A failed check or a reviewer's comment, filed while babysitting: no round's line waits on it."""
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(50, "sev:med")]
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    cli.main(["problem", "resolve", "50", "--commit", "c4", "--branch", "add-oauth"])
+    assert blocks == []

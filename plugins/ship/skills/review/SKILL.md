@@ -232,7 +232,8 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    root-cause fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
-   the CLI counts them by severity and lists them on the round's line in the PR body. Write
+   the CLI counts them by severity and lists them on the round's line in the PR body, which shows
+   once they're all closed. Write
    `--summary` as a real sentence about what was reviewed and found, never a bare "clean pass";
    name any spec, design and comment findings in it. Pass the effort the reviewer ran at as
    `--depth`, and its grade as `--risk`, `--door`, `--blast-radius`, `--complexity` and `--why`,

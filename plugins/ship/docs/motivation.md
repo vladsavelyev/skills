@@ -239,7 +239,10 @@ the work a redesign throws away. On navari-stack #23 round 2 filed a `--repeats`
 the run escalated at once, fixing nothing, and nine problems sat open while the PR body already
 listed them. The user wants problems fixed as soon as they're found. So now the fixes come first at
 every verdict, and the recurrence only shapes the escalation that follows: the fixes' review is the
-round it recommends against, and a redesign the user picks can still replace the patches.
+round it recommends against, and a redesign the user picks can still replace the patches. The PR
+body's line for a round (`Findings: 2 med (#36, #37), 7 low (…)`) read as a done review, so it now
+waits until every problem it lists is closed, and the `problem` commands that close or reopen one
+rewrite the block.
 
 **16. Fixing in the caller's thread → in a fixer fork.** #14 kept the fixes inline, so the user saw
 them and the agent that knew the code made them. Measured on navari's first two inline runs (#5172

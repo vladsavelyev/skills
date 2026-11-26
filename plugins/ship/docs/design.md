@@ -126,8 +126,10 @@ for GitHub to close the tracking issue:
 ```
 
 Every command that writes the block (`feature pr`, `feature describe`, `feature review record`,
-`feature reconcile`) renders the block's whole content from the feature's state (`assess.render`) and sets
-it between the tags (`prbody.py`), so the block always shows the current state. Before any review
+`feature reconcile`, and `feature problem resolve`, `wontfix` and `block` for a problem a round found)
+renders the block's whole content from the feature's state and its problems' open or closed state
+(`assess.render`) and sets it between the tags (`prbody.py`), so the block always shows the current
+state. Before any review
 it is the reference line alone; once the reviewer has graded the PR, the grade comes first, so a reader
 finds the stakes before the review log. It is one quote with no header: a footnote to the
 author's description, not a section competing with it (a `## Risk` and `## Review` version read
@@ -136,7 +138,17 @@ line. A body without the block gets it above the author's signature (a trailing 
 paragraph starting with `🤖`, the attribution line an agent harness asks for), or at the end. The grade is the reviewer's latest, its risk read as its two halves: the door (whether a revert
 undoes what a bug did) and the blast radius (who or what a bug reaches). Each round's line lists
 what it found by severity (recorded with the round from `--found`), which never changes after the
-round. The latest round's line ends with the depth the reviewer's grade buys the next round. After a round
+round, and it shows only once every problem it lists is closed, fixed or `wontfix`. Until then the
+block has no line for that round: a round that found problems is reported once they're dealt with,
+never as a list of problems waiting for their fix (navari-stack #23 showed round 2's nine finds while
+all nine sat open; motivation.md #15). A round that found nothing shows at once, and a problem
+reopened by `problem block` takes its round's line down again. The feature state doesn't hold which
+problems are open, so the writers pass in the sub-issues they read anyway: `review record`, and the
+`problem` commands, which read them to check the number; `pr`, `describe` and `reconcile` read them
+once a round is graded. A problem closed or reopened outside ship (by hand on GitHub) shows at the
+block's next write. Handed-off problems are still open, so a merged PR's round that left one keeps
+its line hidden. The latest round's line ends with the depth the reviewer's grade buys the next
+round; while that line waits, so does the depth. After a round
 that found no high or med problem no round is due (low problems' fixes need none), so it reads `A
 re-review after new commits would run at <depth>` instead of `Next round would run at <depth>`.
 
@@ -386,10 +398,10 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature prompt <text>` | Record the latest prompt into the state block. |
 | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->] [--repeats <number>]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. `--repeats` names a fixed problem this one is the same kind of bug as: its body says so, and a round that finds it (high/med) tells the gate to recommend a redesign. Refuses a problem that is open or `wontfix`. |
-| `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. |
-| `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
+| `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. If a review round found it, rewrite the PR's ship block, which shows that round's line once all its problems are closed. |
+| `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. Rewrites the PR's ship block like `resolve`. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses until then: that would be shipping debt. Old `follow-up` labels count as `handed-off`, and old `rejected` ones as `wontfix`. |
-| `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. Refuses an open problem, which already blocks. |
+| `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. If a round found it, first takes that round's line out of the PR's ship block. Refuses an open problem, which already blocks. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
 | `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), whatever the gate recommends; while the gate is `REVIEW_AGAIN` and no problem is named; and at `OPEN` or `MERGED`. |

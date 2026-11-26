@@ -142,8 +142,8 @@ def record_fix(state: dict, problem: int, commits: list[str]) -> None:
             recorded[sha].append(problem)
 
 
-def found_before(history: list[dict]) -> set[int]:
-    """Every problem a recorded round found (its `found`). Rounds from before `found` existed, and
+def found_in(history: list[dict]) -> set[int]:
+    """Every problem the recorded rounds of `history` found (their `found`). Rounds from before `found` existed, and
     placeholders and markers, name none: kept ON PURPOSE, as they are in the feature issues of PRs
     in flight."""
     return {n for entry in history for nums in entry.get("found", {}).values() for n in nums}
