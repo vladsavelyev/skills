@@ -81,15 +81,18 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    "<the name or family>"`, and take the provider that offers it and the newest model of that
    family it lists. `feature effort --depth <depth> --model-options '<that model's options array,
    as listed>'` prints the `delegate_task` options that run it at the depth. Then `delegate_task`
-   with `mode: "wait"`, `role: "review"`, `timeoutMs: 3600000`, and `target: {providerInstanceId:
-   "<provider>", model: <model>, options: <the printed options>}`.
+   with `mode: "wait"`, `role: "review"`, `timeoutMs: 45000` (the most the tool takes; a timeout
+   doesn't cancel the child), and `target: {providerInstanceId: "<provider>", model: <model>,
+   options: <the printed options>}`.
    The `task` is the brief below, with the user's request filled in from the `Last prompt` line
    of `feature status`, and nothing about tracked problems or earlier rounds: the reviewer must
-   find without them. If the wait times out, keep waiting (`t3_thread_wait` on the child thread)
-   until it finishes; never cancel it or review yourself instead. If no model of the family is
-   listed, `feature effort` refuses it, or its task comes back failed (an auth or
-   gateway error, a crash), stop: record no review, put the reviewer's error verbatim in the
-   report, and don't substitute another reviewer.
+   find without them. A review runs longer than the wait: when it comes back unfinished, call
+   `t3_thread_wait` on the child thread, and again each time that returns unfinished, until the
+   run finishes, even where its result says to end your turn. You run as a subagent, so ending
+   your turn ends the round without a review. Never cancel it or review yourself instead. If no
+   model of the family is listed, `feature effort` refuses it, or its task comes back failed (an
+   auth or gateway error, a crash), stop: record no review, put the reviewer's error verbatim in
+   the report, and don't substitute another reviewer.
    ```
    Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>` (over 300 files that
    fails; then run `git fetch origin <base>` and use `git diff origin/<base>...HEAD` in the
