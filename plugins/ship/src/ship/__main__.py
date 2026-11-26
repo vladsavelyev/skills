@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from datetime import UTC, datetime
 
-from . import assess, budget, feature, gate, github, hold, problems, tidy
+from . import assess, budget, feature, gate, github, hold, problems, reviewer, tidy
 from .errors import Refusal
 from .shell import run, try_run
 from .gitwiring import (
@@ -224,7 +224,7 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
 
 def _block_content(state: dict, issue: int) -> str:
     """The content of the PR body's ship block, rendered from `state`: the reference to `issue`, and
-    once a review has graded the PR, Sol's latest grade and every round so far. Every command that
+    once a review has graded the PR, the reviewer's latest grade and every round so far. Every command that
     writes the block renders it here, so the block always shows the current state."""
     # `feature reconcile` reads schema-1 states too; those predate grading, so they show the
     # reference alone.
@@ -252,8 +252,16 @@ def cmd_describe(args: argparse.Namespace) -> None:
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
-    github.set_pr_description(state["pr"], text, args.title, _block_content(state, issue))
+    github.set_pr_description(state["pr"], text, args.title, _block_content(state, issue), args.attach)
     print(f"Updated the description of PR #{state['pr']}")
+
+
+def cmd_reviewer(_args: argparse.Namespace) -> None:
+    print(f"Default reviewer: provider {reviewer.DEFAULT.provider}, model family {reviewer.DEFAULT.family}")
+
+
+def cmd_effort(args: argparse.Namespace) -> None:
+    print(json.dumps(reviewer.effort_options(json.loads(args.model_options), args.depth)))
 
 
 def cmd_depth(args: argparse.Namespace) -> None:
@@ -678,7 +686,7 @@ def cmd_release(args: argparse.Namespace) -> None:
     """Let this session end its turn with the gate still shut, on the record.
 
     For a run that can't go on without the user: they told the agent to stop, or the review can't run
-    (Sol unavailable or failing). Not a way around fixing: the reason goes on the tracking issue, and
+    (the reviewer unavailable or failing). Not a way around fixing: the reason goes on the tracking issue, and
     the merge guard still refuses the merge while the gate is shut.
     """
     branch = args.branch or current_branch()
@@ -1062,6 +1070,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     c.add_argument("--body-file", required=True, help="File with the new description, or '-' for stdin")
     c.add_argument("--title", help="New PR title")
+    c.add_argument(
+        "--attach",
+        action="append",
+        default=[],
+        metavar="FILE",
+        help="Upload a screencast or screenshot; `![](./<file>)` in the body becomes it (repeatable)",
+    )
     c.add_argument("--branch")
     c.set_defaults(func=cmd_describe)
 
@@ -1069,10 +1084,18 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_depth)
 
-    # The `ship` skill has Sol (a T3 delegate) review the PR, dedups its findings against tracked
-    # problems, files new ones via `problem add`, and records the run here. There is no headless
-    # `review run` — spawning a second long-lived `claude` subprocess got reaped by the session
-    # manager.
+    c = sub.add_parser("reviewer", help="T3 provider and model family that review a PR when the user names none")
+    c.set_defaults(func=cmd_reviewer)
+
+    c = sub.add_parser("effort", help="The delegate_task options that run the reviewer's model at a depth")
+    c.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="The round's depth")
+    c.add_argument(
+        "--model-options",
+        required=True,
+        help="The model's `options` array, as JSON, from T3's orchestrator_capabilities",
+    )
+    c.set_defaults(func=cmd_effort)
+
     c = sub.add_parser("review", help="Review subcommands")
     rsub = c.add_subparsers(dest="review_command", required=True)
     r = rsub.add_parser("record", help="Record an in-session review run (moves the gate)")
@@ -1092,7 +1115,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Count of previously-closed BLOCKING (high/med) problems re-opened this run — a churn signal",
     )
     r.add_argument("--summary", required=True)
-    r.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="Effort Sol ran at")
+    r.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="Effort the reviewer ran at")
     r.add_argument("--risk", required=True, choices=assess.LEVELS, help="The reviewer's grade of the PR's risk")
     r.add_argument("--door", required=True, choices=assess.DOORS, help="Whether reverting the PR undoes a bug in it")
     r.add_argument("--blast-radius", required=True, help="A few words: who or what a bug in the PR would reach")

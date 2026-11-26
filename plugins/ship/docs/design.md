@@ -128,15 +128,15 @@ for GitHub to close the tracking issue:
 Every command that writes the block (`feature pr`, `feature describe`, `feature review record`,
 `feature reconcile`) renders the block's whole content from the feature's state (`assess.render`) and sets
 it between the tags (`prbody.py`), so the block always shows the current state. Before any review
-it is the reference line alone; once Sol has graded the PR, the grade comes first, so a reader
+it is the reference line alone; once the reviewer has graded the PR, the grade comes first, so a reader
 finds the stakes before the review log. It is one quote with no header: a footnote to the
 author's description, not a section competing with it (a `## Risk` and `## Review` version read
 as overcomplicated). GitHub breaks a PR body's lines at single newlines, so each line stays a
 line. A body without the block gets it above the author's signature (a trailing one-line
-paragraph starting with `🤖`, the attribution line an agent harness asks for), or at the end. The grade is Sol's latest, its risk read as its two halves: the door (whether a revert
+paragraph starting with `🤖`, the attribution line an agent harness asks for), or at the end. The grade is the reviewer's latest, its risk read as its two halves: the door (whether a revert
 undoes what a bug did) and the blast radius (who or what a bug reaches). Each round's line lists
 what it found by severity (recorded with the round from `--found`), which never changes after the
-round. The latest round's line ends with the depth Sol's grade buys the next round. After a round
+round. The latest round's line ends with the depth the reviewer's grade buys the next round. After a round
 that found no high or med problem no round is due (low problems' fixes need none), so it reads `A
 re-review after new commits would run at <depth>` instead of `Next round would run at <depth>`.
 
@@ -276,7 +276,7 @@ design is wrong.
 - **High/med findings are rising** round over round (`gate.rising_reason`). More findings can also
   mean a PR too big for one round to cover, so the next step leaves the choice open.
 
-The link between problems comes from the review fork's dedup, not from Sol. Sol finds blind, so it
+The link between problems comes from the review fork's dedup, not from the reviewer. The reviewer finds blind, so it
 can't name a tracked problem, and a class name it made up would be worded differently every round,
 the way titles were when dedup tried to match them by fingerprint. The fork already reads each
 finding against the closed problems by meaning to catch regressions; whether a root-cause fix of
@@ -434,10 +434,10 @@ Skill(ship:ship), in the caller's session
 ```
 
 It ends only at an end state: `READY`, `MERGED`, `NEEDS_DECISION` escalated, a question for the
-user's call, or a run released on the record (`feature release`: the user stopped it, or Sol
-can't run). The caller drives the loop and the forks do the heavy work, so the caller's
+user's call, or a run released on the record (`feature release`: the user stopped it, or the
+reviewer can't run). The caller drives the loop and the forks do the heavy work, so the caller's
 thread keeps their reports, not their reading. The finder, the triager and the fixer are three
-separate agents: Sol starts each round in a new thread with the PR number, a fresh fork dedups and
+separate agents: the reviewer starts each round in a new thread with the PR number, a fresh fork dedups and
 files its findings with no memory of the fixes, and another fork fixes them. The fixer starts with
 none of the caller's conversation, so the caller hands it what the code and the issues don't say
 (what the user asked of the change, a constraint they set, a fix they turned down). Why the fixes
@@ -455,7 +455,7 @@ reads the gate first, so a merged PR ends `MERGED` before anything syncs its bra
 What needs fixing goes through the same problems as the review's: a failed check this PR causes,
 and a reviewer's requested change or finding, are filed with `feature problem add`, quoting the
 source. The fixer fork fixes them like any other, the gate decides whether a fix needs a review (a
-`low` one's doesn't), and a later Sol round dedups against them. Once its problem closes, the
+`low` one's doesn't), and a later round dedups against them. Once its problem closes, the
 caller answers the comment with the fix commit or the `wontfix` reason, and resolves the thread. A
 reply disputing that reason reopens the problem (`feature problem block`), and a fixer still
 unconvinced puts it to the user with both sides. Questions are answered in the thread, flakes
@@ -572,9 +572,12 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
       PR's base isn't the tracked parent
    2. `feature describe` ─▶ title + description from the motivation and commit messages
    3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
-   4. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
-      ─▶ raw defects, spec gaps, design smells, flaws comments cover + Sol's grade of risk and complexity
-         (Sol gets the recorded request as intent, never tracked state)
+   4. the reviewer the user named, else `feature reviewer` ─▶ provider + model family
+      orchestrator_capabilities ─▶ its newest model and that model's options
+      `feature effort --depth <depth> --model-options <json>` ─▶ the option that sets its effort
+      delegate_task(<reviewer>, <options>, "review PR #<n>, read only under <worktree>")
+      ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
+         (the reviewer gets the recorded request as intent, never tracked state)
    5. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
        ├─ caused by THIS PR? no ─▶ not a problem: reported as pre-existing; the user picks a
@@ -630,30 +633,36 @@ this feature's).
 review is a genuine independent sweep. If the finder ran in the caller's own context, the second
 and later runs in a session would be poisoned: the agent remembers the earlier runs, so instead
 of rediscovering issues blind it drifts into "confirm #12 and #14 got fixed" — a verification
-mindset that misses bugs the fixes themselves introduced. Each round delegates to a new Sol
+mindset that misses bugs the fixes themselves introduced. Each round delegates to a new reviewer
 thread that is handed only the PR number and worktree path, so run 1 and run 5 find with equal
-rigor. Sol is also a different model family from the agent that wrote the code, so it doesn't
-share the author's blind spots.
+rigor. The default reviewer is also a different model family from the agent that writes the code,
+so it doesn't share the author's blind spots. The default is a constant (`reviewer.DEFAULT`);
+the user overrides it for one run by naming a reviewer when they ask to ship, and the ship skill
+passes that name to every round of the run. T3 lists each model's options, and models differ in
+what they call their effort and whether it goes above `max`, so `feature effort` finds the effort
+option by its values (`low`…`max`) rather than by a provider's name for it. A table of each
+provider's spelling broke twice in review: a provider-wide entry gave one model a value it didn't
+list.
 
 **Why the depth is sized, and by whom.** A review round used to cost the same for a two-line docs
-fix and a migration, so Sol's reasoning effort is sized per round (`assess.py`). The first version
-had the fork read the whole diff to judge risk and complexity before Sol ran. That spent the most
-expensive, most context-heavy read on the least important decision, ahead of Sol reading the same
+fix and a migration, so the reviewer's reasoning effort is sized per round (`assess.py`). The first version
+had the fork read the whole diff to judge risk and complexity before the reviewer ran. That spent the most
+expensive, most context-heavy read on the least important decision, ahead of the reviewer reading the same
 diff properly, and `gh pr diff` refuses PRs over 300 files anyway. Now the first round is sized
-without reading the diff: size from its stats, risk from the paths it touches. Sol, which reads
+without reading the diff: size from its stats, risk from the paths it touches. The reviewer, which reads
 every line, grades risk and complexity as part of its review; the grade is recorded with the round,
 written into the PR body for the human, and sizes every later round. A cheap first guess that was
 too low gets corrected by the reviewer that found out. The mapping is code, not prose, so the same
 inputs always buy the same depth.
 
 **Why risk is about stakes, and caps the depth.** PR #38 changed only how ship formats its own
-block in PR bodies, in this personal repo, where a bad write is visible and fixed by hand. Sol
-still graded it high twice ("whole-body rewrites can corrupt persistent author content"), so its
+block in PR bodies, in this personal repo, where a bad write is visible and fixed by hand. The
+reviewer still graded it high twice ("whole-body rewrites can corrupt persistent author content"), so its
 rounds ran at high, then xhigh, with max next. The rubric listed "data loss or corruption" and
-"stored formats" as high without asking who a bug reaches or whether it can be undone, so Sol
-matched the subject, not the stakes. Its reasoning also mixed in how hard the parser was to get
+"stored formats" as high without asking who a bug reaches or whether it can be undone, so the
+reviewer matched the subject, not the stakes. Its reasoning also mixed in how hard the parser was to get
 right, which is complexity. Now risk is the cost of a missed bug, judged from the repo's stakes:
-reach and reversibility, which Sol names as the grade's blast radius and door (borrowed from
+reach and reversibility, which the reviewer names as the grade's blast radius and door (borrowed from
 mattpocock's `pr` skill), so a reader sees what the level rests on. Each risk level starts at the
 depth of the same name, and a low-risk PR reviews at low whatever its size or complexity: a big,
 intricate change still costs little to get wrong if nobody else is hit and it is easy to undo. For
@@ -676,10 +685,10 @@ regression (reopen, count as new); distinct → file. It also checks each findin
 positives never reach the gate.
 
 **Evidence is a ladder, and a finding names its rung.** A finding that sounds right reads the same
-whether it is true or not, so Sol says how far it proved each one: *cited* (it read the line),
+whether it is true or not, so the reviewer says how far it proved each one: *cited* (it read the line),
 *traced* (it walked the failure step by step), or *ran* (a script or test against the real code
 fails as described). The agent takes each finding at least to traced, and to ran when that is
-cheap, and drops what stays at cited. Sol's brief also names where breakage hides past a symbol
+cheap, and drops what stays at cited. The reviewer's brief also names where breakage hides past a symbol
 search: wire formats, stored data another reader parses, flags, code a few hops downstream.
 Both come from pstack's `blast-radius` skill (`cursor/plugins`).
 

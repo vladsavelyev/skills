@@ -178,13 +178,16 @@ def set_pr_block(pr: int, content: str, issue: int) -> bool:
     return True
 
 
-def set_pr_description(pr: int, text: str, title: str | None, content: str) -> None:
+def set_pr_description(pr: int, text: str, title: str | None, content: str, attach: list[str]) -> None:
     """Replace the PR's description with `text` (and its title with `title`), with ship's block
     set to `content` below it. `text` may carry the block already (the body fetched and edited): the
-    PR still ends up with exactly one (`prbody.with_description`)."""
+    PR still ends up with exactly one (`prbody.with_description`). Each `attach` file (a screencast
+    or screenshot) is uploaded to GitHub, which rewrites a `![](./<file>)` in `text` to the asset."""
     cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
     if title:
         cmd += ["--title", title]
+    for path in attach:
+        cmd += ["--attach", path]
     run(cmd, input_text=prbody.with_description(text, content))
 
 
