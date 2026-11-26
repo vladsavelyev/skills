@@ -34,7 +34,7 @@ Use latest versions of Python (and other languages). If needed, upgrade. Never a
 
 ### Navari local stack
 
-In navari, load `Skill(navari-stack)` before you start, stop, restart or rebuild anything in the local Docker stack, or run `docker compose` there. It overrides the repo's own stack instructions (`./scripts/run.sh`, `docker compose down`).
+In navari, load `Skill(navari-stack)` before you start, stop, restart or rebuild anything in the local Docker stack, run `docker compose` there, or run RIO to test a change. It overrides the repo's own stack instructions (`./scripts/run.sh`, `docker compose down`). A RIO-only change needs no stack: `nstack rio up` runs that worktree's own RIO beside it.
 
 ### Browsers
 
