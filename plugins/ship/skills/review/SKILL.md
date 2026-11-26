@@ -78,15 +78,16 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 4. **Have Sol find, blind.** Sol is the Codex provider's Sol model in T3. Load the T3 tools with
    ToolSearch, call `orchestrator_capabilities` with `search: "sol"`, and take the newest Sol
    model the `codex` provider lists. Then `delegate_task` with `mode: "wait"`, `role: "review"`,
-   `timeoutMs: 3600000`, and
+   `timeoutMs: 45000` (the most the tool takes; a timeout doesn't cancel the child), and
    `target: {providerInstanceId: "codex", model: <sol model>, options: {reasoningEffort: <depth>}}`.
    The `task` is the brief below, with the user's request filled in from the `Last prompt` line
    of `feature status`, and nothing about tracked problems or earlier rounds: Sol must find
-   without them. If the wait times out, keep
-   waiting (`t3_thread_wait` on the child thread) until it finishes; never cancel it or review
-   yourself instead. If Sol isn't listed, or its task comes back failed (an auth or gateway
-   error, a crash), stop: record no review, put Sol's error verbatim in the report, and don't
-   substitute another reviewer.
+   without them. A review runs longer than the wait: when it comes back unfinished, call
+   `t3_thread_wait` on the child thread, and again each time that returns unfinished, until the
+   run finishes, even where its result says to end your turn. You run as a subagent, so ending
+   your turn ends the round without a review. Never cancel it or review yourself instead. If Sol
+   isn't listed, or its task comes back failed (an auth or gateway error, a crash), stop: record
+   no review, put Sol's error verbatim in the report, and don't substitute another reviewer.
    ```
    Review PR #<n> in <owner/repo>: `gh pr view <n>` and `gh pr diff <n>` (over 300 files that
    fails; then run `git fetch origin <base>` and use `git diff origin/<base>...HEAD` in the
