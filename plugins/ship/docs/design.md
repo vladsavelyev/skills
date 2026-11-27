@@ -134,7 +134,8 @@ Every command that writes the block (`feature pr`, `feature describe`, `feature 
 `feature reconcile`, and `feature problem resolve`, `wontfix` and `block` for a problem a round found)
 renders the block's whole content from the feature's state and its problems' open or closed state
 (`assess.render`) and sets it between the tags (`prbody.py`), so the block always shows the current
-state. Before any review
+state. A `feature problem` command reads the problems for it after its own change, not from what it
+read at its start, so another command's change in between isn't written over. Before any review
 it is the reference line alone; once the reviewer has graded the PR, the grade comes first, so a reader
 finds the stakes before the review log. It is one quote with no header: a footnote to the
 author's description, not a section competing with it (a `## Risk` and `## Review` version read
@@ -415,7 +416,7 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. If a review round found it, rewrite the PR's ship block, which shows that round's line once all its problems are closed. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. Rewrites the PR's ship block like `resolve`; run again on a problem it already closed, it only rewrites the block. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses until then: that would be shipping debt. Old `follow-up` labels count as `handed-off`, and old `rejected` ones as `wontfix`. |
-| `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. If a round found it, first takes that round's line out of the PR's ship block. Refuses an open problem, which already blocks. |
+| `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. If a round found it, then rewrites the PR's ship block, which takes that round's line out. Run on an open problem, which already blocks, it only rewrites the block. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
 | `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), while the gate is `REVIEW_AGAIN` or `REDESIGN` and no problem is named; and at `OPEN` or `MERGED`. |

@@ -65,13 +65,14 @@ def _blocking(issue: int) -> list[dict]:
     return problems.blocking(github.sub_issues(issue))
 
 
-def _show_problem_change(feat: feature.Snapshot, number: int, now: str) -> None:
-    """Re-render the PR's ship block now that problem `number` is `now` (`OPEN` or `CLOSED`), if a
-    review round found it: that round's line shows only once every problem it found is closed
-    (`assess.render`)."""
+def _reconcile_block(feat: feature.Snapshot, number: int) -> None:
+    """Re-render the PR's ship block from the feature's problems as GitHub has them now, once a command
+    has changed problem `number`, if a review round found it: that round's line shows only once every
+    problem it found is closed (`assess.render`). Read after the change, not from `feat`: another
+    command may have changed a problem since `feat` was read."""
     if feat.state["pr"] is None or number not in found_in(feat.state["review_history"]):
         return
-    _write_block(feat.state, feat.issue, [s | {"state": now} if s["number"] == number else s for s in feat.subs])
+    _write_block(feat.state, feat.issue)
 
 
 # ── commands ────────────────────────────────────────────────────────────────
@@ -447,7 +448,7 @@ def cmd_problem_resolve(args: argparse.Namespace) -> None:
         _save_state(feat.issue, feat.body, feat.state)
     note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
     github.close_issue(args.number, note)
-    _show_problem_change(feat, args.number, "CLOSED")
+    _reconcile_block(feat, args.number)
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
@@ -460,7 +461,6 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     """
     feat = feature.snapshot(args.branch or current_branch())
     sub = feat.problem(args.number)
-    # A problem already closed as `wontfix` is a re-run whose block write failed: it finishes that.
     if sub["state"] == "OPEN":
         # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
         github.init_labels()
@@ -470,7 +470,7 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
         github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
     elif not problems.is_wontfix(sub):
         sys.exit(f"#{args.number} is already closed.")
-    _show_problem_change(feat, args.number, "CLOSED")
+    _reconcile_block(feat, args.number)
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
@@ -531,16 +531,15 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
     # An open problem still labelled `wontfix` is a block whose label removal failed after the reopen;
     # the re-run finishes it rather than refusing.
     if sub["state"] == "OPEN" and not stale:
-        sys.exit(f"#{args.number} is open, so it already blocks the gate.")
-    # Its round's line goes before the reopen, so it never shows a problem open again, and again after:
-    # a block written in between, from GitHub where it was still closed, showed the line.
-    _show_problem_change(feat, args.number, "OPEN")
+        _reconcile_block(feat, args.number)
+        print(f"#{args.number} is open, so it already blocks the gate.")
+        return
     # Reopen first: if removing the label fails afterwards, the problem is open and blocks with a
     # stale label, which a re-run fixes. The other order could leave it closed and unlabelled,
     # looking fixed.
     if sub["state"] != "OPEN":
         github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
-    _show_problem_change(feat, args.number, "OPEN")
+    _reconcile_block(feat, args.number)
     if stale:
         github.remove_label(args.number, problems.WONTFIX)
     github.comment(args.number, f"⛔ Blocking again: {args.reason}")

@@ -339,11 +339,10 @@ def test_problem_list_marks_old_rejected_problems_wontfix_and_old_follow_ups_han
     assert "handed-off" in cli._problem_line(_problem(3, "sev:low", extra=("follow-up",)))
 
 
-def test_block_refuses_an_open_problem_which_already_blocks(monkeypatch):
+def test_block_leaves_an_open_problem_which_already_blocks(monkeypatch, capsys):
     did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
-    with pytest.raises(SystemExit, match="already blocks"):
-        cli.cmd_problem_block(cli.argparse.Namespace(branch="add-oauth", number=8, reason="rediscovered"))
-    assert did == []
+    cli.cmd_problem_block(cli.argparse.Namespace(branch="add-oauth", number=8, reason="rediscovered"))
+    assert did == [] and "already blocks" in capsys.readouterr().out
 
 
 def test_escalate_offers_what_the_gate_says_next(monkeypatch):
@@ -837,19 +836,39 @@ def _graded_state() -> dict:
 
 
 def _stub_pr_block(monkeypatch, state: dict, subs: list[dict]) -> list[str]:
-    """GitHub as `feature problem …` sees it on a PR whose round 2 filed `subs`; returns each block written."""
+    """GitHub as `feature problem …` sees it on a PR whose round 2 filed `subs`, which closing,
+    reopening and labelling a problem change in place; returns each block written."""
     blocks: list[str] = []
+
+    def edit(number, change):
+        at = next(i for i, s in enumerate(subs) if s["number"] == number)
+        subs[at] = change(subs[at])
+
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
     monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
-    monkeypatch.setattr(github, "sub_issues", lambda issue: subs)
+    monkeypatch.setattr(github, "sub_issues", lambda issue: list(subs))
     monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
     monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: blocks.append(content) or True)
-    for name in ("init_labels", "add_label", "remove_label", "comment", "reopen_issue", "close_issue"):
+    monkeypatch.setattr(
+        github, "close_issue", lambda n, note, not_planned=False: edit(n, lambda s: s | {"state": "CLOSED"})
+    )
+    monkeypatch.setattr(github, "reopen_issue", lambda n, note: edit(n, lambda s: s | {"state": "OPEN"}))
+    monkeypatch.setattr(github, "add_label", lambda n, label: edit(n, lambda s: s | {"labels": [*s["labels"], label]}))
+    monkeypatch.setattr(
+        github,
+        "remove_label",
+        lambda n, label: edit(n, lambda s: s | {"labels": [x for x in s["labels"] if x != label]}),
+    )
+    for name in ("init_labels", "comment"):
         monkeypatch.setattr(github, name, lambda *a, **k: None)
     monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
     monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
     return blocks
+
+
+def _unavailable(pr, content, issue):
+    raise CommandFailed(1, ["gh"], "", "503")
 
 
 def test_a_round_is_recorded_without_its_line_while_its_problems_are_open(monkeypatch):
@@ -889,17 +908,11 @@ def test_reopening_a_rounds_problem_takes_its_line_down(monkeypatch):
 
 
 def test_a_wontfix_rerun_after_its_block_write_failed_shows_the_line(monkeypatch):
-    """#229: the re-run refused "already closed" before the block write, so the round's line stayed hidden."""
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED"), _problem(38, "sev:low")]
     blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
-
-    def unavailable(pr, content, issue):
-        raise CommandFailed(1, ["gh"], "", "503")
-
-    monkeypatch.setattr(github, "set_pr_block", unavailable)
+    monkeypatch.setattr(github, "set_pr_block", _unavailable)
     with pytest.raises(CommandFailed):
         cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
-    subs[2] = _problem(38, "sev:low", state="CLOSED", extra=(problems.WONTFIX,))
     monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: blocks.append(content) or True)
     cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
     assert _ROUND_2 in blocks[-1]
@@ -913,21 +926,51 @@ def test_wontfix_still_refuses_a_problem_closed_as_fixed(monkeypatch):
     assert blocks == []
 
 
+def test_two_overlapping_closes_of_a_rounds_last_problems_show_its_line(monkeypatch):
+    """Both commands read the feature while #36 and #38 were open, and each closes one."""
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med"), _problem(38, "sev:low")]
+    state = _graded_state()
+    blocks = _stub_pr_block(monkeypatch, state, subs)
+    read_before_either = [feature.snapshot("add-oauth"), feature.snapshot("add-oauth")]
+    monkeypatch.setattr(feature, "snapshot", lambda branch: read_before_either.pop())
+    cli.main(["problem", "resolve", "36", "--commit", "c3", "--branch", "add-oauth"])
+    cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
+    assert _ROUND_2 in blocks[-1]
+
+
+def test_a_block_rerun_after_its_block_write_failed_takes_the_line_down(monkeypatch):
+    """The reopen went through and the block write after it didn't, so the round's line still shows."""
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED")]
+    subs.append(_problem(38, "sev:low", state="CLOSED"))
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    write = github.set_pr_block
+
+    def unavailable_once_reopened(pr, content, issue):
+        return _unavailable(pr, content, issue) if subs[1]["state"] == "OPEN" else write(pr, content, issue)
+
+    monkeypatch.setattr(github, "set_pr_block", unavailable_once_reopened)
+    with pytest.raises(CommandFailed):
+        cli.main(["problem", "block", "36", "--reason", "back again", "--branch", "add-oauth"])
+    monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: blocks.append(content) or True)
+    cli.main(["problem", "block", "36", "--reason", "back again", "--branch", "add-oauth"])
+    assert "Review round 2" not in blocks[-1] and "Review round 1" in blocks[-1]
+
+
 def test_a_block_written_while_a_problem_reopens_is_written_over(monkeypatch):
-    """#231: another session re-renders the block from GitHub between the hide and the reopen."""
+    """Another session renders the block from GitHub while #36 is still closed, and writes it as it reopens."""
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED")]
     subs.append(_problem(38, "sev:low", state="CLOSED"))
     state = _graded_state()
     blocks = _stub_pr_block(monkeypatch, state, subs)
-
+    reopen = github.reopen_issue
     concurrent: list[str] = []
 
-    def reopen(number, body):
-        concurrent.append(cli._block_content(state, 7, subs))
+    def reopen_meanwhile(number, note):
+        concurrent.append(cli._block_content(state, 7, list(subs)))
         blocks.append(concurrent[-1])
-        subs[1] = _problem(36, "sev:med")
+        reopen(number, note)
 
-    monkeypatch.setattr(github, "reopen_issue", reopen)
+    monkeypatch.setattr(github, "reopen_issue", reopen_meanwhile)
     cli.main(["problem", "block", "36", "--reason", "back again", "--branch", "add-oauth"])
     assert _ROUND_2 in concurrent[0]
     assert "Review round 2" not in blocks[-1]
