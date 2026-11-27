@@ -1290,3 +1290,9 @@ def test_hand_off_holds_the_feature_while_it_hands_the_problem_off(monkeypatch, 
     _stub_pr(monkeypatch, "MERGED")
     args = cli.argparse.Namespace(branch="add-oauth", number=8, reason="fix in a separate PR")
     _waits_for_the_lock(lock_waited, "add-oauth", lambda: cli.cmd_problem_hand_off(args), did)
+
+
+def test_a_long_non_ascii_branch_takes_its_lock():
+    branch = "feature/" + "исправить-гонку-при-записи-состояния-фичи-из-двух-сессий"
+    with feature.locked(branch):
+        pass

@@ -7,9 +7,9 @@ prints it and exits, the merge guard denies the merge, the Stop hook reports it.
 """
 
 import fcntl
+import hashlib
 import json
 import sys
-import urllib.parse
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -87,8 +87,9 @@ def locked(branch: str) -> Iterator[None]:
     """This machine's lock on the feature of `branch`, held by every command that changes it, from its read to its
     last write: its state block, its problems and its PR's ship block. GitHub replaces an issue or PR body whole and
     has no conditional write, so two commands interleaving would each write back what it read, and the later would
-    undo the earlier. A branch of the same name in another repo shares the lock, which only makes one wait."""
-    path = ship_state_dir() / "locks" / f"{urllib.parse.quote(branch, safe='')}.lock"
+    undo the earlier. A branch of the same name in another repo shares the lock, which only makes one wait. The file
+is named by a digest of the branch: a name git accepts can be longer than a filename may be."""
+    path = ship_state_dir() / "locks" / f"{hashlib.sha256(branch.encode()).hexdigest()}.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as lock:
         try:
