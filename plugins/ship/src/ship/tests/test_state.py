@@ -8,7 +8,7 @@ from ship.state import (
     END,
     SCHEMA,
     fixes,
-    found_before,
+    found_in,
     migrate,
     new_state,
     parse_block,
@@ -183,7 +183,7 @@ def test_record_fix_is_idempotent_and_a_block_from_before_fixes_has_none():
     assert fixes(older) == {}
 
 
-def test_found_before_is_every_problem_a_recorded_round_found():
+def test_found_in_is_every_problem_a_recorded_round_found():
     """Rounds from before `found`, placeholders and base-change markers found nothing it can name."""
     history = [
         {"run": 1, "placeholder": True},
@@ -192,4 +192,4 @@ def test_found_before_is_every_problem_a_recorded_round_found():
         {"run": 3, "found": {"high": [5], "low": [6]}},
         {"run": 4, "found": {"med": [5, 7]}},
     ]
-    assert found_before(history) == {5, 6, 7}
+    assert found_in(history) == {5, 6, 7}

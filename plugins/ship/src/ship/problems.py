@@ -97,12 +97,19 @@ def repeated(body: str) -> int | None:
     return int(match[1]) if match else None
 
 
-def recurring(found: dict[str, list[int]], *, earlier: set[int], body: Callable[[int], str]) -> dict[str, int]:
-    """A round's high/med finds (`found`, by severity) filed as repeating a fixed problem, each with
-    the problem it repeats, in number order. `body` reads a problem's issue body.
+def serious(found: dict[str, list[int]]) -> set[int]:
+    """The high/med (and unlabelled) finds of a round's `found`, by severity: the ones whose coming
+    back is evidence that the design keeps producing the bug. A nit back again is not."""
+    return {n for sev, nums in found.items() if f"sev:{sev}" != LOW_SEV for n in nums}
+
+
+def repeat_links(found: dict[str, list[int]], *, earlier: set[int], body: Callable[[int], str]) -> dict[str, int]:
+    """A round's finds (`found`, by severity) filed as repeating a fixed problem, each with the problem
+    it repeats, in number order. `body` reads a problem's issue body.
 
     Only the finds this round filed: one an `earlier` round found is back as a regression, which the
-    round counts apart. A low one doesn't count, as in the trend: a nit back again is not evidence
-    that the design keeps producing the bug."""
-    serious = sorted(n for sev, nums in found.items() if f"sev:{sev}" != LOW_SEV for n in nums if n not in earlier)
-    return {str(n): r for n in serious if (r := repeated(body(n))) is not None}
+    round counts apart. Every severity: the links are what a recurrence chain walks (`gate.chain_root`),
+    and a low find can be a link in one. Whether a link is a recurrence is the gate's call
+    (`gate.recurrences`), which reads the high/med ones only."""
+    filed = sorted(n for nums in found.values() for n in nums if n not in earlier)
+    return {str(n): r for n in filed if (r := repeated(body(n))) is not None}

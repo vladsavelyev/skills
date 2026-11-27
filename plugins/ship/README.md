@@ -27,8 +27,9 @@ terminates — a real reviewer always finds *something*. After it, a fourth ends
 | --- | --- | --- |
 | `OPEN` | 0 | No open problems, and nothing since the last review needs one (low fixes, base merges, docs and tests don't). Ship it. |
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code left, review budget remains. |
-| `NEEDS_DECISION` | 20 | Budget spent, or the loop is churning. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign. When a kind of bug came back after its fix, the gate recommends the redesign, and the problems wait for that call. |
+| `NEEDS_DECISION` | 20 | Budget spent, the loop is churning, or a redesign didn't hold. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign again. |
 | `MERGED` | 30 | The PR is in. Nothing left to review; close the feature out. |
+| `REDESIGN` | 40 | A kind of bug came back after its fix. The run redesigns without asking, unless the design crosses a one-way door (a public API, stored data, a shared environment): competing designs, each critiqued blind, one built, closing the problems it fixes; then `feature redesign` buys the round that reviews it. |
 
 **Nothing ships as debt.** Every open problem blocks the gate, at every severity including `low`.
 It's either fixed (`feature problem resolve` with its commit) or, if it isn't relevant, closed with
@@ -139,15 +140,16 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature effort --depth <d> --model-options <json>` | The `delegate_task` options that run a model at `<d>`, from its `options` as `orchestrator_capabilities` lists them: the option whose values run `low`…`max`, and for `ultra` the value listed after `max`. Refuses a model that has neither. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
-| `feature review record --sha <s> --found [<problem#> ...] [--regressions <n>] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with the reviewer's grade (moves the gate, writes the grade and one line per round into the PR body) and print the resulting verdict. |
+| `feature review record --sha <s> --found [<problem#> ...] [--regressions <problem#> ...] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with the reviewer's grade (moves the gate, writes the grade and one line per round into the PR body, each shown once the problems it found are closed) and print the resulting verdict. |
 | `feature problem add --title <t> --sev <high\|med\|low> [--repeats <number>]` | Add a problem sub-issue (it blocks the gate until closed, at any severity). `--repeats` names a fixed problem a root-cause fix of which would have prevented this one: a round that finds it recommends a redesign. |
-| `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue as fixed, recording its fix commits: one that fixed only low problems needs no review. |
-| `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. |
+| `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue as fixed, recording its fix commits: one that fixed only low problems needs no review. Closing a round's last open problem shows its line in the PR body. |
+| `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. Like `resolve`, it can show a round's line in the PR body. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: hand an open problem to a separate fix PR, or keep it as an issue. Labels it `handed-off`; it stays open, outside the feature, and stops holding the close-out. |
-| `feature problem block <number> --reason <why>` | Reopen a closed problem (a regression, or a `wontfix` overturned) so it blocks again. |
+| `feature problem block <number> --reason <why>` | Reopen a closed problem (a regression, or a `wontfix` overturned) so it blocks again, taking the line of the round that found it out of the PR body until it closes again. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking, handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto]` | Show or override the review-round budget. |
-| `feature escalate --reason <t> [--problem <#> …]` | Park at `needs-decision` with your recommendation for a human, ending the session's hold. Every open problem must be closed first, or named with `--problem` as needing the user's call, unless the gate recommends a redesign. |
+| `feature escalate --reason <t> [--problem <#> …]` | Park at `needs-decision` with your recommendation for a human, ending the session's hold. Every open problem must be closed first, or named with `--problem` as needing the user's call, and never for a redesign, which is the run's to make. |
+| `feature redesign --reason <t>` | Record the redesign a `REDESIGN` gate asked for, once it's pushed and every problem is closed, and pin the budget so a round reviews it. A later round that brings the same kind back goes to a human. |
 | `feature round <review\|fix> [--branch <b>]` | Hold the branch for the session driving the ship run (`hold.py`), and print the description to give the round's background subagent: the session may end its turn while that subagent runs, and once it's done can't until the gate settles. |
 | `feature release --reason <t>` | Let this session end its turn with the gate still shut (the user stopped the run, or the review can't run), with the reason on the tracking issue. |
 | `feature status [--branch <b>] [--json]` | Reconstruct and print feature state. |

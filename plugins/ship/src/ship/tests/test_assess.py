@@ -70,7 +70,13 @@ def test_last_grade_skips_ungraded_entries():
 
 
 def _review(grade: dict, history: list[dict], **kw) -> assess.Review:
-    defaults = {"size": "M", "changed_files": 8, "changed_lines": 412, "next_depth": "max"}
+    defaults = {
+        "size": "M",
+        "changed_files": 8,
+        "changed_lines": 412,
+        "next_depth": "max",
+        "open_problems": frozenset(),
+    }
     return assess.Review(grade=grade, history=history, **(defaults | kw))
 
 
@@ -148,3 +154,32 @@ def test_a_round_that_found_only_low_problems_announces_no_further_round():
     assert out.splitlines()[-1] == (
         "> **Review round 1** (high). Findings: 2 low (#4910, #4911). A re-review after new commits would run at high."
     )
+
+
+_GRADE = {"risk": "high", "door": "two-way", "blast_radius": "this repo", "complexity": "med", "why": "a parser"}
+# navari-stack #23: round 1's finds are fixed, round 2 filed #36 (med) and #38 (low).
+_ROUNDS = [
+    {"run": 1, "depth": "high", "found": {"med": [30]}, "new_blocking": 1, "regressions": 0},
+    {"run": 2, "depth": "high", "found": {"med": [36], "low": [38]}, "new_blocking": 1, "regressions": 0},
+]
+
+
+def test_a_rounds_findings_line_waits_until_every_problem_it_filed_is_closed():
+    """The user wants a round's problems fixed before its line appears."""
+    out = assess.render(issue=35, review=_review(_GRADE, _ROUNDS, open_problems=frozenset({38, 99})))
+    assert out.splitlines()[3:] == [
+        "> **Tracking issue:** closes #35",
+        "> **Review round 1** (high). Findings: 1 med (#30).",
+    ]
+    out = assess.render(issue=35, review=_review(_GRADE, _ROUNDS, open_problems=frozenset({99})))
+    assert out.splitlines()[-1] == (
+        "> **Review round 2** (high). Findings: 1 med (#36), 1 low (#38). Next round would run at max."
+    )
+
+
+def test_a_reopened_problem_takes_its_rounds_line_down_again():
+    out = assess.render(issue=35, review=_review(_GRADE, _ROUNDS, open_problems=frozenset({30})))
+    assert out.splitlines()[3:] == [
+        "> **Tracking issue:** closes #35",
+        "> **Review round 2** (high). Findings: 1 med (#36), 1 low (#38). Next round would run at max.",
+    ]
