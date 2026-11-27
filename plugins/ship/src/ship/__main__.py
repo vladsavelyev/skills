@@ -1010,24 +1010,8 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
     unreadable: list[tuple[int, str]] = []
     pending: list[tuple[dict, dict]] = []  # (issue row, state block)
     for row in rows:
-        try:
-            state = parse_block_raw(row["body"])
-        except ValueError as exc:
-            # Reported and non-zero at the end, never skipped silently: a `feature`-labelled issue
-            # whose state block is missing or hand-mangled is exactly the thing that would otherwise
-            # sit orphaned while the sweep claimed success.
-            unreadable.append((row["number"], str(exc)))
-            continue
-        # Read `pr` and `status` — the two fields every schema has carried — WITHOUT the usual
-        # schema check, because the features that need this sweep most are the oldest ones, whose
-        # branches are long deleted: `feature migrate` resolves its issue through the branch's git
-        # config, so it cannot reach them at all, and refusing to read them here would leave them
-        # permanently orphaned. A schema this CLI has never written is still refused (those fields
-        # could mean anything), and nothing is written back until the block has been migrated.
-        if state.get("schema") not in (1, SCHEMA):
-            unreadable.append((row["number"], f"state block has unknown schema {state.get('schema')!r}"))
-            continue
-        if state.get("pr") is not None and state.get("status") not in TERMINAL_STATUS:
+        state = _swept_state(row, unreadable)
+        if state is not None and state.get("pr") is not None and state.get("status") not in TERMINAL_STATUS:
             pending.append((row, state))
 
     states = github.pr_states([state["pr"] for _, state in pending])
@@ -1041,8 +1025,9 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
             # is written is decided from the feature as read under its lock.
             with feature.locked(swept["branch"]):
                 row = github.get_issue(row["number"])
-                change = feature.Draft(row["number"], parse_block_raw(row["body"]), row["body"])
-                now = change.state
+                if (now := _swept_state(row, unreadable)) is None:
+                    continue
+                change = feature.Draft(row["number"], now, row["body"])
                 if (now["pr"], now["status"]) != (swept["pr"], swept["status"]):
                     print(
                         f"#{row['number']} ({row['title']}): changed by another command meanwhile, now PR "
@@ -1065,6 +1050,29 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
         for number, why in unreadable:
             print(f"  #{number}: {why}")
         sys.exit("Fix those by hand (the state block is in the issue body) and re-run.")
+
+
+def _swept_state(row: dict, unreadable: list[tuple[int, str]]) -> dict | None:
+    """The state block of feature issue `row`, or None once `unreadable` says why it can't be read.
+
+    Reported and non-zero at the end, never skipped silently: a `feature`-labelled issue whose state block is
+    missing or hand-mangled is exactly the thing that would otherwise sit orphaned while the sweep claimed success.
+
+    Read `pr` and `status` — the two fields every schema has carried — WITHOUT the usual schema check, because the
+    features that need this sweep most are the oldest ones, whose branches are long deleted: `feature migrate`
+    resolves its issue through the branch's git config, so it cannot reach them at all, and refusing to read them
+    here would leave them permanently orphaned. A schema this CLI has never written is still refused (those fields
+    could mean anything), and nothing is written back until the block has been migrated.
+    """
+    try:
+        state = parse_block_raw(row["body"])
+    except ValueError as exc:
+        unreadable.append((row["number"], str(exc)))
+        return None
+    if state.get("schema") not in (1, SCHEMA):
+        unreadable.append((row["number"], f"state block has unknown schema {state.get('schema')!r}"))
+        return None
+    return state
 
 
 def _reconcile_feature(

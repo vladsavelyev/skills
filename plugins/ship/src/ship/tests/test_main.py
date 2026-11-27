@@ -1214,6 +1214,22 @@ def test_reconcile_leaves_a_feature_relinked_to_a_new_pr_meanwhile(monkeypatch, 
     assert "changed by another command meanwhile" in capsys.readouterr().out
 
 
+def test_reconcile_refuses_a_schema_it_never_wrote_that_a_block_got_meanwhile(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
+    repo.meanwhile(monkeypatch, lambda: repo.change(schema=99))
+    with pytest.raises(SystemExit, match="Fix those by hand"):
+        cli.main(["reconcile"])
+    assert repo.blocks == [] and "#7: state block has unknown schema 99" in capsys.readouterr().out
+
+
+def test_reconcile_reports_a_block_mangled_meanwhile_as_unreadable(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    repo.meanwhile(monkeypatch, lambda: repo.issue.update(body="The block was deleted by hand."))
+    with pytest.raises(SystemExit, match="Fix those by hand"):
+        cli.main(["reconcile"])
+    assert repo.notes == [] and "1 feature issue(s) could not be reconciled" in capsys.readouterr().out
+
+
 def test_reconcile_refuses_to_write_over_a_change_made_while_it_closes_out(monkeypatch):
     repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
     close = repo._close
