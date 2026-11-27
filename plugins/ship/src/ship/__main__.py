@@ -196,7 +196,7 @@ def cmd_pr(args: argparse.Namespace) -> None:
         _save(change)
         # Native link: `closes #<issue>` in the PR body so GitHub shows the connection in the PR
         # sidebar and the issue timeline — not just a comment that no linked-issues view reads.
-        _write_block(change.snapshot())
+        _publish_block(change)
     github.comment(change.issue, f"🔗 Linked PR #{args.number}.")
     print(f"Linked PR #{args.number} to feature #{change.issue}")
 
@@ -250,6 +250,18 @@ def _write_block(feat: feature.Snapshot) -> bool:
     return github.set_pr_block(feat.state["pr"], _block_content(feat), feat.issue)
 
 
+def _checked_block(change: feature.Draft) -> str:
+    """The PR's ship block rendered from `change`, checked (`feature.check`) only after the render: rendering reads
+    GitHub, and a change to the feature made meanwhile would go out written over."""
+    content = _block_content(change.snapshot())
+    feature.check(change)
+    return content
+
+
+def _publish_block(change: feature.Draft) -> bool:
+    return github.set_pr_block(change.state["pr"], _checked_block(change), change.issue)
+
+
 def cmd_describe(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
@@ -259,7 +271,7 @@ def cmd_describe(args: argparse.Namespace) -> None:
         pr = change.state["pr"]
         if pr is None:
             sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
-        github.set_pr_description(pr, text, args.title, _block_content(change.snapshot()), args.attach)
+        github.set_pr_description(pr, text, args.title, _checked_block(change), args.attach)
     print(f"Updated the description of PR #{pr}")
 
 
@@ -366,8 +378,7 @@ def _record_review(args: argparse.Namespace, branch: str, change: feature.Draft)
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
     blocking = problems.blocking(subs)
-    feature.check(change)
-    _write_block(feature.Snapshot(issue, state, change.body, subs))
+    _publish_block(change)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     github.comment(
         issue,
@@ -1075,7 +1086,7 @@ def _reconcile_feature(
             # what the real run does — don't claim a count here that a dry run can't know.
             print(f"#{issue} ({row['title']}): PR #{pr} open → block repaired if stale{stale}")
             return None
-        if not _write_block(change.snapshot()):
+        if not _publish_block(change):
             return None
         print(f"#{issue} ({row['title']}): block repaired — PR #{pr} closes it on merge{stale}")
         return "repaired"

@@ -116,7 +116,8 @@ its read to its last write, so two sessions here take turns. Its write (`feature
 issue, keeps the prose around the block as it is now, and refuses if the block changed since the
 read, which is a command on another machine or a hand edit: writing back would undo it. A command that
 publishes something before that write (a comment, the PR's block, the issue's close) checks the same
-way first (`feature.check`), so a conflict already there stops it before anything goes out; one that
+way first (`feature.check`), after it has rendered what it publishes (the PR's block reads the
+problems and the diff), so a conflict already there stops it before anything goes out; one that
 lands while it publishes is refused at the write, naming what went out. What no check can cover is a
 write from another machine in the instant between that re-read and the edit.
 

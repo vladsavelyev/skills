@@ -538,7 +538,8 @@ def _stub_review_record(
     monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [_problem(8, "sev:med")])
     if stub_block:
-        monkeypatch.setattr(cli, "_write_block", lambda *args: did.append("block"))
+        monkeypatch.setattr(cli, "_block_content", lambda feat: "")
+        monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: did.append("block") or True)
     decision = cli.gate.GateDecision(cli.gate.Verdict.REVIEW_AGAIN, ["open"], "fix", 1, 2)
     monkeypatch.setattr(feature, "decide", lambda *a, **k: decision)
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
@@ -1225,6 +1226,27 @@ def test_reconcile_refuses_to_write_over_a_change_made_while_it_closes_out(monke
     with pytest.raises(SystemExit, match="though the outcome's comment and the issue's close went out"):
         cli.main(["reconcile"])
     assert (repo.state["last_prompt"], repo.state["status"]) == ("from the laptop", "in-review")
+
+
+def test_reconcile_refuses_to_repair_the_block_over_a_change_made_while_it_renders_it(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
+    monkeypatch.setattr(github, "sub_issues", lambda number: repo.change(pr=124) or [])
+    with pytest.raises(SystemExit, match="nothing was written"):
+        cli.main(["reconcile"])
+    assert repo.blocks == []
+
+
+def test_describe_refuses_to_publish_over_a_change_made_while_it_renders_the_block(monkeypatch, tmp_path):
+    _stub_issue(monkeypatch, _merged_state())
+    relinked = _merged_state() | {"pr": 124}
+    monkeypatch.setattr(github, "sub_issues", lambda issue: github.set_issue_body(7, render_block(relinked)) or [])
+    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
+    published: list[int] = []
+    monkeypatch.setattr(github, "set_pr_description", lambda pr, *args: published.append(pr))
+    (tmp_path / "body.md").write_text("Why it changed.")
+    with pytest.raises(SystemExit, match="nothing was written"):
+        cli.main(["describe", "--body-file", str(tmp_path / "body.md"), "--branch", "add-oauth"])
+    assert published == []
 
 
 def test_a_dry_run_reconcile_writes_nothing(monkeypatch, capsys):
