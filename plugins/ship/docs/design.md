@@ -477,9 +477,9 @@ Skill(ship:ship), in the caller's session
 It ends only at an end state: `READY`, `MERGED`, `NEEDS_DECISION` escalated, a question for the
 user's call, or a run released on the record (`feature release`: the user stopped it, or the
 reviewer can't run). The caller drives the loop and the forks do the heavy work, so the caller's
-thread keeps their reports, not their reading. The finder, the triager and the fixer are three
-separate agents: the reviewer starts each round in a new thread with the PR number, a fresh fork dedups and
-files its findings with no memory of the fixes, and another fork fixes them. The fixer starts with
+thread keeps their reports, not their reading. The finders, the triager and the fixer are separate
+agents: the two reviewers start each round, each in a new thread with the PR, a fresh fork merges,
+dedups and files their findings with no memory of the fixes, and another fork fixes them. The fixer starts with
 none of the caller's conversation, so the caller hands it what the code and the issues don't say
 (what the user asked of the change, a constraint they set, a fix they turned down). Why the fixes
 left the caller's thread: motivation.md #16. Why the rounds run in background subagents, not as
@@ -611,13 +611,17 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
       takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
       PR's base isn't the tracked parent
    2. `feature describe` ─▶ title + description from the motivation and commit messages
-   3. the reviewer the user named, else `feature reviewer` ─▶ provider + model family
-      orchestrator_capabilities ─▶ its newest model and that model's options
+   3. two reviewers, started together; `feature reviewer` ─▶ provider + model family of each
+      (the reviewer: the one the user named, else the default; the `/code-review` reviewer: Claude)
+      orchestrator_capabilities ─▶ each one's newest model and that model's options
       `feature effort --model-options <json>` ─▶ the option that sets its effort to high
-      delegate_task(<reviewer>, <options>, "review PR #<n>, read only under <worktree>")
+      delegate_task(<reviewer>, <options>, "<the brief> for PR #<n>, read only under <worktree>")
       ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
          (the reviewer gets the recorded request as intent, never tracked state)
-   4. NOW load tracked state, and for each finding decide (real code + problems):
+      delegate_task(<the /code-review reviewer>, <options>, "/code-review high <PR URL> --max-findings all, read only, findings as text")
+      ─▶ raw defects from /code-review's own finders
+   4. NOW load tracked state, merge the two reviewers' findings (the same defect from both is one),
+      and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
        ├─ caused by THIS PR? no ─▶ not a problem: reported as pre-existing; the user picks a
        │                           separate fix PR or a plain issue
@@ -631,7 +635,7 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
                                                     (spec, design and comment findings: always low)
    5. `feature review record --found <problems filed & regressed>
                              --regressions <high/med reopened #s> --risk --door --blast-radius --complexity --why`   (refuses if no PR linked;
-                             idempotent per sha, so a retry after a failed call spends no extra round)
+                             it writes state last, so a failed call records nothing and a retry records once)
    6. report ─▶ the ship run: the verdict and every open problem, which it fixes before the next round
       or an escalation, whatever the verdict (a merged PR stops at step 1: the ship run hands it to
       Skill(ship:close))
@@ -650,12 +654,13 @@ against `main` for a stacked feature is caught before it can record a wrongly-sc
 Push + open the PR against the parent + `feature pr <n>` is a precondition of the review loop,
 not an afterthought.
 
-**Why the finder runs before tracked state is loaded.** The finder must find blind — no memory of
-prior runs, no list of already-filed problems to "just confirm." Rather than load that state and
-then instruct the agent not to pass it along (a rule it must remember to honor every run), the
-ordering enforces it structurally: the fork runs the finder FIRST, with only the PR number in
-hand, and loads `feature status` / open problems only afterward for its own dedup. There is
-nothing to leak because the leakable context doesn't exist yet.
+**Why the reviewers run before the problem list is loaded.** The reviewers must find blind — no
+memory of prior runs, no list of already-filed problems to "just confirm." Rather than load that
+state and then instruct the agent not to pass it along (a rule it must remember to honor every
+run), the ordering does most of it: the fork starts both reviewers before it loads the problem
+list, which it reads only afterward for its own dedup. Before them it reads `feature status` for
+one line, the user's recorded request, which goes into the brief as intent; for the rest of that
+output, the rule that the tasks carry nothing about tracked problems or earlier rounds holds.
 
 **Why the finder is pinned to the feature worktree.** Feature worktrees live *under* the main
 checkout (`.claude/worktrees/<name>`), so the main checkout's path is a prefix of the worktree
@@ -681,6 +686,22 @@ passes that name to every round of the run. T3 lists each model's options, and m
 what they call their effort, so `feature effort` finds the effort option by its values
 (`low`…`max`) rather than by a provider's name for it. A table of each provider's spelling broke
 twice in review: a provider-wide entry gave one model a value it didn't list.
+
+**Why two reviewers.** One reviewer finds what one model finds. So every round also runs Claude
+Code's `/code-review` (`reviewer.CODE_REVIEW`), in its own Claude thread beside the reviewer, and the fork
+merges what both found before it verifies and files anything. The two differ in more than the
+model. The reviewer works from ship's brief, which asks for spec gaps, design smells, comments and
+the grade. `/code-review` runs its own finders and is maintained with Claude Code, so ship doesn't
+hand-roll a second review prompt (motivation.md #2). It gets the PR by URL, because by number a diff it can't read (a PR over 300 files)
+falls back to the checkout's own diff against the default branch, the wrong scope for a stacked
+PR; by URL it stops, and the round fails rather than review the wrong diff. It runs with
+`--max-findings all`: without
+it, `/code-review` reports only up to its level's limit, or up to the limit the user last typed in
+their own sessions, so a round would drop findings past it. A Claude child returns the findings as text: run
+on PR #264, it ran read-only and listed its three findings, each with file, failure scenario and fix.
+A round needs both: if either reviewer fails, the round records no review, because a round recorded
+on half its finders would read as the full sweep. Each round costs about twice as much as with one
+reviewer, which was the trade chosen.
 
 **Why every round runs at high.** Rounds used to be sized from `low` to `max` (`assess.py`): risk set
 the base effort, and a large or complex diff bought one or two steps more, first from the diff's
@@ -711,6 +732,8 @@ review never finished. Verified empirically: no jetsam (OOM) events fired, and s
 calls succeed; only the long review child was killed, and only when spawned as a grandchild of a
 managed session. A subagent is a sub-task *inside the already-alive session process* — there is
 no second `claude` to reap — so it keeps the reaping fix while restoring reviewer independence.
+The reviewers are not grandchildren of the session either: T3 Code runs each `delegate_task` child,
+the `/code-review` one included, as a thread of its own, outside the session's process tree.
 
 **Dedup is semantic, not string-based.** An even earlier design fingerprinted `sha1(file +
 title)`, but two reviews word the same bug differently every time, so a title fingerprint almost

@@ -819,9 +819,12 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
     assert parse_block(stored["body"])["review_budget_run"] is None
 
 
-def test_reviewer_prints_the_default(capsys):
+def test_reviewer_prints_both_reviewers_of_a_round(capsys):
     cli.main(["reviewer"])
-    assert capsys.readouterr().out == "Default reviewer: provider codex, model family sol\n"
+    assert capsys.readouterr().out == (
+        "Default reviewer: provider codex, model family sol\n"
+        "/code-review reviewer: provider claudeAgent, model family opus, runs `/code-review high <PR URL> --max-findings all`\n"
+    )
 
 
 # Each model's `options` as `orchestrator_capabilities` listed them on 2026-11-26.

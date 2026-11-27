@@ -20,7 +20,7 @@ them, `unwatch_pull_request` if you watched the PR.
   escalated with your recommendation.
 - `YOUR CALL`: something only the user can decide, asked with its options and your recommendation.
 - `MERGED`: the PR is in; `Skill(ship:close)` closes it out.
-- `STOPPED`: the reviewer can't run, the fix waits on something only the user has, or the user
+- `STOPPED`: a reviewer can't run, the fix waits on something only the user has, or the user
   stopped the run; released on the record (`feature release --reason "…"`).
 
 **Never ship debt.** Every problem, at every severity including `low`, is fixed or, if it isn't
@@ -49,13 +49,13 @@ the same way twice.
 
 1. **Review.** A review round, with `args` naming the PR and anything the user asked of the
    review (a fresh one past an `OPEN` gate). If the user named a reviewer ("ship
-   it, review with Claude"), name it in every round's `args` for the whole run; otherwise the
+   it, review with Gemini"), name it in every round's `args` for the whole run; otherwise the
    round takes the default. Then `EnterWorktree` with `path: <worktree>` from its report (never
    `name:`), unless you're in it.
    - `Blocked:` no PR, or its base isn't the tracked parent: open a draft against the parent (`gh
      pr create --draft --base <parent>`) or retarget it (`gh pr edit <PR#> --base <parent>`), and
      review again.
-   - `Blocked:` the reviewer unavailable or failing: end `STOPPED` with its error, releasing the
+   - `Blocked:` a reviewer unavailable or failed: end `STOPPED` with its error, releasing the
      branch if this session holds it.
    - `Gate: MERGED`: end `MERGED`.
    - `Gate: REDESIGN`: step 3's fix round is a redesign.

@@ -253,6 +253,11 @@ def cmd_describe(args: argparse.Namespace) -> None:
 
 def cmd_reviewer(_args: argparse.Namespace) -> None:
     print(f"Default reviewer: provider {reviewer.DEFAULT.provider}, model family {reviewer.DEFAULT.family}")
+    code = reviewer.CODE_REVIEW
+    print(
+        f"/code-review reviewer: provider {code.provider}, model family {code.family}, "
+        f"runs `{reviewer.code_review_command('<PR URL>')}`"
+    )
 
 
 def cmd_effort(args: argparse.Namespace) -> None:
@@ -1232,12 +1237,14 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_describe)
 
-    c = sub.add_parser("reviewer", help="T3 provider and model family that review a PR when the user names none")
+    c = sub.add_parser(
+        "reviewer", help="T3 provider and model family of each reviewer: the default, and Claude's /code-review"
+    )
     c.set_defaults(func=cmd_reviewer)
 
     c = sub.add_parser(
         "effort",
-        help=f"The delegate_task options that run the reviewer's model at the review effort ({reviewer.EFFORT})",
+        help=f"The delegate_task options that run a reviewer's model at the review effort ({reviewer.EFFORT})",
     )
     c.add_argument(
         "--model-options",

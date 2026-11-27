@@ -2,7 +2,7 @@
 
 A CLI and hooks for running multiple Claude features in parallel. A feature starts as
 a branch, a worktree and a draft PR (the `start` skill); when it's shipped (the `ship` skill) it
-gets a GitHub tracking issue and a review by another model, through T3, at high reasoning
+gets a GitHub tracking issue and a review by two reviewers, through T3, at high reasoning
 effort: real defects, plus spec gaps, design smells and the flaws its new comments
 cover, and the reviewer's grade of the PR's risk and complexity goes into the PR body. Features can be **stacked** on each
 other (via git-town). Review-found problems are tracked as GitHub sub-issues, and a **merge
@@ -12,7 +12,7 @@ open problems) from GitHub. Once the PR merges, the `close` skill closes the fea
 records what shipped and closes the tracking issue, and never reviews.
 
 A ship run doesn't stop at the review. It fixes every problem the review files and reviews again
-until the gate settles. Each round runs in a background subagent, where the reviewer finds blind, and each
+until the gate settles. Each round runs in a background subagent, where two reviewers find blind, and each
 round's fixes run in another, so the caller's thread keeps only their reports and stays free to
 talk to the user while a round runs. Then it babysits the PR
 until it's ready to merge: a failed check or a reviewer's comment becomes a problem like the
@@ -90,13 +90,18 @@ chmod +x ~/.local/bin/feature
   git config --add feature.sensitive-path 'migrations/*'
   ```
 
-Reviews are run by the **reviewer**, delegated through T3 Code (`delegate_task`) at high reasoning
-effort, every round: a T3 provider instance and a model family, of which a round takes
-the newest model the provider lists. The default is in code (`reviewer.DEFAULT`, printed by
-`feature reviewer`); the user picks another for one run by naming it: "ship it, review with
-Claude". Models name their effort option differently, so `feature
-effort` reads it from the chosen model's options as T3 lists them. The reviewer gets the **PR by number** and nothing about
-earlier rounds, so each re-run finds blind; the `review` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run
+Every round runs **two reviewers** side by side, each delegated through T3 Code (`delegate_task`)
+at high reasoning effort: a T3 provider instance and a model family, of which a round takes the
+newest model the provider lists. **The reviewer** works from ship's own brief (defects, spec gaps,
+design smells, comments, and the grade); its default is of another model family than the author's
+(`reviewer.DEFAULT`), and the user picks another for one run by naming it: "ship it, review with
+Gemini". **The `/code-review` reviewer** is Claude running Claude Code's `/code-review high`
+with every finding it has (`reviewer.CODE_REVIEW`), which brings its own finders; it runs every
+round, so naming Claude as the reviewer makes both reviewers Claude. `feature reviewer` prints both. Models name
+their effort option differently, so `feature effort` reads it from the chosen model's options as
+T3 lists them. Both get the **PR by number** and nothing about earlier rounds, so each re-run finds
+blind; the `review` skill's forked subagent then merges the two reviewers' findings, dedups them
+against tracked problems, files the new ones, and records the run
 via this CLI. A linked PR is required — the PR diff defines the review scope (correct even for
 stacked branches), and `feature review record` refuses to run without one. There is no headless
 review subcommand.
@@ -107,7 +112,7 @@ review subcommand.
 feature start add-oauth --body "Users want Google login."   # branch + worktree + draft PR
 # ... work, commit, push; then, to ship:
 feature adopt                                  # labels, tracking issue; links the open PR
-# the reviewer reviews PR #123 at high effort, the skill dedups vs tracked problems, then:
+# both reviewers review PR #123 at high effort, the skill merges and dedups vs tracked problems, then:
 feature problem add --title "…" --sev high    # file each genuinely-new problem
 feature review record --sha $(git rev-parse HEAD) --found 46 47 48 49 50 \
     --summary "Token refresh race + unchecked PKCE verifier; 3 nits filed as low" \
@@ -134,7 +139,7 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature start <name> --body <motivation> [--base <b>] [--title <t>]` | Branch (off the fetched remote base) + worktree + empty first commit, pushed, + draft PR. No tracking issue. |
 | `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking: tracking issue, linked PR. |
 | `feature describe --body-file <f\|-> [--title <t>] [--attach <file>]…` | Replace the PR's description (and title). Pass it with or without ship's block (e.g. the fetched body, edited); the PR keeps exactly one. Each `--attach` uploads a screencast or screenshot, and `![](./<file>)` in the body becomes it. |
-| `feature reviewer` | The T3 provider and model family that review a PR when the user names none. |
+| `feature reviewer` | The T3 provider and model family of both reviewers of a round: the default reviewer (when the user names none) and the `/code-review` reviewer, with the command it runs. |
 | `feature effort --model-options <json>` | The `delegate_task` options that run a model at high reasoning effort, from its `options` as `orchestrator_capabilities` lists them: the option whose values run `low`…`max`. Refuses a model that has none. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
@@ -205,7 +210,7 @@ See "Driving the loop to the end" and "The merge guard" in [docs/design.md](docs
 ## Claude skills
 
 `skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (review, fix, review
-again to the gate, then babysit it to ready); `skills/review/SKILL.md` is one round of that (the reviewer's review,
+again to the gate, then babysit it to ready); `skills/review/SKILL.md` is one round of that (both reviewers' review,
 triage, filing, in a fork); `skills/close/SKILL.md` closes it out after the merge. Keep them in sync with the
 CLI: when you add or change a command, update the SKILL.md files in the same commit.
 
