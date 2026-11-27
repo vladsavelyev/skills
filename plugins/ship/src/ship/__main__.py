@@ -65,14 +65,14 @@ def _blocking(issue: int) -> list[dict]:
     return problems.blocking(github.sub_issues(issue))
 
 
-def _reconcile_block(feat: feature.Snapshot, number: int) -> None:
-    """Re-render the PR's ship block from the feature's problems as GitHub has them now, once a command
-    has changed problem `number`, if a review round found it: that round's line shows only once every
-    problem it found is closed (`assess.render`). Read after the change, not from `feat`: another
-    command may have changed a problem since `feat` was read."""
+def _reconcile_block(branch: str, number: int) -> None:
+    """Re-render the PR's ship block from the feature as GitHub has it now, once a command has changed
+    problem `number`, if a review round found it: that round's line shows only once every problem it
+    found is closed (`assess.render`)."""
+    feat = feature.snapshot(branch)
     if feat.state["pr"] is None or number not in found_in(feat.state["review_history"]):
         return
-    _write_block(feat.state, feat.issue)
+    _write_block(feat)
 
 
 # ── commands ────────────────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ def cmd_adopt(args: argparse.Namespace) -> None:
         state["pr"] = pr
         set_status(state, "in-review")
         _save_state(issue, body, state)
-        _write_block(state, issue)
+        _write_block(feature.Snapshot(issue, state, body, github.sub_issues(issue)))
         github.comment(issue, f"🔗 Linked PR #{pr}.")
 
     print(f"Adopted existing branch '{name}'")
@@ -193,7 +193,7 @@ def cmd_pr(args: argparse.Namespace) -> None:
     _save_state(issue, body, state)
     # Native link: `closes #<issue>` in the PR body so GitHub shows the connection in the PR
     # sidebar and the issue timeline — not just a comment that no linked-issues view reads.
-    _write_block(state, issue)
+    _write_block(feature.Snapshot(issue, state, body, github.sub_issues(issue)))
     github.comment(issue, f"🔗 Linked PR #{args.number}.")
     print(f"Linked PR #{args.number} to feature #{issue}")
 
@@ -216,20 +216,20 @@ def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
     return depth, size, files, lines, why
 
 
-def _block_content(state: dict, issue: int, subs: list[dict] | None = None) -> str:
-    """The content of the PR body's ship block, rendered from `state`: the reference to `issue`, and
+def _block_content(feat: feature.Snapshot) -> str:
+    """The content of the PR body's ship block, rendered from `feat`: the reference to its issue, and
     once a review has graded the PR, the reviewer's latest grade and every round whose problems are
     all closed. Every command that writes the block renders it here, so the block always shows the
-    current state. `subs` are the feature's problems, when the caller has them; otherwise they're
-    read here, and only once a review has graded the PR, since before that no round's line shows."""
+    current state."""
+    state = feat.state
     # `feature reconcile` reads schema-1 states too; those predate grading, so they show the
     # reference alone.
     history = state["review_history"] if state["schema"] == SCHEMA else []
     grade = assess.last_grade(history)
     if grade is None:
-        return assess.render(issue=issue, review=None)
+        return assess.render(issue=feat.issue, review=None)
     next_depth, size, files, lines, _ = _next_depth(state)
-    still_open = problems.blocking(github.sub_issues(issue) if subs is None else subs)
+    still_open = problems.blocking(feat.subs)
     review = assess.Review(
         grade=grade,
         size=size,
@@ -239,24 +239,25 @@ def _block_content(state: dict, issue: int, subs: list[dict] | None = None) -> s
         next_depth=next_depth,
         open_problems=frozenset(s["number"] for s in still_open),
     )
-    return assess.render(issue=issue, review=review)
+    return assess.render(issue=feat.issue, review=review)
 
 
-def _write_block(state: dict, issue: int, subs: list[dict] | None = None) -> bool:
-    """Set the linked PR's ship block from `state` and the feature's problems; True if the body changed."""
-    return github.set_pr_block(state["pr"], _block_content(state, issue, subs), issue)
+def _write_block(feat: feature.Snapshot) -> bool:
+    """Set the linked PR's ship block from `feat`; True if the body changed."""
+    return github.set_pr_block(feat.state["pr"], _block_content(feat), feat.issue)
 
 
 def cmd_describe(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    issue, state, _ = feature.load_state(branch)
-    if state["pr"] is None:
+    feat = feature.snapshot(branch)
+    pr = feat.state["pr"]
+    if pr is None:
         sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
-    github.set_pr_description(state["pr"], text, args.title, _block_content(state, issue), args.attach)
-    print(f"Updated the description of PR #{state['pr']}")
+    github.set_pr_description(pr, text, args.title, _block_content(feat), args.attach)
+    print(f"Updated the description of PR #{pr}")
 
 
 def cmd_reviewer(_args: argparse.Namespace) -> None:
@@ -357,7 +358,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
     blocking = problems.blocking(subs)
-    _write_block(state, issue, subs)
+    _write_block(feature.Snapshot(issue, state, body, subs))
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     github.comment(
         issue,
@@ -439,7 +440,8 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
 
 def cmd_problem_resolve(args: argparse.Namespace) -> None:
     """Close a fixed problem, recording its fix commits for the gate (`gate.needs_review`)."""
-    feat = feature.snapshot(args.branch or current_branch())
+    branch = args.branch or current_branch()
+    feat = feature.snapshot(branch)
     sub = feat.problem(args.number)
     commits = [full_sha(c) for c in args.commit]
     if commits:
@@ -448,7 +450,7 @@ def cmd_problem_resolve(args: argparse.Namespace) -> None:
         _save_state(feat.issue, feat.body, feat.state)
     note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
     github.close_issue(args.number, note)
-    _reconcile_block(feat, args.number)
+    _reconcile_block(branch, args.number)
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
@@ -459,7 +461,8 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     without changing code. Nothing ships as debt: there is no "open but not blocking" disposition,
     so a problem that matters is fixed, and one that doesn't is closed here with the reason on it.
     """
-    feat = feature.snapshot(args.branch or current_branch())
+    branch = args.branch or current_branch()
+    feat = feature.snapshot(branch)
     sub = feat.problem(args.number)
     if sub["state"] == "OPEN":
         # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
@@ -470,7 +473,7 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
         github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
     elif not problems.is_wontfix(sub):
         sys.exit(f"#{args.number} is already closed.")
-    _reconcile_block(feat, args.number)
+    _reconcile_block(branch, args.number)
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
@@ -525,13 +528,14 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
     problem was closed as `wontfix` with a repro that changes the call. Reopening is all it takes to
     block again; the `wontfix` label goes too, so the record doesn't call a live problem irrelevant.
     """
-    feat = feature.snapshot(args.branch or current_branch())
+    branch = args.branch or current_branch()
+    feat = feature.snapshot(branch)
     sub = feat.problem(args.number)
     stale = problems.WONTFIX in sub["labels"]
     # An open problem still labelled `wontfix` is a block whose label removal failed after the reopen;
     # the re-run finishes it rather than refusing.
     if sub["state"] == "OPEN" and not stale:
-        _reconcile_block(feat, args.number)
+        _reconcile_block(branch, args.number)
         print(f"#{args.number} is open, so it already blocks the gate.")
         return
     # Reopen first: if removing the label fails afterwards, the problem is open and blocks with a
@@ -539,7 +543,7 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
     # looking fixed.
     if sub["state"] != "OPEN":
         github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
-    _reconcile_block(feat, args.number)
+    _reconcile_block(branch, args.number)
     if stale:
         github.remove_label(args.number, problems.WONTFIX)
     github.comment(args.number, f"⛔ Blocking again: {args.reason}")
@@ -989,7 +993,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
                 # Whether the body actually needs an edit is only knowable by reading it, which is
                 # what the real run does — don't claim a count here that a dry run can't know.
                 print(f"#{issue} ({row['title']}): PR #{pr} open → block repaired if stale{stale}")
-            elif _write_block(state, issue):
+            elif _write_block(feature.Snapshot(issue, state, row["body"], github.sub_issues(issue))):
                 print(f"#{issue} ({row['title']}): block repaired — PR #{pr} closes it on merge{stale}")
                 repaired += 1
             continue

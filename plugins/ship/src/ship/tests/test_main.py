@@ -108,6 +108,7 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
     monkeypatch.setattr(github, "open_pr_for_branch", lambda name: pr)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
+    monkeypatch.setattr(github, "sub_issues", lambda issue: [])
     monkeypatch.setattr(github, "set_pr_block", lambda number, quote, issue: True)
     monkeypatch.setattr(github, "comment", lambda issue, text: None)
     monkeypatch.setattr(github, "init_labels", lambda: None)
@@ -928,8 +929,11 @@ def test_two_overlapping_closes_of_a_rounds_last_problems_show_its_line(monkeypa
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med"), _problem(38, "sev:low")]
     state = _graded_state()
     blocks = _stub_pr_block(monkeypatch, state, subs)
-    read_before_either = [feature.snapshot("add-oauth"), feature.snapshot("add-oauth")]
-    monkeypatch.setattr(feature, "snapshot", lambda branch: read_before_either.pop())
+    fresh = feature.snapshot
+    stale = feature.snapshot("add-oauth")
+    # Each command reads the feature at its start, from before either close, and again once it closed its problem.
+    reads = iter([stale, None, stale, None])
+    monkeypatch.setattr(feature, "snapshot", lambda branch: next(reads) or fresh(branch))
     cli.main(["problem", "resolve", "36", "--commit", "c3", "--branch", "add-oauth"])
     cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
     assert _ROUND_2 in blocks[-1]
@@ -963,7 +967,7 @@ def test_a_block_written_while_a_problem_reopens_is_written_over(monkeypatch):
     concurrent: list[str] = []
 
     def reopen_meanwhile(number, note):
-        concurrent.append(cli._block_content(state, 7, list(subs)))
+        concurrent.append(cli._block_content(feature.Snapshot(7, state, "", list(subs))))
         blocks.append(concurrent[-1])
         reopen(number, note)
 
@@ -971,6 +975,28 @@ def test_a_block_written_while_a_problem_reopens_is_written_over(monkeypatch):
     cli.main(["problem", "block", "36", "--reason", "back again", "--branch", "add-oauth"])
     assert _ROUND_2 in concurrent[0]
     assert "Review round 2" not in blocks[-1]
+
+
+def test_a_round_recorded_while_a_problem_closes_stays_in_the_block(monkeypatch):
+    """#241: another session records round 3 while `wontfix` closes #38, so the block the wontfix
+    writes is rendered from the feature as it is after the close, round 3 and all."""
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED"), _problem(38, "sev:low")]
+    state = _graded_state()
+    blocks = _stub_pr_block(monkeypatch, state, subs)
+    later = json.loads(json.dumps(state))
+    round_3 = {"run": 3, "sha": "c3", "depth": "xhigh", "found": {}, "new_blocking": 0, "new_low": 0}
+    later["review_history"].append(round_3 | {"regressions": 0, "regressed": [], "summary": "", "grade": {}})
+    later["review_history"][-1]["grade"] = state["review_history"][-1]["grade"] | {"risk": "high"}
+    later["review_runs"], later["last_review"] = 3, later["review_history"][-1]
+    close = github.close_issue
+
+    def close_meanwhile(number, note, not_planned=False):
+        close(number, note, not_planned)
+        monkeypatch.setattr(feature, "load_state", lambda branch: (7, later, render_block(later)))
+
+    monkeypatch.setattr(github, "close_issue", close_meanwhile)
+    cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
+    assert "Review round 3" in blocks[-1] and _ROUND_2 in blocks[-1]
 
 
 def test_closing_a_problem_no_round_found_leaves_the_block_alone(monkeypatch):
