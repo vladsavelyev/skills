@@ -1,6 +1,6 @@
 """How many review rounds a feature is worth — pure sizing logic.
 
-A review round is a full independent sweep of the PR by a subagent: the most expensive thing
+A review round is a full independent sweep of the PR by two reviewers: the most expensive thing
 this workflow does. So the number of rounds is bounded, and the bound scales with the risk the
 diff actually carries — a two-file tweak does not deserve the same spend as a 900-line change
 to authentication. The budget is what turns "review until clean" (unbounded) into "review until

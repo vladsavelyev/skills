@@ -256,7 +256,7 @@ def cmd_reviewer(_args: argparse.Namespace) -> None:
     code = reviewer.CODE_REVIEW
     print(
         f"/code-review reviewer: provider {code.provider}, model family {code.family}, "
-        f"runs `{reviewer.code_review_command('<PR number>')}`"
+        f"runs `{reviewer.code_review_command('<PR URL>')}`"
     )
 
 

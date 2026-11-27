@@ -80,23 +80,27 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    - **the `/code-review` reviewer**, running Claude Code's `/code-review` as `feature reviewer`
      prints it, with the task after the brief.
 
-   For each, load the T3 tools with ToolSearch, call `orchestrator_capabilities` with `search:
-   "<the name or family>"`, and take the provider that offers it and the newest model of that
-   family it lists. `feature effort --model-options '<that model's options array, as listed>'`
-   prints the `delegate_task` options that run it at high reasoning effort, the effort of every
-   round: never set another, whatever the PR. Start both in one message, each a `delegate_task`
-   with `mode: "wait"`, `role: "review"`, `timeoutMs: 45000` (the most the tool takes; a timeout
-   doesn't cancel the child), and `target: {providerInstanceId: "<provider>", model: <model>,
-   options: <its printed options>}`.
+   Load the T3 tools with ToolSearch and call `orchestrator_capabilities` once, for both: take
+   for each the provider that offers its family and the newest model of that family listed. Only
+   a family missing from that list gets a second call, with `search: "<the name or family>"`.
+   `feature effort --model-options '<that model's options array, as listed>'` prints the
+   `delegate_task` options that run it at high reasoning effort, the effort of every round: never
+   set another, whatever the PR. Start both in one message, each a `delegate_task` with `mode:
+   "wait"`, `role: "review"`, `timeoutMs: 45000` (the most the tool takes; a timeout doesn't
+   cancel the child), and `target: {providerInstanceId: "<provider>", model: <model>, options:
+   <its printed options>}`. Keep both task ids.
    Both tasks carry nothing about tracked problems or earlier rounds: the reviewers must find
    without them. Fill the user's request in the brief from the `Last prompt` line of `feature
    status`. A review runs longer than the wait: when one comes back unfinished, call
    `t3_thread_wait` on its child thread, and again each time that returns unfinished, until both
    runs finish, even where a result says to end your turn. You run as a subagent, so ending your
-   turn ends the round without a review. Never cancel one or review yourself instead. If no model
-   of a family is listed, `feature effort` refuses it, or either task comes back failed (an auth
-   or gateway error, a crash, or the `/code-review` reviewer's "review failed"), stop: record no review, put that reviewer's error verbatim in the
-   report, and don't substitute another reviewer or record the round on one reviewer's findings.
+   turn ends the round without a review. Never cancel a running reviewer to review yourself
+   instead. The round fails, and you stop, when no model of a family is listed, `feature effort`
+   refuses it, either task comes back failed (an auth or gateway error, a crash, or the
+   `/code-review` reviewer's "review failed"), or either waits on a question or an approval:
+   nobody here answers it. Then `task_cancel` the other if it's still running, record no review,
+   put the failing reviewer's error or question verbatim in the report, and don't substitute
+   another reviewer or record the round on one reviewer's findings.
 
    The reviewer's brief:
    ```
@@ -192,16 +196,16 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
      invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
-   The `/code-review` reviewer's task, with the command `feature reviewer` printed, for PR #<n>:
+   The `/code-review` reviewer's task, with the command `feature reviewer` printed, given PR
+   #<n>'s URL (`https://github.com/<owner/repo>/pull/<n>`). By URL, `/code-review` stops when it
+   can't read the PR's diff, rather than review the checkout's own diff against the default branch.
    ```
    Run `<that command>` on PR #<n> in <owner/repo>. The PR's branch is checked out at
    <worktree abs path>; read code only there, never another checkout. Read-only: no edits,
    commits, pushes or GitHub comments, and don't pass --comment or --fix. When it finishes,
    write every finding it reported in your final message as plain text, one per finding: title,
    severity, file:line, failure scenario, evidence and fix. If it reported none, say so.
-   If it couldn't read the PR's diff and reviewed the checked-out branch instead, it diffed
-   against the default branch. When the PR's base, <base>, isn't the default branch, that isn't
-   this PR's diff: report the review failed, quoting its sentence, and no findings.
+   If it says nothing was reviewed, report the review failed, quoting its sentence.
    ```
 4. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
 5. **Verify and dedup each finding** of both reviewers against the real code:
