@@ -1,5 +1,3 @@
-"""Ship's own files on this machine, kept outside any repo: the sessions' holds and the features' locks."""
-
 import os
 from pathlib import Path
 

@@ -964,8 +964,6 @@ def test_wontfix_still_refuses_a_problem_closed_as_fixed(monkeypatch):
 
 
 def test_two_overlapping_closes_of_a_rounds_last_problems_show_its_line(monkeypatch, tmp_path):
-    """Another machine, whose lock is its own, resolves #36 while `wontfix` is closing #38: both read the feature
-    while #36 and #38 were open."""
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med"), _problem(38, "sev:low")]
     blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
     add_label = github.add_label
@@ -1123,8 +1121,6 @@ def test_the_write_keeps_an_edit_to_the_prose_around_the_block(monkeypatch):
 
 
 class _Repo:
-    """GitHub as `feature reconcile` sees it: one feature issue #7 tracking `add-oauth`, and its PRs."""
-
     def __init__(self, monkeypatch, state: dict, prs: dict[int, str]):
         self.issue = {"number": 7, "title": "A feature", "state": "OPEN", "body": render_block(state)}
         self.prs = prs
@@ -1155,8 +1151,7 @@ class _Repo:
     def change(self, **fields) -> None:
         self.issue["body"] = render_block(self.state | fields)
 
-    def meanwhile(self, monkeypatch, other) -> None:
-        """Run `other` as another command would: before reconcile gets the feature's lock."""
+    def before_lock(self, monkeypatch, other) -> None:
         locked = feature.locked
 
         @contextmanager
@@ -1237,7 +1232,7 @@ def test_reconcile_reports_a_schema_1_block_it_cannot_upgrade(monkeypatch, capsy
 
 def test_reconcile_leaves_a_feature_another_command_closed_out_meanwhile(monkeypatch, capsys):
     repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
-    repo.meanwhile(monkeypatch, lambda: repo.change(status="merged"))
+    repo.before_lock(monkeypatch, lambda: repo.change(status="merged"))
     cli.main(["reconcile"])
     assert repo.notes == [] and repo.issue["state"] == "OPEN"
     assert "changed by another command meanwhile" in capsys.readouterr().out
@@ -1245,7 +1240,7 @@ def test_reconcile_leaves_a_feature_another_command_closed_out_meanwhile(monkeyp
 
 def test_reconcile_leaves_a_feature_relinked_to_a_new_pr_meanwhile(monkeypatch, capsys):
     repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED", 124: "OPEN"})
-    repo.meanwhile(monkeypatch, lambda: repo.change(pr=124))
+    repo.before_lock(monkeypatch, lambda: repo.change(pr=124))
     cli.main(["reconcile"])
     assert (repo.state["pr"], repo.state["status"], repo.issue["state"]) == (124, "in-review", "OPEN")
     assert "changed by another command meanwhile" in capsys.readouterr().out
@@ -1253,7 +1248,7 @@ def test_reconcile_leaves_a_feature_relinked_to_a_new_pr_meanwhile(monkeypatch, 
 
 def test_reconcile_refuses_a_schema_it_never_wrote_that_a_block_got_meanwhile(monkeypatch, capsys):
     repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
-    repo.meanwhile(monkeypatch, lambda: repo.change(schema=99))
+    repo.before_lock(monkeypatch, lambda: repo.change(schema=99))
     with pytest.raises(SystemExit, match="Fix those by hand"):
         cli.main(["reconcile"])
     assert repo.blocks == [] and "#7: state block has unknown schema 99" in capsys.readouterr().out
@@ -1261,7 +1256,7 @@ def test_reconcile_refuses_a_schema_it_never_wrote_that_a_block_got_meanwhile(mo
 
 def test_reconcile_reports_a_block_mangled_meanwhile_as_unreadable(monkeypatch, capsys):
     repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
-    repo.meanwhile(monkeypatch, lambda: repo.issue.update(body="The block was deleted by hand."))
+    repo.before_lock(monkeypatch, lambda: repo.issue.update(body="The block was deleted by hand."))
     with pytest.raises(SystemExit, match="Fix those by hand"):
         cli.main(["reconcile"])
     assert repo.notes == [] and "1 feature issue(s) could not be reconciled" in capsys.readouterr().out

@@ -267,7 +267,6 @@ def gate_for(branch: str) -> tuple[int, dict, list[dict], gate.GateDecision]:
 
 
 def judge(branch: str, issue: int, state: dict) -> tuple[list[dict], gate.GateDecision]:
-    """The open problems of the feature whose state is `state`, and its gate."""
     subs = github.sub_issues(issue)
     return problems.blocking(subs), decide(branch, state, subs, pr_merged(state))
 

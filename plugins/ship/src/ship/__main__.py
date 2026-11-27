@@ -80,8 +80,6 @@ def _reconcile_block(branch: str, number: int) -> None:
 
 
 def _open_feature_issue(name: str, base: str, title: str | None, pr: int | None) -> feature.Snapshot:
-    """Create the tracking issue with an initial state block, linked to `pr` if there is one, and wire it to the
-    branch."""
     state = new_state(branch=name, base=base, updated=_now())
     if pr is not None:
         state["pr"] = pr
