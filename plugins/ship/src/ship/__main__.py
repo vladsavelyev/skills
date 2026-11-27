@@ -65,41 +65,13 @@ def _blocking(issue: int) -> list[dict]:
     return problems.blocking(github.sub_issues(issue))
 
 
-def _feature_problems(branch: str, number: int) -> tuple[dict, list[dict]]:
-    """Return `number` as a problem sub-issue of this feature, with all of the feature's problems,
-    aborting if it isn't one.
-
-    Resolving and disposing edit exactly the state the gate reads. Pointed at the wrong number —
-    a typo, a PR number, the feature issue itself — they would quietly change what blocks a merge
-    or close something unrelated. One API call to rule it out is worth it, and the problems it
-    returns are what re-renders the PR's block afterwards (`_show_problem_change`).
-    """
-    parent = feature.resolve_issue(branch)
-    subs = github.sub_issues(parent)
-    sub = next((s for s in subs if s["number"] == number), None)
-    if sub is None:
-        sys.exit(
-            f"#{number} is not a problem sub-issue of feature #{parent} — refusing to touch it. "
-            f"Run `feature problem list` to see this feature's problems."
-        )
-    return sub, subs
-
-
-def _require_problem(branch: str, number: int) -> dict:
-    return _feature_problems(branch, number)[0]
-
-
-def _show_problem_change(
-    branch: str, subs: list[dict], number: int, now: str, loaded: tuple[int, dict, str] | None = None
-) -> None:
+def _show_problem_change(feat: feature.Snapshot, number: int, now: str) -> None:
     """Re-render the PR's ship block now that problem `number` is `now` (`OPEN` or `CLOSED`), if a
     review round found it: that round's line shows only once every problem it found is closed
-    (`assess.render`). `subs` are the feature's problems as `_feature_problems` read them, so this
-    costs no second sub-issue query. `loaded` is the feature state if the caller already has it."""
-    issue, state, _ = loaded or feature.load_state(branch)
-    if state["pr"] is None or number not in found_in(state["review_history"]):
+    (`assess.render`)."""
+    if feat.state["pr"] is None or number not in found_in(feat.state["review_history"]):
         return
-    _write_block(state, issue, [s | {"state": now} if s["number"] == number else s for s in subs])
+    _write_block(feat.state, feat.issue, [s | {"state": now} if s["number"] == number else s for s in feat.subs])
 
 
 # ── commands ────────────────────────────────────────────────────────────────
@@ -433,9 +405,9 @@ def _make_room(parent: int) -> None:
     print(f"Unlinked closed problem #{oldest} from #{parent}: GitHub allows {SUB_ISSUE_LIMIT} sub-issues.")
 
 
-def _require_fixed(branch: str, number: int) -> None:
-    """Abort unless `number` is a problem of this feature that was fixed, so a new one can repeat it."""
-    sub = _require_problem(branch, number)
+def _require_fixed(feat: feature.Snapshot, number: int) -> None:
+    """Abort unless `number` is a problem of the feature that was fixed, so a new one can repeat it."""
+    sub = feat.problem(number)
     if sub["state"] == "OPEN":
         sys.exit(
             f"#{number} is still open, so nothing came back after a fix. If the finding means the same "
@@ -459,7 +431,7 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
     else:
         detail = args.body or f"Found during review of feature #{parent}."
     if args.repeats is not None:
-        _require_fixed(branch, args.repeats)
+        _require_fixed(feature.snapshot(branch), args.repeats)
         detail = problems.with_repeat(detail, args.repeats)
     child = _add_problem(parent, args.title, args.sev, detail)
     print(f"Added problem #{child} ({args.sev}) under feature #{parent}")
@@ -467,19 +439,17 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
 
 def cmd_problem_resolve(args: argparse.Namespace) -> None:
     """Close a fixed problem, recording its fix commits for the gate (`gate.needs_review`)."""
-    branch = args.branch or current_branch()
-    sub, subs = _feature_problems(branch, args.number)
+    feat = feature.snapshot(args.branch or current_branch())
+    sub = feat.problem(args.number)
     commits = [full_sha(c) for c in args.commit]
-    loaded = None
     if commits:
         # State first: if the close fails, the problem still blocks, and a re-run records nothing twice.
-        loaded = issue, state, body = feature.load_state(branch)
-        record_fix(state, args.number, commits)
-        _save_state(issue, body, state)
+        record_fix(feat.state, args.number, commits)
+        _save_state(feat.issue, feat.body, feat.state)
     note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
     github.close_issue(args.number, note)
     # After the close: if the block's write fails, its round's line stays hidden, never shown early.
-    _show_problem_change(branch, subs, args.number, "CLOSED", loaded)
+    _show_problem_change(feat, args.number, "CLOSED")
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
@@ -490,8 +460,8 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     without changing code. Nothing ships as debt: there is no "open but not blocking" disposition,
     so a problem that matters is fixed, and one that doesn't is closed here with the reason on it.
     """
-    branch = args.branch or current_branch()
-    sub, subs = _feature_problems(branch, args.number)
+    feat = feature.snapshot(args.branch or current_branch())
+    sub = feat.problem(args.number)
     if sub["state"] != "OPEN":
         sys.exit(f"#{args.number} is already closed.")
     # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
@@ -501,7 +471,7 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     github.add_label(args.number, problems.WONTFIX)
     github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
     # After the close: if the block's write fails, its round's line stays hidden, never shown early.
-    _show_problem_change(branch, subs, args.number, "CLOSED")
+    _show_problem_change(feat, args.number, "CLOSED")
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
@@ -512,11 +482,11 @@ def cmd_problem_hand_off(args: argparse.Namespace) -> None:
     the gate exists to stop; after it, the fix needs a new PR anyway, and the feature's close-out
     shouldn't wait for one. A PR closed unmerged never landed its problems: those close as `wontfix`.
     """
-    branch = args.branch or current_branch()
-    sub = _require_problem(branch, args.number)
+    feat = feature.snapshot(args.branch or current_branch())
+    sub = feat.problem(args.number)
     if sub["state"] != "OPEN":
         sys.exit(f"#{args.number} is already closed.")
-    _, state, _ = feature.load_state(branch)
+    state = feat.state
     pr_state = github.pr_state(state["pr"]) if state["pr"] is not None else None
     if pr_state != "MERGED":
         sys.exit(
@@ -556,8 +526,8 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
     problem was closed as `wontfix` with a repro that changes the call. Reopening is all it takes to
     block again; the `wontfix` label goes too, so the record doesn't call a live problem irrelevant.
     """
-    branch = args.branch or current_branch()
-    sub, subs = _feature_problems(branch, args.number)
+    feat = feature.snapshot(args.branch or current_branch())
+    sub = feat.problem(args.number)
     stale = problems.WONTFIX in sub["labels"]
     # An open problem still labelled `wontfix` is a block whose label removal failed after the reopen;
     # the re-run finishes it rather than refusing.
@@ -565,7 +535,7 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
         sys.exit(f"#{args.number} is open, so it already blocks the gate.")
     # Before the reopen: its round's line goes first, so a failure in between leaves it hidden, never
     # showing a round whose problem is open again; the re-run finishes the reopen.
-    _show_problem_change(branch, subs, args.number, "OPEN")
+    _show_problem_change(feat, args.number, "OPEN")
     # Reopen first: if removing the label fails afterwards, the problem is open and blocks with a
     # stale label, which a re-run fixes. The other order could leave it closed and unlabelled,
     # looking fixed.

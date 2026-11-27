@@ -271,9 +271,7 @@ def test_a_low_problem_left_open_keeps_the_gate_shut(monkeypatch):
 
 def _stub_problem_edits(monkeypatch, sub: dict) -> list[str]:
     did: list[str] = []
-    monkeypatch.setattr(cli, "_feature_problems", lambda branch, number: (sub, [sub]))
-    # No round found it, so the PR's block stays as it is.
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
+    monkeypatch.setattr(feature, "snapshot", lambda branch: feature.Snapshot(7, _merged_state(), "", [sub]))
     monkeypatch.setattr(github, "init_labels", lambda: did.append("init_labels"))
     monkeypatch.setattr(github, "add_label", lambda number, label: did.append(f"add {label}"))
     monkeypatch.setattr(github, "remove_label", lambda number, label: did.append(f"remove {label}"))
@@ -454,8 +452,9 @@ def test_a_round_outside_a_claude_session_refuses(monkeypatch, tmp_path):
 
 def test_closing_a_problem_holds_nobody(monkeypatch, tmp_path):
     _in_session(monkeypatch, tmp_path)
-    monkeypatch.setattr(cli, "_feature_problems", lambda branch, number: (_problem(number, "sev:med"), []))
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
+    monkeypatch.setattr(
+        feature, "snapshot", lambda branch: feature.Snapshot(7, _merged_state(), "", [_problem(5, "sev:med")])
+    )
     monkeypatch.setattr(github, "init_labels", lambda: None)
     monkeypatch.setattr(github, "add_label", lambda number, label: None)
     monkeypatch.setattr(github, "close_issue", lambda number, note, not_planned=False: None)
@@ -467,9 +466,10 @@ def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
     """The gate reads a low problem's fix commits from the state block to let them through unreviewed."""
     did: list[str] = []
     state = _merged_state()
-    monkeypatch.setattr(cli, "_feature_problems", lambda branch, number: (_problem(number, "sev:low"), []))
+    monkeypatch.setattr(
+        feature, "snapshot", lambda branch: feature.Snapshot(7, state, "body", [_problem(5, "sev:low")])
+    )
     monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, "body"))
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, s: did.append(f"save {s['fixes']}"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(f"close {note}"))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=["abc12", "def34"]))
@@ -479,8 +479,9 @@ def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
 
 def test_resolve_without_a_commit_records_no_fix(monkeypatch):
     did: list[str] = []
-    monkeypatch.setattr(cli, "_feature_problems", lambda branch, number: (_problem(number, "sev:low"), []))
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
+    monkeypatch.setattr(
+        feature, "snapshot", lambda branch: feature.Snapshot(7, _merged_state(), "", [_problem(5, "sev:low")])
+    )
     monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: pytest.fail("wrote the state"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(note))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=[]))
@@ -536,8 +537,9 @@ def _add_args(repeats: int | None = None):
 def _stub_problem_add(monkeypatch, repeated: dict | None) -> list[str]:
     filed: list[str] = []
     monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
-    monkeypatch.setattr(cli, "_require_problem", lambda branch, number: repeated)
-    monkeypatch.setattr(feature, "load_state", lambda branch: pytest.fail("touched the state"))
+    subs = [] if repeated is None else [repeated]
+    monkeypatch.setattr(feature, "snapshot", lambda branch: feature.Snapshot(7, _merged_state(), "", subs))
+    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: pytest.fail("wrote the state"))
 
     def add(parent, title, sev, detail):
         filed.append(detail)
