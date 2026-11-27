@@ -118,7 +118,9 @@ read, which is a command on another machine or a hand edit: writing back would u
 publishes something before that write (a comment, the PR's block, the issue's close) checks the same
 way first (`feature.check`), after it has rendered what it publishes (the PR's block reads the
 problems and the diff), so a conflict already there stops it before anything goes out; one that
-lands while it publishes is refused at the write, naming what went out. What no check can cover is a
+lands while it publishes is refused at the write, naming what went out. Every write of the PR's
+block takes that check, the problem commands' too, which write no state, and a refusal after the
+command did something (linked the PR, closed or reopened a problem) names that. What no check can cover is a
 write from another machine in the instant between that re-read and the edit.
 
 ### The PR body

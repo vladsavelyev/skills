@@ -66,20 +66,20 @@ def _blocking(issue: int) -> list[dict]:
     return problems.blocking(github.sub_issues(issue))
 
 
-def _reconcile_block(branch: str, number: int) -> None:
+def _reconcile_block(branch: str, number: int, *, done: str | None) -> None:
     """Re-render the PR's ship block from the feature as GitHub has it now, once a command has changed
-    problem `number`, if a review round found it: that round's line shows only once every problem it
-    found is closed (`assess.render`)."""
-    feat = feature.snapshot(branch)
-    if feat.state["pr"] is None or number not in found_in(feat.state["review_history"]):
+    problem `number` (`done` names how, for a refusal to say), if a review round found it: that round's
+    line shows only once every problem it found is closed (`assess.render`)."""
+    change = feature.draft(branch)
+    if change.state["pr"] is None or number not in found_in(change.state["review_history"]):
         return
-    _write_block(feat)
+    _publish_block(change, done=done)
 
 
 # ── commands ────────────────────────────────────────────────────────────────
 
 
-def _open_feature_issue(name: str, base: str, title: str | None, pr: int | None) -> feature.Snapshot:
+def _open_feature_issue(name: str, base: str, title: str | None, pr: int | None) -> feature.Draft:
     state = new_state(branch=name, base=base, updated=_now())
     if pr is not None:
         state["pr"] = pr
@@ -92,7 +92,7 @@ def _open_feature_issue(name: str, base: str, title: str | None, pr: int | None)
     )
     issue = github.create_issue(resolved_title, body, labels=["feature"])
     set_feature_issue(name, issue)
-    return feature.Snapshot(issue, state, body, [])
+    return feature.Draft(issue, state, body)
 
 
 def cmd_start(args: argparse.Namespace) -> None:
@@ -168,7 +168,7 @@ def _adopt(args: argparse.Namespace, name: str) -> None:
     github.init_labels()
     feat = _open_feature_issue(name, base, args.title, pr)
     if pr is not None:
-        _write_block(feat)
+        _publish_block(feat, done=f"feature issue #{feat.issue}")
         github.comment(feat.issue, f"🔗 Linked PR #{pr}.")
 
     print(f"Adopted existing branch '{name}'")
@@ -196,7 +196,7 @@ def cmd_pr(args: argparse.Namespace) -> None:
         _save(change)
         # Native link: `closes #<issue>` in the PR body so GitHub shows the connection in the PR
         # sidebar and the issue timeline — not just a comment that no linked-issues view reads.
-        _publish_block(change)
+        _publish_block(change, done=f"the link to PR #{args.number}")
     github.comment(change.issue, f"🔗 Linked PR #{args.number}.")
     print(f"Linked PR #{args.number} to feature #{change.issue}")
 
@@ -245,21 +245,17 @@ def _block_content(feat: feature.Snapshot) -> str:
     return assess.render(issue=feat.issue, review=review)
 
 
-def _write_block(feat: feature.Snapshot) -> bool:
-    """Set the linked PR's ship block from `feat`; True if the body changed."""
-    return github.set_pr_block(feat.state["pr"], _block_content(feat), feat.issue)
-
-
-def _checked_block(change: feature.Draft) -> str:
+def _checked_block(change: feature.Draft, *, done: str | None = None) -> str:
     """The PR's ship block rendered from `change`, checked (`feature.check`) only after the render: rendering reads
     GitHub, and a change to the feature made meanwhile would go out written over."""
     content = _block_content(change.snapshot())
-    feature.check(change)
+    feature.check(change, done=done)
     return content
 
 
-def _publish_block(change: feature.Draft) -> bool:
-    return github.set_pr_block(change.state["pr"], _checked_block(change), change.issue)
+def _publish_block(change: feature.Draft, *, done: str | None = None) -> bool:
+    """Set the linked PR's ship block from `change`, the one way to; True if the body changed."""
+    return github.set_pr_block(change.state["pr"], _checked_block(change, done=done), change.issue)
 
 
 def cmd_describe(args: argparse.Namespace) -> None:
@@ -469,7 +465,11 @@ def cmd_problem_resolve(args: argparse.Namespace) -> None:
             _save(change)
         note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
         github.close_issue(args.number, note)
-        _reconcile_block(branch, args.number)
+        _reconcile_block(
+            branch,
+            args.number,
+            done=f"the record of the fix and #{args.number}'s close" if commits else f"#{args.number}'s close",
+        )
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
@@ -483,7 +483,8 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
     with feature.locked(branch):
         sub = feature.snapshot(branch).problem(args.number)
-        if sub["state"] == "OPEN":
+        closing = sub["state"] == "OPEN"
+        if closing:
             # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
             github.init_labels()
             # Label first, close second: if the close fails, the problem is still open and still blocks,
@@ -492,7 +493,7 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
             github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
         elif not problems.is_wontfix(sub):
             sys.exit(f"#{args.number} is already closed.")
-        _reconcile_block(branch, args.number)
+        _reconcile_block(branch, args.number, done=f"#{args.number}'s close" if closing else None)
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
@@ -564,15 +565,16 @@ def _block_problem(args: argparse.Namespace, branch: str) -> None:
     # An open problem still labelled `wontfix` is a block whose label removal failed after the reopen;
     # the re-run finishes it rather than refusing.
     if sub["state"] == "OPEN" and not stale:
-        _reconcile_block(branch, args.number)
+        _reconcile_block(branch, args.number, done=None)
         print(f"#{args.number} is open, so it already blocks the gate.")
         return
     # Reopen first: if removing the label fails afterwards, the problem is open and blocks with a
     # stale label, which a re-run fixes. The other order could leave it closed and unlabelled,
     # looking fixed.
-    if sub["state"] != "OPEN":
+    reopened = sub["state"] != "OPEN"
+    if reopened:
         github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
-    _reconcile_block(branch, args.number)
+    _reconcile_block(branch, args.number, done=f"#{args.number}'s reopen" if reopened else None)
     if stale:
         github.remove_label(args.number, problems.WONTFIX)
     github.comment(args.number, f"⛔ Blocking again: {args.reason}")

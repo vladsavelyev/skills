@@ -120,19 +120,21 @@ def _canonical(state: dict) -> str:
     return json.dumps(state, sort_keys=True)
 
 
+def draft(branch: str, *, raw: bool = False) -> Draft:
+    """The feature of `branch` read as `changing` reads it, for a command already holding its lock."""
+    return Draft(*load_state(branch, raw=raw))
+
+
 @contextmanager
 def changing(branch: str, *, raw: bool = False) -> Iterator[Draft]:
     """The feature of `branch`, read under its lock for a command that changes it (`raw` as in `load_state`)."""
     with locked(branch):
-        yield Draft(*load_state(branch, raw=raw))
+        yield draft(branch, raw=raw)
 
 
-def _unchanged_body(change: Draft, *, published: str | None = None) -> str:
+def _unchanged_body(change: Draft, *, written: str) -> str:
     current = github.get_issue_body(change.issue)
     if _canonical(parse_block_raw(current)) != change.baseline_json:
-        written = (
-            "nothing was written" if published is None else f"the state wasn't written, though {published} went out"
-        )
         raise StateChanged(
             f"#{change.issue}'s state changed since this command read it, by another machine or by hand. Writing it "
             f"back would undo that change, so {written}: run the command again."
@@ -140,10 +142,13 @@ def _unchanged_body(change: Draft, *, published: str | None = None) -> str:
     return current
 
 
-def check(change: Draft) -> None:
-    """Refuse, as `save` does, if the block changed since `change` was read. A command that publishes something before
-    its state write checks first, so a conflict already there stops it before anything goes out."""
-    _unchanged_body(change)
+def check(change: Draft, *, done: str | None = None) -> None:
+    """Refuse, as `save` does, if the block changed since `change` was read. A command that publishes something checks
+    first, so a conflict already there stops it before that goes out. `done` names what the command did before, for
+    the refusal to say."""
+    _unchanged_body(
+        change, written="nothing was written" if done is None else f"nothing more was written, though {done} went out"
+    )
 
 
 def save(change: Draft, *, updated: str, published: str | None = None) -> None:
@@ -151,7 +156,12 @@ def save(change: Draft, *, updated: str, published: str | None = None) -> None:
     Refuses if the block changed since the read: a command on another machine, which the lock doesn't reach, or a
     hand edit. Writing it back would undo that change. `published` names what the command published before, for the
     refusal to say."""
-    current = _unchanged_body(change, published=published)
+    current = _unchanged_body(
+        change,
+        written="nothing was written"
+        if published is None
+        else f"the state wasn't written, though {published} went out",
+    )
     change.state["updated"] = updated
     change.body = replace_block(current, change.state)
     github.set_issue_body(change.issue, change.body)
