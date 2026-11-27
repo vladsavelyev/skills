@@ -70,9 +70,13 @@ def handed_off(subs: list[dict]) -> list[dict]:
 
 
 def low_fix_commits(fixes: dict[str, list[int]], subs: list[dict]) -> set[str]:
-    """The fix commits (`state.fixes`) whose every problem is `low`."""
+    """The fix commits (`state.fixes`) whose every problem is `low`.
+
+    A problem unlinked at the sub-issue limit (`_make_room`) is no longer in `subs`: its severity
+    is unknown, so its commit isn't counted as low and a review still sees it.
+    """
     sev = {s["number"]: severity(s) for s in subs}
-    return {sha for sha, fixed in fixes.items() if all(sev[n] == LOW_SEV for n in fixed)}
+    return {sha for sha, fixed in fixes.items() if all(sev.get(n) == LOW_SEV for n in fixed)}
 
 
 # The link `feature problem add --repeats` writes into a problem's body, for a human (GitHub
