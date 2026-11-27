@@ -88,7 +88,7 @@ def locked(branch: str) -> Iterator[None]:
     last write: its state block, its problems and its PR's ship block. GitHub replaces an issue or PR body whole and
     has no conditional write, so two commands interleaving would each write back what it read, and the later would
     undo the earlier. A branch of the same name in another repo shares the lock, which only makes one wait. The file
-is named by a digest of the branch: a name git accepts can be longer than a filename may be."""
+    is named by a digest of the branch: a name git accepts can be longer than a filename may be."""
     path = ship_state_dir() / "locks" / f"{hashlib.sha256(branch.encode()).hexdigest()}.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as lock:
