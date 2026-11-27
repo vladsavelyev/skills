@@ -1,6 +1,7 @@
 """Tests for the command-layer logic worth pinning: the merge close-out's ordering and wording."""
 
 import json
+from contextlib import contextmanager
 import threading
 import time
 
@@ -1100,3 +1101,107 @@ def test_the_write_keeps_an_edit_to_the_prose_around_the_block(monkeypatch):
         change.state["review_budget"] = 4
         cli._save(change)
     assert stored["body"].startswith("Notes added by hand.") and parse_block(stored["body"])["review_budget"] == 4
+
+
+class _Repo:
+    """GitHub as `feature reconcile` sees it: one feature issue #7 tracking `add-oauth`, and its PRs."""
+
+    def __init__(self, monkeypatch, state: dict, prs: dict[int, str]):
+        self.issue = {"number": 7, "title": "A feature", "state": "OPEN", "body": render_block(state)}
+        self.prs = prs
+        self.successor: int | None = None
+        self.notes: list[str] = []
+        self.blocks: list[int] = []
+        monkeypatch.setattr(github, "use_owner_account", lambda: None)
+        monkeypatch.setattr(github, "feature_issues", lambda: [dict(self.issue)])
+        monkeypatch.setattr(github, "get_issue", lambda number: dict(self.issue))
+        monkeypatch.setattr(github, "get_issue_body", lambda number: self.issue["body"])
+        monkeypatch.setattr(github, "set_issue_body", lambda number, body: self.issue.update(body=body))
+        monkeypatch.setattr(github, "pr_states", lambda numbers: {n: self.prs[n] for n in numbers})
+        monkeypatch.setattr(github, "pr_state", lambda number: self.prs[number])
+        monkeypatch.setattr(github, "sub_issues", lambda number: [])
+        monkeypatch.setattr(github, "open_pr_for_branch", lambda branch: self.successor)
+        monkeypatch.setattr(github, "comment", lambda number, note: self.notes.append(note))
+        monkeypatch.setattr(github, "close_issue", self._close)
+        monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: self.blocks.append(pr) or True)
+
+    def _close(self, number, note, not_planned=False):
+        self.notes.append(note)
+        self.issue["state"] = "CLOSED"
+
+    @property
+    def state(self) -> dict:
+        return parse_block(self.issue["body"])
+
+    def change(self, **fields) -> None:
+        self.issue["body"] = render_block(self.state | fields)
+
+    def meanwhile(self, monkeypatch, other) -> None:
+        """Run `other` as another command would: before reconcile gets the feature's lock."""
+        locked = feature.locked
+
+        @contextmanager
+        def after_other(branch):
+            other()
+            with locked(branch):
+                yield
+
+        monkeypatch.setattr(feature, "locked", after_other)
+
+
+def test_reconcile_closes_out_a_feature_whose_pr_merged(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    cli.main(["reconcile"])
+    assert (repo.state["status"], repo.issue["state"]) == ("merged", "CLOSED")
+    assert "Merged in PR #123" in repo.notes[-1]
+
+
+def test_reconcile_closes_a_feature_whose_pr_closed_unmerged_as_abandoned(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "CLOSED"})
+    cli.main(["reconcile"])
+    assert (repo.state["status"], repo.issue["state"]) == ("abandoned", "CLOSED")
+    assert "Abandoned" in repo.notes[-1]
+
+
+def test_reconcile_repairs_the_block_of_a_feature_whose_pr_is_open(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
+    cli.main(["reconcile"])
+    assert repo.blocks == [123] and repo.state["status"] == "in-review" and repo.notes == []
+
+
+def test_reconcile_leaves_a_feature_another_command_closed_out_meanwhile(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    repo.meanwhile(monkeypatch, lambda: repo.change(status="merged"))
+    cli.main(["reconcile"])
+    assert repo.notes == [] and repo.issue["state"] == "OPEN"
+    assert "changed by another command meanwhile" in capsys.readouterr().out
+
+
+def test_reconcile_leaves_a_feature_relinked_to_a_new_pr_meanwhile(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED", 124: "OPEN"})
+    repo.meanwhile(monkeypatch, lambda: repo.change(pr=124))
+    cli.main(["reconcile"])
+    assert (repo.state["pr"], repo.state["status"], repo.issue["state"]) == (124, "in-review", "OPEN")
+    assert "changed by another command meanwhile" in capsys.readouterr().out
+
+
+def test_reconcile_refuses_to_write_over_a_change_made_while_it_closes_out(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    close = repo._close
+
+    def close_while_the_laptop_writes(number, note, not_planned=False):
+        repo.change(last_prompt="from the laptop")
+        close(number, note, not_planned)
+
+    monkeypatch.setattr(github, "close_issue", close_while_the_laptop_writes)
+    with pytest.raises(SystemExit, match="changed since this command read it"):
+        cli.main(["reconcile"])
+    assert (repo.state["last_prompt"], repo.state["status"]) == ("from the laptop", "in-review")
+
+
+def test_a_dry_run_reconcile_writes_nothing(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    body = repo.issue["body"]
+    cli.main(["reconcile", "--dry-run"])
+    assert (repo.issue["body"], repo.notes) == (body, [])
+    assert "would close out" in capsys.readouterr().out
