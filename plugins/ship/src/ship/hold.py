@@ -24,6 +24,8 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .statedir import ship_state_dir
+
 # The id Claude Code gives every Bash command of a session, subagents and forked skills included;
 # the Stop hook's input names the session the same way.
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
@@ -32,8 +34,7 @@ ROUND_KINDS = ("review", "fix")
 
 
 def holds_dir() -> Path:
-    state_home = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(state_home) / "ship" / "holds"
+    return ship_state_dir() / "holds"
 
 
 def current_session() -> str | None:

@@ -1018,7 +1018,8 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
                 print(f"#{issue} ({row['title']}): PR #{pr} open → block repaired if stale{stale}")
             else:
                 with feature.locked(state["branch"]):
-                    current = feature.draft(issue, github.get_issue_body(issue), raw=True)
+                    body = github.get_issue_body(issue)
+                    current = feature.Draft(issue, parse_block_raw(body), body)
                     if _write_block(current.snapshot()):
                         print(f"#{issue} ({row['title']}): block repaired — PR #{pr} closes it on merge{stale}")
                         repaired += 1
@@ -1061,7 +1062,8 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
                 abandoned += 1
             continue
         with feature.locked(state["branch"]):
-            change = feature.draft(issue, github.get_issue_body(issue), raw=True)
+            body = github.get_issue_body(issue)
+            change = feature.Draft(issue, parse_block_raw(body), body)
             if change.state["status"] in TERMINAL_STATUS:
                 print(f"#{issue} ({row['title']}): already {change.state['status']}, by another command meanwhile")
                 continue

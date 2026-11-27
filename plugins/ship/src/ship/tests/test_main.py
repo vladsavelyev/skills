@@ -27,7 +27,7 @@ def _stub_issue(monkeypatch, state: dict) -> dict:
     """The tracking issue's body on GitHub, holding `state`: each read parses it afresh, as `gh` would, and each
     write replaces it. Returns it as {"body": …}."""
     stored = {"body": render_block(state)}
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, parse_block(stored["body"]), stored["body"]))
+    monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
     monkeypatch.setattr(github, "get_issue_body", lambda issue: stored["body"])
     monkeypatch.setattr(github, "set_issue_body", lambda issue, body: stored.update(body=body))
     return stored
@@ -35,7 +35,7 @@ def _stub_issue(monkeypatch, state: dict) -> dict:
 
 def _stub_gate(monkeypatch, state: dict, blocking: list[dict], decision) -> None:
     """The feature as a command changing it reads it (`feature.changing`), and its gate."""
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, render_block(state)))
     monkeypatch.setattr(feature, "judge", lambda branch, issue, state: (blocking, decision))
 
 
@@ -58,7 +58,7 @@ def _stub_github(monkeypatch, *, calls: list[str], failing: str | None = None) -
 def test_record_outcome_closes_then_writes_state(monkeypatch):
     calls: list[str] = []
     _stub_github(monkeypatch, calls=calls)
-    change = feature.draft(42, render_block(_merged_state()))
+    change = feature.Draft(42, _merged_state(), render_block(_merged_state()))
     cli._record_outcome(change, "✅ Merged.", status="merged", already_closed=False)
     # The state write is LAST, and the close carries the note (one call, not close + comment).
     assert calls == ["close_issue", "set_issue_body"]
@@ -71,7 +71,10 @@ def test_record_outcome_only_comments_when_already_closed(monkeypatch):
     calls: list[str] = []
     _stub_github(monkeypatch, calls=calls)
     cli._record_outcome(
-        feature.draft(42, render_block(_merged_state())), "✅ Merged.", status="merged", already_closed=True
+        feature.Draft(42, _merged_state(), render_block(_merged_state())),
+        "✅ Merged.",
+        status="merged",
+        already_closed=True,
     )
     assert calls == ["comment", "set_issue_body"]
 
@@ -82,7 +85,7 @@ def test_record_outcome_leaves_state_unwritten_if_closing_fails(monkeypatch):
     # means a re-run does the whole thing again.
     calls: list[str] = []
     _stub_github(monkeypatch, calls=calls, failing="close_issue")
-    change = feature.draft(42, render_block(_merged_state()))
+    change = feature.Draft(42, _merged_state(), render_block(_merged_state()))
     with pytest.raises(CommandFailed):
         cli._record_outcome(change, "✅ Merged.", status="merged", already_closed=False)
     assert "set_issue_body" not in calls
@@ -123,7 +126,9 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
         return 7
 
     monkeypatch.setattr(cli, "_open_feature_issue", open_issue)
-    monkeypatch.setattr(feature, "load_state", lambda name: (7, new_state(branch=name, base="x", updated="t"), ""))
+    monkeypatch.setattr(
+        feature, "load_state", lambda name, raw=False: (7, new_state(branch=name, base="x", updated="t"), "")
+    )
     monkeypatch.setattr(cli, "_save", lambda change: None)
     monkeypatch.setattr(github, "open_pr_for_branch", lambda name: pr)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
@@ -246,7 +251,7 @@ def _stub_gate_inputs(
     state = _merged_state()
     state["last_review"] = {"run": 1, "sha": reviewed, "new_blocking": 0, "new_low": 0, "regressions": 0, "summary": ""}
     state["review_history"] = [state["last_review"]]
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, ""))
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, ""))
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [])
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (2, False, []))
     monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
@@ -318,7 +323,7 @@ def test_wontfix_refuses_a_closed_problem(monkeypatch):
 
 
 def _stub_pr(monkeypatch, pr_state: str) -> None:
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, _merged_state(), ""))
     monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
 
 
@@ -516,7 +521,7 @@ def _stub_review_record(
     did: list[str] = []
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     state = state or _merged_state()
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, ""))
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, ""))
     monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
     monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [_problem(8, "sev:med")])
@@ -698,11 +703,8 @@ def _stub_redesign(monkeypatch, *, pr_head: str = "c3c3c3c3c3") -> tuple[dict, l
     state = _merged_state()
     state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
     state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
-    stored = {"body": render_block(state)}
+    stored = _stub_issue(monkeypatch, state)
     comments: list[str] = []
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, parse_block(stored["body"]), stored["body"]))
-    monkeypatch.setattr(github, "get_issue_body", lambda issue: stored["body"])
-    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: stored.update(body=body))
     monkeypatch.setattr(github, "comment", lambda issue, text: comments.append(text))
     monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(12, "sev:high", state="CLOSED")])
     monkeypatch.setattr(github, "pr_head_sha", lambda pr: pr_head)
@@ -1057,8 +1059,8 @@ def _slow_issue(monkeypatch, state: dict) -> dict:
     stored = _stub_issue(monkeypatch, state)
     load_state = feature.load_state
 
-    def slow(branch):
-        read = load_state(branch)
+    def slow(branch, raw=False):
+        read = load_state(branch, raw=raw)
         time.sleep(0.3)
         return read
 
