@@ -1198,6 +1198,53 @@ def test_reconcile_repairs_the_block_of_a_feature_whose_pr_is_open(monkeypatch):
     assert repo.blocks == [123] and repo.state["status"] == "in-review" and repo.notes == []
 
 
+def test_reconcile_leaves_an_open_prs_block_that_needs_no_repair_uncounted(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
+    monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: repo.blocks.append(pr) and False)
+    cli.main(["reconcile"])
+    assert capsys.readouterr().out == (
+        "Scanned 1 feature issue(s): closed out 0 merged, closed 0 abandoned, repaired 0, 0 needing a human decision.\n"
+    )
+
+
+def test_reconcile_hands_back_a_feature_whose_branch_has_a_new_pr(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "CLOSED"})
+    repo.successor = 130
+    cli.main(["reconcile"])
+    assert (repo.state["status"], repo.issue["state"], repo.notes) == ("in-review", "OPEN", [])
+    assert capsys.readouterr().out == (
+        "#7 (A feature): PR #123 was closed unmerged, but branch 'add-oauth' has open PR #130 — run `feature pr 130`\n"
+        "Scanned 1 feature issue(s): closed out 0 merged, closed 0 abandoned, repaired 0, 1 needing a human decision.\n"
+    )
+
+
+def test_reconcile_leaves_a_merged_feature_with_an_undecided_problem_for_a_human(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    monkeypatch.setattr(github, "sub_issues", lambda number: [_problem(8, "sev:med")])
+    cli.main(["reconcile"])
+    assert (repo.state["status"], repo.issue["state"], repo.notes) == ("in-review", "OPEN", [])
+    out = capsys.readouterr().out
+    assert "#7 (A feature): PR #123 MERGED, but 1 open problem(s) need a decision first: #8 [sev:med]" in out
+    assert "1 needing a human decision." in out
+
+
+def test_reconcile_upgrades_a_schema_1_block_as_it_closes_the_feature_out(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state() | {"schema": 1, "last_review": None}, {123: "MERGED"})
+    cli.main(["reconcile"])
+    assert (repo.state["schema"], repo.state["status"], repo.issue["state"]) == (SCHEMA, "merged", "CLOSED")
+    assert "#7 (A feature): closed out — merged in PR #123 + state upgraded from schema 1\n" in capsys.readouterr().out
+
+
+def test_reconcile_reports_a_schema_1_block_it_cannot_upgrade(monkeypatch, capsys):
+    state = _merged_state() | {"schema": 1}
+    del state["last_review"]
+    repo = _Repo(monkeypatch, state, {123: "MERGED"})
+    with pytest.raises(SystemExit, match="Fix those by hand"):
+        cli.main(["reconcile"])
+    assert (repo.issue["state"], repo.notes) == ("OPEN", [])
+    assert "#7: could not migrate its schema-1 state block" in capsys.readouterr().out
+
+
 def test_reconcile_leaves_a_feature_another_command_closed_out_meanwhile(monkeypatch, capsys):
     repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
     repo.meanwhile(monkeypatch, lambda: repo.change(status="merged"))
@@ -1265,12 +1312,24 @@ def test_describe_refuses_to_publish_over_a_change_made_while_it_renders_the_blo
     assert published == []
 
 
-def test_a_dry_run_reconcile_writes_nothing(monkeypatch, capsys):
-    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+@pytest.mark.parametrize(
+    ("pr_state", "said"),
+    [
+        ("MERGED", "#7 (A feature): PR #123 MERGED, status 'in-review' → would close out\n"),
+        ("CLOSED", "#7 (A feature): PR #123 CLOSED, status 'in-review' → would close as abandoned\n"),
+        ("OPEN", "#7 (A feature): PR #123 open → block repaired if stale\n"),
+    ],
+)
+def test_a_dry_run_reconcile_says_what_it_would_do_and_writes_nothing(monkeypatch, capsys, pr_state, said):
+    repo = _Repo(monkeypatch, _merged_state(), {123: pr_state})
     body = repo.issue["body"]
     cli.main(["reconcile", "--dry-run"])
-    assert (repo.issue["body"], repo.notes) == (body, [])
-    assert "would close out" in capsys.readouterr().out
+    assert (repo.issue["body"], repo.notes, repo.blocks) == (body, [], [])
+    merged, abandoned = int(pr_state == "MERGED"), int(pr_state == "CLOSED")
+    assert capsys.readouterr().out == said + (
+        f"Scanned 1 feature issue(s): would close out {merged} merged, would close {abandoned} abandoned, "
+        "0 needing a human decision.\n"
+    )
 
 
 def test_sync_refuses_a_stale_schema_before_it_syncs(monkeypatch):

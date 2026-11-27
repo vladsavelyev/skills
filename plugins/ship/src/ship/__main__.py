@@ -10,8 +10,10 @@ import argparse
 import json
 import sys
 from collections import Counter
-from pathlib import Path
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum, auto
+from pathlib import Path
 
 from . import assess, budget, feature, gate, github, hold, problems, reviewer, tidy
 from .errors import Refusal
@@ -1015,35 +1017,34 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
             pending.append((row, state))
 
     states = github.pr_states([state["pr"] for _, state in pending])
-    tally: Counter[str] = Counter()
+    tally: Counter[Outcome] = Counter()
     for row, swept in pending:
         pr_state = states[swept["pr"]]
         if args.dry_run:
-            outcome = _reconcile_feature(row, swept, pr_state, None, unreadable)
-        else:
-            # The sweep's read only picks the candidates. Another command may have changed the feature since, so what
-            # is written is decided from the feature as read under its lock.
-            with feature.locked(swept["branch"]):
-                row = github.get_issue(row["number"])
-                if (now := _swept_state(row, unreadable)) is None:
-                    continue
-                change = feature.Draft(row["number"], now, row["body"])
-                if (now["pr"], now["status"]) != (swept["pr"], swept["status"]):
-                    print(
-                        f"#{row['number']} ({row['title']}): changed by another command meanwhile, now PR "
-                        f"#{now['pr']} and '{now['status']}', so left as it is"
-                    )
-                    continue
-                outcome = _reconcile_feature(row, now, pr_state, change, unreadable)
-        if outcome is not None:
-            tally[outcome] += 1
+            decision = _decide(row, swept, pr_state)
+            print(decision.said)
+            tally[decision.outcome] += 1
+            continue
+        with feature.locked(swept["branch"]):
+            row = github.get_issue(row["number"])
+            if (now := _swept_state(row, unreadable)) is None:
+                continue
+            if (now["pr"], now["status"]) != (swept["pr"], swept["status"]):
+                print(
+                    f"#{row['number']} ({row['title']}): changed by another command meanwhile, now PR "
+                    f"#{now['pr']} and '{now['status']}', so left as it is"
+                )
+                continue
+            decision = _decide(row, now, pr_state)
+            if _carry_out(decision, row, feature.Draft(row["number"], now, row["body"]), unreadable):
+                tally[decision.outcome] += 1
 
     scope = f"feature for branch '{args.branch}'" if args.branch else f"{len(rows)} feature issue(s)"
     did = "would close" if args.dry_run else "closed"
-    tail = "" if args.dry_run else f", repaired {tally['repaired']}"
+    tail = "" if args.dry_run else f", repaired {tally[Outcome.REPAIRED]}"
     print(
-        f"Scanned {scope}: {did} out {tally['merged']} merged, {did} {tally['abandoned']} abandoned"
-        f"{tail}, {tally['human']} needing a human decision."
+        f"Scanned {scope}: {did} out {tally[Outcome.MERGED]} merged, {did} {tally[Outcome.ABANDONED]} abandoned"
+        f"{tail}, {tally[Outcome.HUMAN]} needing a human decision."
     )
     if unreadable:
         print(f"\n{len(unreadable)} feature issue(s) could not be reconciled:")
@@ -1075,29 +1076,33 @@ def _swept_state(row: dict, unreadable: list[tuple[int, str]]) -> dict | None:
     return state
 
 
-def _reconcile_feature(
-    row: dict, state: dict, pr_state: str, change: feature.Draft | None, unreadable: list[tuple[int, str]]
-) -> str | None:
-    """Reconcile the feature of issue `row`, whose state is `state` and whose PR is `pr_state`: repair an open PR's
-    block, close out a feature whose PR merged or closed unmerged. `change` is that state as read under the feature's
-    lock, which gets written; None for a dry run, which writes nothing. Returns what it did, for the sweep's tally:
-    "repaired", "human" (needing a human decision), "merged" or "abandoned"."""
-    issue, pr = row["number"], state["pr"]
+class Outcome(Enum):
+    REPAIRED = auto()
+    HUMAN = auto()
+    MERGED = auto()
+    ABANDONED = auto()
+
+
+@dataclass(frozen=True)
+class _Decision:
+    """What `feature reconcile` does with one feature, decided from one read of it: a dry run prints `said`, a real
+    run carries it out (`_carry_out`). `blocking` is a close-out's open problems, every one handed off."""
+
+    outcome: Outcome
+    said: str
+    blocking: list[dict] = field(default_factory=list)
+
+
+def _decide(row: dict, state: dict, pr_state: str) -> _Decision:
+    subject, pr = f"#{row['number']} ({row['title']})", state["pr"]
     if pr_state == "OPEN":
         # Still in flight. Repair its PR body's block if it is stale (a reference from before the
         # closing link, or none, so this one closes itself on merge) or written more than once.
         # Its state block is left alone even if stale: a live feature is reachable from its own
         # branch, where `feature migrate` can upgrade it loudly and the gate can be re-derived.
-        stale = "" if state["schema"] == SCHEMA else f" (state is schema {state['schema']}; run `feature migrate`)"
-        if change is None:
-            # Whether the body actually needs an edit is only knowable by reading it, which is
-            # what the real run does — don't claim a count here that a dry run can't know.
-            print(f"#{issue} ({row['title']}): PR #{pr} open → block repaired if stale{stale}")
-            return None
-        if not _publish_block(change):
-            return None
-        print(f"#{issue} ({row['title']}): block repaired — PR #{pr} closes it on merge{stale}")
-        return "repaired"
+        # Whether the body actually needs an edit is only knowable by reading it, which is what
+        # the real run does — so a dry run doesn't claim a count it can't know.
+        return _Decision(Outcome.REPAIRED, f"{subject}: PR #{pr} open → block repaired if stale{_stale(state)}")
     if pr_state == "CLOSED":
         # Closed unmerged: the work never landed, so this ends as `abandoned`, never `merged`.
         # First rule out the one case where the feature is alive anyway — the branch was
@@ -1105,51 +1110,71 @@ def _reconcile_feature(
         # would bury work in flight, so hand it back with the number to link instead.
         successor = github.open_pr_for_branch(state["branch"])
         if successor is not None:
-            print(
-                f"#{issue} ({row['title']}): PR #{pr} was closed unmerged, but branch "
-                f"'{state['branch']}' has open PR #{successor} — run `feature pr {successor}`"
+            return _Decision(
+                Outcome.HUMAN,
+                f"{subject}: PR #{pr} was closed unmerged, but branch '{state['branch']}' has open PR "
+                f"#{successor} — run `feature pr {successor}`",
             )
-            return "human"
-
-    # From here the feature reaches a terminal status, so the state block gets written — which
-    # means an old schema has to be upgraded first, right here: `feature migrate` resolves its
-    # issue through the branch's git config and these branches are gone.
-    blocking = _blocking(issue)
+    blocking = _blocking(row["number"])
     # Every open problem needs a decision first, merged or abandoned alike: once the feature is
     # closed nothing would ever come back to an undecided one.
     if undecided := problems.undecided(blocking):
-        print(
-            f"#{issue} ({row['title']}): PR #{pr} {pr_state}, but {len(undecided)} open problem(s) need a "
-            f"decision first: {feature.blocking_refs(undecided)} — `feature problem hand-off|wontfix <#> --reason …`"
+        return _Decision(
+            Outcome.HUMAN,
+            f"{subject}: PR #{pr} {pr_state}, but {len(undecided)} open problem(s) need a decision first: "
+            f"{feature.blocking_refs(undecided)} — `feature problem hand-off|wontfix <#> --reason …`",
         )
-        return "human"
     merged = pr_state == "MERGED"
-    outcome = "merged" if merged else "abandoned"
-    upgrade = "" if state["schema"] == SCHEMA else f" + state upgraded from schema {state['schema']}"
-    if change is None:
-        would = f"would close out{upgrade}" if merged else f"would close as abandoned{upgrade}"
-        print(f"#{issue} ({row['title']}): PR #{pr} {pr_state}, status '{state['status']}' → {would}")
-        return outcome
-    if state["schema"] != SCHEMA:
-        # The review budget and convergence trend the migration reconstructs no longer decide
-        # anything for a finished feature — but the block still has to be readable by every
-        # later command, and hand-editing 20 issue bodies is not a plan.
-        try:
-            change.state = migrate(state)
-        except ValueError as exc:
-            unreadable.append((issue, f"could not migrate its schema-{state['schema']} state block: {exc}"))
-            return None
+    would = "would close out" if merged else "would close as abandoned"
+    return _Decision(
+        Outcome.MERGED if merged else Outcome.ABANDONED,
+        f"{subject}: PR #{pr} {pr_state}, status '{state['status']}' → {would}{_upgrade(state)}",
+        blocking,
+    )
+
+
+def _stale(state: dict) -> str:
+    return "" if state["schema"] == SCHEMA else f" (state is schema {state['schema']}; run `feature migrate`)"
+
+
+def _upgrade(state: dict) -> str:
+    return "" if state["schema"] == SCHEMA else f" + state upgraded from schema {state['schema']}"
+
+
+def _carry_out(decision: _Decision, row: dict, change: feature.Draft, unreadable: list[tuple[int, str]]) -> bool:
+    """Carry out `decision` on the feature as `change` read it under its lock; whether it did, for the tally."""
+    subject, state, pr = f"#{row['number']} ({row['title']})", change.state, change.state["pr"]
+    if decision.outcome is Outcome.HUMAN:
+        print(decision.said)
+        return True
+    if decision.outcome is Outcome.REPAIRED:
+        if not _publish_block(change):
+            return False
+        print(f"{subject}: block repaired — PR #{pr} closes it on merge{_stale(state)}")
+        return True
+    # The feature reaches a terminal status, so the state block gets written — which means an old
+    # schema has to be upgraded first, right here: `feature migrate` resolves its issue through the
+    # branch's git config and these branches are gone. The review budget and convergence trend the
+    # migration reconstructs no longer decide anything for a finished feature — but the block still
+    # has to be readable by every later command, and hand-editing 20 issue bodies is not a plan.
+    upgrade = _upgrade(state)
+    try:
+        change.state = migrate(state)
+    except ValueError as exc:
+        unreadable.append((row["number"], f"could not migrate its schema-{state['schema']} state block: {exc}"))
+        return False
+    merged = decision.outcome is Outcome.MERGED
     _record_outcome(
         change,
-        _reconcile_note(pr, blocking) if merged else _abandoned_note(pr, blocking),
-        status=outcome,
+        _reconcile_note(pr, decision.blocking) if merged else _abandoned_note(pr, decision.blocking),
+        status="merged" if merged else "abandoned",
         already_closed=row["state"] != "OPEN",
     )
     if merged:
-        print(f"#{issue} ({row['title']}): closed out — merged in PR #{pr}{upgrade}")
+        print(f"{subject}: closed out — merged in PR #{pr}{upgrade}")
     else:
-        print(f"#{issue} ({row['title']}): closed as abandoned — PR #{pr} never merged{upgrade}")
-    return outcome
+        print(f"{subject}: closed as abandoned — PR #{pr} never merged{upgrade}")
+    return True
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
