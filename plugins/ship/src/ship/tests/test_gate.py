@@ -29,11 +29,10 @@ def run(
     blocking: int = 0,
     low: int = 0,
     regressed: list[int] = (),
-    repeats: dict | None = None,
+    med_repeats: dict | None = None,
     low_repeats: dict | None = None,
     sha: str = HEAD,
 ) -> dict:
-    """Round `n`; `repeats` are its med finds filed as repeating a fixed problem, `low_repeats` its low ones."""
     entry = {
         "run": n,
         "sha": sha,
@@ -44,9 +43,9 @@ def run(
         "summary": f"run {n}",
     }
     # Rounds recorded before `repeats` existed have no such key, as most of these do.
-    if repeats is not None or low_repeats is not None:
-        entry["repeats"] = (repeats or {}) | (low_repeats or {})
-        entry["found"] = {"med": [*map(int, repeats or {}), *regressed], "low": [*map(int, low_repeats or {})]}
+    if med_repeats is not None or low_repeats is not None:
+        entry["repeats"] = (med_repeats or {}) | (low_repeats or {})
+        entry["found"] = {"med": [*map(int, med_repeats or {}), *regressed], "low": [*map(int, low_repeats or {})]}
     return entry
 
 
@@ -57,22 +56,19 @@ def gate(
     history,
     budget=3,
     unreviewed=(),
-    answered=None,
-    redesigned=None,
+    budget_run=None,
+    redesigns=None,
     dismissed=(),
     merged=False,
 ):
-    """`answered` is the run a `feature budget --set` came after (None: the budget is auto-sized),
-    `redesigned` each run a `feature redesign` answered with the chains it covered, and `dismissed`
-    the problems closed as `wontfix`."""
     return evaluate(
         blocking_open=blocking_open,
         last_review=last_review,
         history=history,
         budget=budget,
         unreviewed=list(unreviewed),
-        budget_answers=answered,
-        redesigns=[{"run": n, "chains": chains, "reason": "r"} for n, chains in (redesigned or {}).items()],
+        budget_answers=budget_run,
+        redesigns=[{"run": n, "chains": chains, "reason": "r"} for n, chains in (redesigns or {}).items()],
         dismissed=frozenset(dismissed),
         pr_merged=merged,
     )
@@ -175,13 +171,13 @@ def test_buying_a_round_overrides_the_churn_escalation():
     history = [run(1, blocking=2), run(2, blocking=3)]
     stuck = gate(blocking_open=3, last_review=history[-1], history=history, budget=4)
     assert stuck.verdict is Verdict.NEEDS_DECISION
-    bought = gate(blocking_open=3, last_review=history[-1], history=history, budget=4, answered=2)
+    bought = gate(blocking_open=3, last_review=history[-1], history=history, budget=4, budget_run=2)
     assert bought.verdict is Verdict.REVIEW_AGAIN
 
 
 def test_a_pinned_budget_that_is_spent_still_needs_a_decision():
     history = [run(1, blocking=2), run(2, blocking=3)]
-    d = gate(blocking_open=3, last_review=history[-1], history=history, budget=2, answered=2)
+    d = gate(blocking_open=3, last_review=history[-1], history=history, budget=2, budget_run=2)
     assert d.verdict is Verdict.NEEDS_DECISION
 
 
@@ -196,7 +192,7 @@ def test_a_regression_is_a_fix_that_didnt_hold_so_it_asks_for_a_redesign():
 
 def test_a_new_bug_of_a_kind_already_fixed_asks_for_a_redesign_not_another_round():
     """The fix patched one instance; the design still produces the kind, so the next round finds the next."""
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10})]
     d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4)
     assert d.verdict is Verdict.REDESIGN
     assert any("#12 like #10" in r and "redesign" in r for r in d.reasons)
@@ -213,14 +209,14 @@ def test_the_redesign_step_points_to_an_arena_and_does_not_stop_to_ask():
 
 
 def test_a_redesign_answers_its_recurrence_and_its_review_round_follows():
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10})]
     d = gate(
         blocking_open=0,
         last_review=history[-1],
         history=history,
         budget=3,
         unreviewed=["redesign"],
-        redesigned={2: [10]},
+        redesigns={2: [10]},
     )
     assert d.verdict is Verdict.REVIEW_AGAIN
 
@@ -228,30 +224,34 @@ def test_a_redesign_answers_its_recurrence_and_its_review_round_follows():
 def test_a_redesign_made_only_in_docs_is_still_reviewed():
     """A SKILL.md redesign is all docs, so `needs_review` drops its commits: the recurrence stays
     REDESIGN until it's recorded, and the round that reviews it is due all the same."""
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10})]
     assert gate(blocking_open=0, last_review=history[-1], history=history).verdict is Verdict.REDESIGN
-    d = gate(blocking_open=0, last_review=history[-1], history=history, redesigned={2: [10]})
+    d = gate(blocking_open=0, last_review=history[-1], history=history, redesigns={2: [10]})
     assert d.verdict is Verdict.REVIEW_AGAIN
     assert "the redesign after run 2 has not been reviewed" in d.reasons
 
 
 def test_a_clean_review_of_the_redesign_opens_the_gate():
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, sha=HEAD)]
-    assert gate(blocking_open=0, last_review=history[-1], history=history, redesigned={2: [10]}).verdict is Verdict.OPEN
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10}), run(3, sha=HEAD)]
+    assert gate(blocking_open=0, last_review=history[-1], history=history, redesigns={2: [10]}).verdict is Verdict.OPEN
 
 
 def test_the_kind_back_after_a_redesign_goes_to_a_human():
     """The run's own diagnosis missed: a second redesign on its say-so would be a loop."""
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"20": 12})]
-    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=3, answered=2, redesigned={2: [10]})
+    history = [
+        run(1, blocking=1),
+        run(2, blocking=1, med_repeats={"12": 10}),
+        run(3, blocking=1, med_repeats={"20": 12}),
+    ]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=3, budget_run=2, redesigns={2: [10]})
     assert d.verdict is Verdict.NEEDS_DECISION
     assert d.next_step == _NEXT_REDESIGN_FAILED
     assert any("#20 like #12" in r and "already redesigned for that kind after run 2" in r for r in d.reasons)
 
 
 def test_a_problem_of_the_redesigned_chain_back_again_goes_to_a_human():
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, regressed=[12])]
-    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=3, answered=2, redesigned={2: [10]})
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10}), run(3, blocking=1, regressed=[12])]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=3, budget_run=2, redesigns={2: [10]})
     assert d.next_step == _NEXT_REDESIGN_FAILED
 
 
@@ -259,11 +259,11 @@ def test_the_kind_back_after_a_redesign_through_a_low_find_goes_to_a_human():
     """A low find (#14 like #12) bridges the chain, so #16 like #14 is the redesigned kind back."""
     history = [
         run(1, blocking=1),
-        run(2, blocking=1, repeats={"12": 10}),
+        run(2, blocking=1, med_repeats={"12": 10}),
         run(3, low=1, low_repeats={"14": 12}),
-        run(4, blocking=1, repeats={"16": 14}),
+        run(4, blocking=1, med_repeats={"16": 14}),
     ]
-    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=5, answered=2, redesigned={2: [10]})
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=5, budget_run=2, redesigns={2: [10]})
     assert d.verdict is Verdict.NEEDS_DECISION
     assert d.next_step == _NEXT_REDESIGN_FAILED
 
@@ -277,29 +277,37 @@ def test_a_low_find_repeating_a_fixed_one_is_no_recurrence():
 
 def test_an_unrelated_kind_back_after_a_redesign_gets_its_own_redesign():
     """#227: the redesign never addressed #30's kind, so its diagnosis can't have missed it."""
-    history = [run(1, blocking=2), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"31": 30})]
-    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4, answered=2, redesigned={2: [10]})
+    history = [
+        run(1, blocking=2),
+        run(2, blocking=1, med_repeats={"12": 10}),
+        run(3, blocking=1, med_repeats={"31": 30}),
+    ]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4, budget_run=2, redesigns={2: [10]})
     assert d.verdict is Verdict.REDESIGN
     assert redesign_chains(history, dismissed=frozenset()) == [30]
     assert _NEXT_REDESIGN_FAILED.index("Skill(ship:fix)") < _NEXT_REDESIGN_FAILED.index("feature escalate")
 
 
 def test_a_human_who_buys_a_round_after_a_failed_redesign_answers_it():
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"20": 12})]
+    history = [
+        run(1, blocking=1),
+        run(2, blocking=1, med_repeats={"12": 10}),
+        run(3, blocking=1, med_repeats={"20": 12}),
+    ]
     d = gate(
         blocking_open=0,
         last_review=history[-1],
         history=history,
         budget=5,
         unreviewed=["x"],
-        answered=3,
-        redesigned={2: [10]},
+        budget_run=3,
+        redesigns={2: [10]},
     )
     assert d.verdict is Verdict.REVIEW_AGAIN
 
 
 def test_a_round_whose_finds_repeat_nothing_is_not_a_recurrence():
-    assert recurrences([run(1, blocking=1), run(2, blocking=2, repeats={})], dismissed=frozenset()) == {}
+    assert recurrences([run(1, blocking=1), run(2, blocking=2, med_repeats={})], dismissed=frozenset()) == {}
     # Rounds recorded before `repeats` existed have no links, so nothing recurs in them.
     assert recurrences([run(1, blocking=1), run(2, blocking=2)], dismissed=frozenset()) == {}
 
@@ -342,20 +350,24 @@ def test_an_old_cli_regression_count_the_finds_dont_account_for_aborts():
 
 
 def test_a_recurrence_chain_starts_at_the_first_problem_of_its_kind():
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"20": 12})]
+    history = [
+        run(1, blocking=1),
+        run(2, blocking=1, med_repeats={"12": 10}),
+        run(3, blocking=1, med_repeats={"20": 12}),
+    ]
     assert redesign_chains(history, dismissed=frozenset()) == [10]
     assert redesign_chains(history, dismissed=frozenset({20})) == []
 
 
 def test_only_the_last_round_decides_a_recurrence():
     """A human who saw an earlier recurrence and bought rounds answered it; a later clean round stands."""
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={})]
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10}), run(3, blocking=1, med_repeats={})]
     assert gate(blocking_open=1, last_review=history[-1], history=history, budget=4).verdict is Verdict.REVIEW_AGAIN
 
 
 def test_a_recurrence_outranks_a_spent_budget():
     """navari #5176 round 5: the budget said "spent", and the agent recommended one more round."""
-    history = [run(1, blocking=2), run(2, blocking=2, repeats={"14": 10})]
+    history = [run(1, blocking=2), run(2, blocking=2, med_repeats={"14": 10})]
     d = gate(blocking_open=2, last_review=history[-1], history=history, budget=2)
     assert d.next_step == _NEXT_REDESIGN
     assert not any("budget spent" in r for r in d.reasons)
@@ -363,28 +375,32 @@ def test_a_recurrence_outranks_a_spent_budget():
 
 def test_buying_a_round_after_a_recurrence_reviews_again():
     """The human chose: the redesign (or the patches) gets its review round."""
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
-    d = gate(blocking_open=0, last_review=history[-1], history=history, budget=3, unreviewed=["redesign"], answered=2)
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10})]
+    d = gate(blocking_open=0, last_review=history[-1], history=history, budget=3, unreviewed=["redesign"], budget_run=2)
     assert d.verdict is Verdict.REVIEW_AGAIN
 
 
 def test_a_round_after_the_bought_one_is_judged_on_its_own():
     """The human answered round 2's recurrence; round 3's repeat is new evidence they haven't seen."""
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"20": 12})]
-    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=5, answered=2)
+    history = [
+        run(1, blocking=1),
+        run(2, blocking=1, med_repeats={"12": 10}),
+        run(3, blocking=1, med_repeats={"20": 12}),
+    ]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=5, budget_run=2)
     assert d.next_step == _NEXT_REDESIGN
     assert any("#20 like #12" in r for r in d.reasons)
 
 
 def test_a_budget_pinned_before_any_round_answers_no_recurrence():
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
-    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4, answered=0)
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4, budget_run=0)
     assert d.next_step == _NEXT_REDESIGN
 
 
 def test_a_recurrence_closed_as_not_relevant_opens_the_gate():
     """The recurring finds were closed as `wontfix`: they weren't bugs, so nothing is left to redesign."""
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10})]
     assert gate(blocking_open=0, last_review=history[-1], history=history, dismissed=[12]).verdict is Verdict.OPEN
 
 
@@ -394,7 +410,9 @@ def test_a_recurrence_closed_as_not_relevant_opens_the_gate():
 NAVARI_5176 = [
     {**run(1, blocking=3, sha="26a92daa2"), "found": {"high": [5201], "med": [5202, 5203]}},
     {
-        **run(2, blocking=4, low=1, sha="cc507393", repeats={"5214": 5201, "5215": 5201, "5216": 5202, "5217": 5203}),
+        **run(
+            2, blocking=4, low=1, sha="cc507393", med_repeats={"5214": 5201, "5215": 5201, "5216": 5202, "5217": 5203}
+        ),
         "found": {"high": [5214], "med": [5215, 5216, 5217], "low": [5218]},
     },
 ]
@@ -547,7 +565,7 @@ def test_there_is_nothing_to_escalate_once_the_gate_is_open_or_the_pr_merged():
 
 
 def test_a_redesign_is_not_escalated_but_made():
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10})]
     d = gate(blocking_open=1, last_review=history[-1], history=history)
     assert "#12 still open" in escalation_refusal(d, open_problems=[12], named=[])
     fixed = gate(blocking_open=0, last_review=history[-1], history=history, unreviewed=["redesign"])
@@ -557,12 +575,12 @@ def test_a_redesign_is_not_escalated_but_made():
 
 
 def test_a_redesign_is_recorded_once_its_problems_are_closed():
-    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    history = [run(1, blocking=1), run(2, blocking=1, med_repeats={"12": 10})]
     d = gate(blocking_open=1, last_review=history[-1], history=history, unreviewed=["redesign"])
     assert "#12 still open" in redesign_refusal(d, open_problems=[12], commits=["c3"])
     assert redesign_refusal(d, open_problems=[], commits=["c3"]) is None
     assert "nothing was redesigned" in redesign_refusal(d, open_problems=[], commits=[])
     reviewing = gate(
-        blocking_open=0, last_review=history[-1], history=history, unreviewed=["redesign"], redesigned={2: [10]}
+        blocking_open=0, last_review=history[-1], history=history, unreviewed=["redesign"], redesigns={2: [10]}
     )
     assert "not REDESIGN" in redesign_refusal(reviewing, open_problems=[], commits=["c3"])
