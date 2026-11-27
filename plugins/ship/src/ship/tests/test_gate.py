@@ -489,7 +489,6 @@ def test_a_redesign_is_not_escalated_but_made():
     fixed = gate(blocking_open=0, last_review=history[-1], history=history, unreviewed=["redesign"])
     assert fixed.verdict is Verdict.REDESIGN
     assert "yours to make" in escalation_refusal(fixed, open_problems=[], named=[])
-    # A problem that needs the user's call still goes to them.
     assert escalation_refusal(d, open_problems=[12], named=[12]) is None
 
 

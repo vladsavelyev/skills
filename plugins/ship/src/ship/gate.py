@@ -53,11 +53,7 @@ _NEXT_DECISION = (
     "whether to review the fixes in another round (`feature budget --set <n>`), merge with them "
     "unreviewed, or split/redesign the PR."
 )
-# A bug back after its fix means the design keeps producing it, so another fix-and-review round would
-# likely find the next one. The run redesigns then, without asking. It once escalated with the fixes held
-# back ("Don't fix the open problems yet"), then with them made first; on navari-stack #23 nine problems
-# sat open while the run waited for a yes to the redesign it recommended, and the user's answer was that a
-# redesign the run believes in is its to make. Why: docs/motivation.md #15.
+# Why the run redesigns without asking: docs/motivation.md #15.
 _NEXT_REDESIGN = (
     "Redesign, don't patch, and don't stop to ask: the same kind of bug came back after its fix, so the design "
     "keeps producing it, and another round of fixes and review would likely find the next one. A fix round that "

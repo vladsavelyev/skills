@@ -356,7 +356,6 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
     blocking = problems.blocking(subs)
-    # The round's own finds are open, so its line waits for them (`assess.render`).
     _write_block(state, issue, subs)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     github.comment(
