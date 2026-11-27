@@ -27,8 +27,6 @@ def _merged_state() -> dict:
 
 
 def _stub_issue(monkeypatch, state: dict) -> dict:
-    """The tracking issue's body on GitHub, holding `state`: each read parses it afresh, as `gh` would, and each
-    write replaces it. Returns it as {"body": …}."""
     stored = {"body": render_block(state)}
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
@@ -38,7 +36,6 @@ def _stub_issue(monkeypatch, state: dict) -> dict:
 
 
 def _stub_gate(monkeypatch, state: dict, blocking: list[dict], decision) -> None:
-    """The feature as a command changing it reads it (`feature.changing`), and its gate."""
     monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, render_block(state)))
     monkeypatch.setattr(feature, "judge", lambda branch, issue, state: (blocking, decision))
 
@@ -975,20 +972,22 @@ def test_wontfix_still_refuses_a_problem_closed_as_fixed(monkeypatch):
     assert blocks == []
 
 
-def test_two_overlapping_closes_of_a_rounds_last_problems_show_its_line(monkeypatch):
-    """Both commands read the feature while #36 and #38 were open, and each closes one."""
+def test_two_overlapping_closes_of_a_rounds_last_problems_show_its_line(monkeypatch, tmp_path):
+    """Another machine, whose lock is its own, resolves #36 while `wontfix` is closing #38: both read the feature
+    while #36 and #38 were open."""
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med"), _problem(38, "sev:low")]
-    state = _graded_state()
-    blocks = _stub_pr_block(monkeypatch, state, subs)
-    fresh = feature.snapshot
-    stale = feature.snapshot("add-oauth")
-    # `wontfix` reads the feature at its start from before either close, and each command again once it closed its
-    # problem.
-    reads = iter([None, stale, None])
-    monkeypatch.setattr(feature, "snapshot", lambda branch: next(reads) or fresh(branch))
-    cli.main(["problem", "resolve", "36", "--commit", "c3", "--branch", "add-oauth"])
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    add_label = github.add_label
+
+    def resolve_on_the_laptop_meanwhile(number, label):
+        with monkeypatch.context() as laptop:
+            laptop.setenv("XDG_STATE_HOME", str(tmp_path / "laptop"))
+            cli.main(["problem", "resolve", "36", "--commit", "c3", "--branch", "add-oauth"])
+        add_label(number, label)
+
+    monkeypatch.setattr(github, "add_label", resolve_on_the_laptop_meanwhile)
     cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
-    assert _ROUND_2 in blocks[-1]
+    assert _ROUND_2 not in blocks[0] and _ROUND_2 in blocks[-1]
 
 
 def test_a_block_rerun_after_its_block_write_failed_takes_the_line_down(monkeypatch):
@@ -1113,7 +1112,6 @@ def test_two_commands_changing_one_feature_at_once_both_land(monkeypatch, lock_w
 
 
 def test_a_change_made_elsewhere_between_the_read_and_the_write_is_refused_not_undone(monkeypatch):
-    """Another machine, which this one's lock doesn't reach, or a hand edit of the JSON."""
     stored = _stub_issue(monkeypatch, _merged_state())
     with feature.changing("add-oauth") as change:
         elsewhere = parse_block(stored["body"]) | {"last_prompt": "from the laptop"}
@@ -1248,7 +1246,6 @@ def test_sync_refuses_a_stale_schema_before_it_syncs(monkeypatch):
 
 @pytest.fixture
 def lock_waited(monkeypatch) -> threading.Event:
-    """Set once a command finds its feature's lock held by another and waits for it."""
     waited = threading.Event()
 
     def flock(fd, operation):
