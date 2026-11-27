@@ -732,8 +732,6 @@ def cmd_redesign(args: argparse.Namespace) -> None:
     rounds = max(decision.budget, used + 1)
     chains = gate.redesign_chains(state["review_history"], dismissed=feature.dismissed(subs))
     record_redesign(state, rounds=rounds, chains=chains, reason=args.reason)
-    # The state write goes last, as in `review record`: a failure before it records nothing, and the
-    # retry records it once (a repeated comment is the one thing it can duplicate).
     github.comment(
         issue,
         f"🔁 **Redesigned** after run {state['review_runs']}. {args.reason}\n\n"

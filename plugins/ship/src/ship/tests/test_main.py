@@ -636,9 +636,7 @@ def test_review_record_refuses_a_regression_that_is_not_a_high_or_med_find(monke
 
 
 def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bought(monkeypatch, tmp_path):
-    """navari #5176: each escalation recommended fixing them all and one more round, five rounds
-    running. navari-stack #23: the run escalated the redesign it recommended, and nine problems sat open
-    while it waited for a yes. Now the run redesigns, closes the problems, and records it."""
+    """The run redesigns, closes the problems the redesign fixed, and records it, asking no one."""
     state = _merged_state()
     state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
     state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
@@ -705,7 +703,7 @@ _REDESIGN = ["redesign", "--branch", "add-oauth", "--reason", "Every claim of ch
 
 
 def test_a_redesign_whose_comment_failed_is_recorded_by_the_retry(monkeypatch):
-    """#230: the state was saved before the comment, so the retry refused and the reason was lost."""
+    """The retry posts the reason and records the redesign, once."""
     stored, comments = _stub_redesign(monkeypatch)
 
     def fail(issue, text):
@@ -872,7 +870,6 @@ def _unavailable(pr, content, issue):
 
 
 def test_a_round_is_recorded_without_its_line_while_its_problems_are_open(monkeypatch):
-    """navari-stack #23: the line listed nine problems before any was fixed."""
     state = _graded_state()
     state["review_history"].pop()
     state["review_runs"], state["last_review"] = 1, state["review_history"][-1]

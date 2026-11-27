@@ -204,8 +204,7 @@ def test_a_new_bug_of_a_kind_already_fixed_asks_for_a_redesign_not_another_round
 
 
 def test_the_redesign_step_points_to_an_arena_and_does_not_stop_to_ask():
-    """navari-stack #23: nine problems sat open while the run waited for a yes to the redesign it
-    recommended. A redesign the run believes in is its to make."""
+    """A redesign the run believes in is its to make."""
     assert "competing designs" in _NEXT_REDESIGN and "critiqued blind" in _NEXT_REDESIGN
     assert "feature escalate" not in _NEXT_REDESIGN and "human" not in _NEXT_REDESIGN
     assert _NEXT_REDESIGN.index("Skill(ship:fix)") < _NEXT_REDESIGN.index("feature redesign")
@@ -511,7 +510,6 @@ def test_there_is_nothing_to_escalate_once_the_gate_is_open_or_the_pr_merged():
 
 
 def test_a_redesign_is_not_escalated_but_made():
-    """navari-stack #23: the run escalated the redesign it recommended, and waited for a yes."""
     history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
     d = gate(blocking_open=1, last_review=history[-1], history=history)
     assert "#12 still open" in escalation_refusal(d, open_problems=[12], named=[])

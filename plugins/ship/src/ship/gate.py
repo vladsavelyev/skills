@@ -152,8 +152,7 @@ def _links(history: list[dict]) -> dict[int, int]:
 
 def chain_root(problem: int, history: list[dict]) -> int:
     """The first problem of `problem`'s recurrence chain: the one it repeats, and the one that one repeats,
-    back to a problem that repeats none. A link always points at an older issue, fixed when the newer one
-    was filed (`problem add --repeats`), so the walk ends."""
+    back to a problem that repeats none."""
     links = _links(history)
     while problem in links:
         problem = links[problem]
@@ -361,8 +360,7 @@ def evaluate(
     # A budget raised, or a redesign made, after a round outranks that round's churn signals: they
     # answered it, and re-deriving the signals from the same unchanged history would make `budget
     # --set` a silent no-op and send the run to redesign again what it just redesigned. A round
-    # recorded after it is new evidence, judged on its own: a pinned budget once hid every later
-    # recurrence.
+    # recorded after it is new evidence, judged on its own.
     judged = last is not None and last["run"] not in {budget_answers, *redesigned}
     back = recurrences(last, dismissed=dismissed) if judged else {}
 

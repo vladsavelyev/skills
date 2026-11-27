@@ -178,7 +178,6 @@ def render(*, issue: int, review: Review | None) -> str:
     runs = [e for e in review.history if "run" in e]
     shown = [e for e in runs if not found_in([e]) & review.open_problems]
     rounds = [_round_line(e) for e in shown]
-    # The next round's depth goes with the latest round; while that one waits, so does the depth.
     if shown and shown[-1] is runs[-1]:
         rounds[-1] += _next_round(runs[-1], review.next_depth)
     return "\n".join(f"> {line}" for line in [*_grade_lines(review), reference, *rounds])

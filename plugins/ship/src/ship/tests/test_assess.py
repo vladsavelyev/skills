@@ -165,8 +165,7 @@ _ROUNDS = [
 
 
 def test_a_rounds_findings_line_waits_until_every_problem_it_filed_is_closed():
-    """navari-stack #23: the block said "Review round 2 (high). Findings: 2 med (#36, #37), 7 low (…)"
-    while all nine were open and unfixed. The user wants the problems fixed before the line appears."""
+    """The user wants a round's problems fixed before its line appears."""
     out = assess.render(issue=35, review=_review(_GRADE, _ROUNDS, open_problems=frozenset({38, 99})))
     assert out.splitlines()[3:] == [
         "> **Tracking issue:** closes #35",
