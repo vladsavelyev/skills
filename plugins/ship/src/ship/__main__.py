@@ -321,7 +321,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # round, and the gate's counts can't disagree with the labels the gate reads.
     subs = github.sub_issues(issue)
     found, new_serious, new_low = _round_finds(issue, subs, args.found)
-    serious = {n for sev, nums in found.items() if f"sev:{sev}" != problems.LOW_SEV for n in nums}
+    serious = problems.serious(found)
     regressed = sorted(set(args.regressions))
     if stray := [n for n in regressed if n not in serious]:
         sys.exit(
@@ -340,7 +340,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     run_num = entry["run"]
     entry["found"] = found
     entry["regressed"] = regressed
-    entry["repeats"] = problems.recurring(found, earlier=earlier, body=github.get_issue_body)
+    entry["repeats"] = problems.repeat_links(found, earlier=earlier, body=github.get_issue_body)
     entry["depth"] = args.depth
     entry["grade"] = {
         "risk": args.risk,

@@ -36,7 +36,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from . import assess, budget
+from . import assess, budget, problems
 
 # What to do next, per verdict — the gate's most useful output for an agent driving the loop.
 _NEXT_OPEN = "Human merges the PR, then close it out with `Skill(ship:close)`."
@@ -166,11 +166,14 @@ def recurrences(entry: dict, *, dismissed: frozenset[int]) -> dict[int, int]:
     or a new one filed as repeating a fixed one (`problem add --repeats`, kept as `repeats`). A find since
     closed as `wontfix` (`dismissed`) is no recurrence: it wasn't a bug.
 
-    Like the trend, it reads high/med finds only: a nit back again is not evidence the design is wrong.
+    Like the trend, it reads high/med finds only (`problems.serious`): a nit back again is not evidence
+    the design is wrong. A low find's link still counts in the chains it bridges (`chain_root`).
     Rounds recorded before `repeats` or `regressed` existed name no find, so nothing recurs in them:
     kept ON PURPOSE, as they are written into feature issues of PRs in flight.
     """
-    back = {int(problem): repeated for problem, repeated in entry.get("repeats", {}).items()}
+    links = entry.get("repeats", {})
+    serious = problems.serious(entry["found"]) if links else set()
+    back = {int(problem): repeated for problem, repeated in links.items() if int(problem) in serious}
     back |= {problem: problem for problem in entry.get("regressed", [])}
     return {problem: back[problem] for problem in sorted(back) if problem not in dismissed}
 

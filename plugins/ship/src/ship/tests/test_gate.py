@@ -24,8 +24,16 @@ HEAD = "head99"
 
 
 def run(
-    n: int, *, blocking: int = 0, low: int = 0, regressed: list[int] = (), repeats: dict | None = None, sha: str = HEAD
+    n: int,
+    *,
+    blocking: int = 0,
+    low: int = 0,
+    regressed: list[int] = (),
+    repeats: dict | None = None,
+    low_repeats: dict | None = None,
+    sha: str = HEAD,
 ) -> dict:
+    """Round `n`; `repeats` are its med finds filed as repeating a fixed problem, `low_repeats` its low ones."""
     entry = {
         "run": n,
         "sha": sha,
@@ -36,8 +44,9 @@ def run(
         "summary": f"run {n}",
     }
     # Rounds recorded before `repeats` existed have no such key, as most of these do.
-    if repeats is not None:
-        entry["repeats"] = repeats
+    if repeats is not None or low_repeats is not None:
+        entry["repeats"] = (repeats or {}) | (low_repeats or {})
+        entry["found"] = {"med": [*map(int, repeats or {}), *regressed], "low": [*map(int, low_repeats or {})]}
     return entry
 
 
@@ -245,6 +254,26 @@ def test_a_problem_of_the_redesigned_chain_back_again_goes_to_a_human():
     history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, regressed=[12])]
     d = gate(blocking_open=1, last_review=history[-1], history=history, budget=3, answered=2, redesigned={2: [10]})
     assert d.next_step == _NEXT_REDESIGN_FAILED
+
+
+def test_the_kind_back_after_a_redesign_through_a_low_find_goes_to_a_human():
+    """A low find (#14 like #12) bridges the chain, so #16 like #14 is the redesigned kind back."""
+    history = [
+        run(1, blocking=1),
+        run(2, blocking=1, repeats={"12": 10}),
+        run(3, low=1, low_repeats={"14": 12}),
+        run(4, blocking=1, repeats={"16": 14}),
+    ]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=5, answered=2, redesigned={2: [10]})
+    assert d.verdict is Verdict.NEEDS_DECISION
+    assert d.next_step == _NEXT_REDESIGN_FAILED
+
+
+def test_a_low_find_repeating_a_fixed_one_is_no_recurrence():
+    """A nit back again is not evidence the design is wrong, though its link stays in the chain."""
+    history = [run(1, blocking=1), run(2, low=1, low_repeats={"12": 10})]
+    assert recurrences(history[-1], dismissed=frozenset()) == {}
+    assert gate(blocking_open=1, last_review=history[-1], history=history, budget=4).verdict is Verdict.REVIEW_AGAIN
 
 
 def test_an_unrelated_kind_back_after_a_redesign_gets_its_own_redesign():

@@ -579,19 +579,51 @@ def test_problem_add_refuses_to_repeat_a_problem_that_was_never_fixed(monkeypatc
     assert filed == []
 
 
-def test_review_record_keeps_the_rounds_high_and_med_finds_filed_as_repeating_a_fixed_problem(monkeypatch):
+def test_review_record_keeps_the_rounds_finds_filed_as_repeating_a_fixed_problem(monkeypatch):
     state = _merged_state()
     # #50 repeats a fixed problem too, but an earlier round found it: it's back as a regression.
     state["review_history"] = [{"run": 1, "sha": "a1", "found": {"med": [50]}}]
     state["review_runs"] = 1
     subs = [_problem(40, "sev:low"), _problem(41, "sev:high"), _problem(42, "sev:med"), _problem(50, "sev:med")]
     _stub_review_record(monkeypatch, state, subs)
-    bodies = {7: "", 41: problems.with_repeat("repro", 31), 42: "repro"}
+    bodies = {7: "", 40: problems.with_repeat("repro", 30), 41: problems.with_repeat("repro", 31), 42: "repro"}
     monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
     found = _RECORD.index("8")
     cli.main([*_RECORD[:found], "40", "41", "42", "50", *_RECORD[found + 1 :], "--regressions", "50"])
-    assert state["review_history"][-1]["repeats"] == {"41": 31}
+    assert state["review_history"][-1]["repeats"] == {"40": 30, "41": 31}
     assert state["review_history"][-1]["regressed"] == [50] and state["review_history"][-1]["regressions"] == 1
+
+
+def test_a_low_find_bridges_the_recurrence_chain_its_redesign_covered(monkeypatch):
+    """Round 2's #12 repeats #10 and is redesigned; round 3's low #14 repeats #12; round 4's #16
+    repeats #14. That is the redesigned kind back, so a human decides."""
+    state = _merged_state()
+    state["review_history"] = [{"run": 1, "sha": "a1", "found": {"med": [10]}}]
+    state["review_runs"] = 1
+    subs = [_problem(10, "sev:med", state="CLOSED"), _problem(12, "sev:med", state="CLOSED")]
+    subs += [_problem(14, "sev:low", state="CLOSED"), _problem(16, "sev:med")]
+    _stub_review_record(monkeypatch, state, subs)
+    bodies = {7: "", 12: problems.with_repeat("repro", 10), 14: problems.with_repeat("repro", 12)}
+    bodies[16] = problems.with_repeat("repro", 14)
+    monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
+    found = _RECORD.index("8")
+    for number in ("12", "14", "16"):
+        cli.main([*_RECORD[:found], number, *_RECORD[found + 1 :]])
+        if number == "12":
+            chains = cli.gate.redesign_chains(state["review_history"], dismissed=frozenset())
+            cli.record_redesign(state, rounds=5, chains=chains, reason="r")
+    history = state["review_history"]
+    d = cli.gate.evaluate(
+        blocking_open=1,
+        last_review=history[-1],
+        history=history,
+        budget=5,
+        unreviewed=[],
+        budget_answers=2,
+        redesigns=state["redesigns"],
+    )
+    assert d.verdict is cli.gate.Verdict.NEEDS_DECISION
+    assert d.next_step == cli.gate._NEXT_REDESIGN_FAILED
 
 
 @pytest.mark.parametrize("regressed", ["40", "9"])
@@ -714,6 +746,7 @@ def _round(run: int, repeats: dict) -> dict:
         "new_low": 0,
         "regressions": 0,
         "summary": "",
+        "found": {"high": [int(n) for n in repeats]},
         "repeats": repeats,
     }
 

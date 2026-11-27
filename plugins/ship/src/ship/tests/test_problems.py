@@ -6,8 +6,9 @@ from ship.problems import (
     handed_off,
     is_blocking,
     low_fix_commits,
-    recurring,
+    repeat_links,
     repeated,
+    serious,
     severity,
     undecided,
     with_repeat,
@@ -70,20 +71,23 @@ def test_an_old_follow_up_counts_as_handed_off_but_an_old_deferral_does_not():
     assert [s["number"] for s in undecided(subs)] == [2]
 
 
-def test_recurring_keeps_a_rounds_high_and_med_finds_filed_as_repeating_a_fixed_problem():
-    """A low find repeating a fixed one is a nit back again, not evidence the design is wrong."""
+def test_repeat_links_keep_every_find_of_the_round_filed_as_repeating_a_fixed_problem():
+    """A low find's link too: it can bridge a recurrence chain."""
     found = {"med": [42, 41], "low": [40], "?": [43]}
-    # #40's body is never read: a low find can't recur.
-    bodies = {41: with_repeat("repro", 31), 42: "repro", 43: with_repeat("repro", 33)}
-    assert recurring(found, earlier=set(), body=bodies.__getitem__) == {"41": 31, "43": 33}
-    assert recurring({}, earlier=set(), body=bodies.__getitem__) == {}
+    bodies = {40: with_repeat("repro", 30), 41: with_repeat("repro", 31), 42: "repro", 43: with_repeat("repro", 33)}
+    assert repeat_links(found, earlier=set(), body=bodies.__getitem__) == {"40": 30, "41": 31, "43": 33}
+    assert repeat_links({}, earlier=set(), body=bodies.__getitem__) == {}
 
 
 def test_a_repeat_counts_in_the_round_that_filed_it_and_a_re_find_is_a_regression():
     """navari #5176: #5279 was filed in round 3 as like #5216, then rediscovered in round 4, where it
     counts as a regression, not as a new problem of a kind already fixed."""
     bodies = {5301: with_repeat("repro", 5216)}
-    assert recurring({"med": [5279, 5301]}, earlier={5279}, body=bodies.__getitem__) == {"5301": 5216}
+    assert repeat_links({"med": [5279, 5301]}, earlier={5279}, body=bodies.__getitem__) == {"5301": 5216}
+
+
+def test_serious_finds_are_the_high_med_and_unlabelled_ones():
+    assert serious({"high": [1], "med": [2], "low": [3], "?": [4]}) == {1, 2, 4}
 
 
 def test_the_issue_body_carries_the_link():

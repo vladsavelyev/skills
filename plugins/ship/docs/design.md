@@ -97,8 +97,9 @@ the trend and the budget count. `last_review` is only the *currently valid* clea
 evidence, and is nulled on invalidation, which is why it duplicates the last history entry.
 `fixes` maps each commit `feature problem resolve --commit` recorded (full sha) to the problems it
 fixed; a block from before `fixes` has none. Each round written since `repeats` existed keeps, under
-that key, the high/med finds it filed as the same kind of bug as a fixed problem, each with that
-problem (`{"52": 46}`); a later re-find is a regression, kept apart as `regressed` (its numbers,
+that key, the finds it filed as the same kind of bug as a fixed problem, each with that problem
+(`{"52": 46}`), at every severity: a low find is a link in a recurrence chain too, though only a
+high/med one is a recurrence (`gate.recurrences`); a later re-find is a regression, kept apart as `regressed` (its numbers,
 with their count as `regressions`). The link itself lives only
 in the problem's issue body, the line `feature problem add --repeats` writes (`problems.with_repeat`),
 which `review record` reads back before its one state write: a copy in the state took a second
@@ -725,8 +726,9 @@ regressions, and counts them by their severity labels: the high/med ones are the
 already written into feature issues), the low ones its `new_low` count. A clean pass is a bare
 `--found`, which (with zero open sub-issues) opens the gate. Every find blocks until it is closed;
 the round's line in the PR body lists them by severity. `--regressions` names the re-opened high/med
-problems among them, kept as `regressed`, and the round keeps its high/med finds filed with `--repeats` as `repeats`; both feed
-the recurrence signal, where a low-severity nit back again is not evidence the design is wrong.
+problems among them, kept as `regressed`, and the round keeps its finds filed with `--repeats` as `repeats`; both feed
+the recurrence signal, which reads their high/med ones only: a low-severity nit back again is not evidence the design is
+wrong. A low find's link still joins the chain it is part of, so the kind it bridges stays one kind.
 
 **Closing a problem without a fix is auditable.** An agent could open the gate by closing every
 problem as `wontfix`, so the defense is a record: `wontfix` demands a reason posted on the issue,
