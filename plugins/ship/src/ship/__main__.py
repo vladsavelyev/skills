@@ -1127,8 +1127,8 @@ def cmd_sync(args: argparse.Namespace) -> None:
     last review resolved code by hand, invalidate that review, so the next round starts a fresh
     budget. Delegates the actual sync to git-town; does not auto-resolve conflicts."""
     branch = args.branch or current_branch()
-    feature.resolve_issue(branch)
-    # The sync can stop at a conflict for as long as its resolution takes, so the state is read once it's done.
+    # Refuse an unreadable state before the sync, which can't be taken back; it's read again under the lock once done.
+    feature.load_state(branch)
     print(f"Syncing {branch} via git-town{' (stack)' if args.stack else ''}…")
     git_town_sync(stack=args.stack)
     after = run_head_sha()

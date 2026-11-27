@@ -10,7 +10,7 @@ import pytest
 from ship import __main__ as cli
 from ship import feature, github, hold, problems
 from ship.shell import CommandFailed
-from ship.state import SCHEMA, new_state, parse_block, render_block
+from ship.state import SCHEMA, StaleSchema, new_state, parse_block, render_block
 
 
 def _problem(number: int, sev: str, *, state: str = "OPEN", extra: tuple[str, ...] = ()) -> dict:
@@ -1240,3 +1240,12 @@ def test_a_dry_run_reconcile_writes_nothing(monkeypatch, capsys):
     cli.main(["reconcile", "--dry-run"])
     assert (repo.issue["body"], repo.notes) == (body, [])
     assert "would close out" in capsys.readouterr().out
+
+
+def test_sync_refuses_a_stale_schema_before_it_syncs(monkeypatch):
+    synced: list[bool] = []
+    _stub_issue(monkeypatch, _merged_state() | {"schema": 1})
+    monkeypatch.setattr(cli, "git_town_sync", lambda stack: synced.append(stack))
+    with pytest.raises(StaleSchema):
+        cli.main(["sync", "--branch", "add-oauth"])
+    assert synced == []
