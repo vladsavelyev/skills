@@ -738,13 +738,13 @@ def cmd_escalate(args: argparse.Namespace) -> None:
 
 
 def cmd_redesign(args: argparse.Namespace) -> None:
-    """Record the redesign a recurrence asked for, once it is pushed, and buy the round that reviews it.
+    """Record the pushed redesign a recurrence asked for, and buy the round that reviews it.
 
     The run makes the redesign itself (`gate._NEXT_REDESIGN`); this is its record on the tracking
     issue, and what tells the gate the recurrence is answered.
     """
     branch = args.branch or current_branch()
-    issue, state, body = feature.load_state(branch)
+    issue, state, _ = feature.load_state(branch)
     subs = github.sub_issues(issue)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     blocking = problems.blocking(subs)
@@ -754,11 +754,17 @@ def cmd_redesign(args: argparse.Namespace) -> None:
     )
     if refusal := gate.redesign_refusal(decision, open_problems=[s["number"] for s in blocking], commits=commits):
         sys.exit(f"Refusing to record a redesign on #{issue}: {refusal}")
+    if full_sha(branch) != (pr_head := github.pr_head_sha(state["pr"])):
+        sys.exit(
+            f"Refusing to record a redesign on #{issue}: '{branch}' is not PR #{state['pr']}'s head "
+            f"({pr_head[:9]}), and the round it buys reviews the PR. Push it first."
+        )
     used = len(gate.rounds_since_invalidation(state["review_history"]))
     rounds = max(decision.budget, used + 1)
     chains = gate.redesign_chains(state["review_history"], dismissed=feature.dismissed(subs))
     record_redesign(state, rounds=rounds, chains=chains, reason=args.reason)
-    _save_state(issue, body, state)
+    # The state write goes last, as in `review record`: a failure before it records nothing, and the
+    # retry records it once (a repeated comment is the one thing it can duplicate).
     github.comment(
         issue,
         f"🔁 **Redesigned** after run {state['review_runs']}. {args.reason}\n\n"
@@ -766,6 +772,7 @@ def cmd_redesign(args: argparse.Namespace) -> None:
         f"Review budget {rounds} round(s), so a review covers the redesign: "
         f"{', '.join(sha[:9] for sha in commits)}.",
     )
+    _save_state(issue, github.get_issue_body(issue), state)
     print(f"Recorded the redesign on #{issue}; review budget {rounds} round(s). Review it next.")
 
 

@@ -7,7 +7,7 @@ import pytest
 from ship import __main__ as cli
 from ship import feature, github, hold, problems
 from ship.shell import CommandFailed
-from ship.state import SCHEMA, new_state, render_block
+from ship.state import SCHEMA, new_state, parse_block, render_block
 
 
 def _problem(number: int, sev: str, *, state: str = "OPEN", extra: tuple[str, ...] = ()) -> dict:
@@ -619,6 +619,9 @@ def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bough
     # The redesign is all docs (#228): `needs_review` leaves none of its commits for a review.
     monkeypatch.setattr(feature, "unreviewed", lambda state, head, subs: [])
     monkeypatch.setattr(cli, "commits_since", lambda since, head: [(sha, ["p"]) for sha in commits])
+    monkeypatch.setattr(cli, "full_sha", lambda rev: "c3c3c3c3c3")
+    monkeypatch.setattr(github, "pr_head_sha", lambda pr: "c3c3c3c3c3")
+    monkeypatch.setattr(github, "get_issue_body", lambda issue: render_block(state))
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs)
     monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: comments.append(text))
@@ -640,6 +643,56 @@ def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bough
     assert decision.verdict is cli.gate.Verdict.REVIEW_AGAIN
     with pytest.raises(SystemExit, match="not REDESIGN"):
         cli.main(redesign)
+
+
+def _stub_redesign(monkeypatch, *, pr_head: str = "c3c3c3c3c3") -> tuple[dict, list[str]]:
+    """A feature whose round 2 repeated #10 as #12, #12 fixed by the redesign c3c3c3c3c3; returns its
+    stored issue body, which each command reads afresh, and the comments posted."""
+    state = _merged_state()
+    state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
+    state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
+    stored = {"body": render_block(state)}
+    comments: list[str] = []
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, parse_block(stored["body"]), stored["body"]))
+    monkeypatch.setattr(github, "get_issue_body", lambda issue: stored["body"])
+    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: stored.update(body=body))
+    monkeypatch.setattr(github, "comment", lambda issue, text: comments.append(text))
+    monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(12, "sev:high", state="CLOSED")])
+    monkeypatch.setattr(github, "pr_head_sha", lambda pr: pr_head)
+    monkeypatch.setattr(feature, "resolve_budget", lambda state: (state["review_budget"] or 2, False, []))
+    monkeypatch.setattr(feature, "pr_merged", lambda state: False)
+    monkeypatch.setattr(feature, "review_head", lambda branch, state, merged: "c3c3c3c")
+    monkeypatch.setattr(feature, "unreviewed", lambda state, head, subs: ["c3c3c3c3c3"])
+    monkeypatch.setattr(cli, "full_sha", lambda rev: "c3c3c3c3c3")
+    monkeypatch.setattr(cli, "commits_since", lambda since, head: [("c3c3c3c3c3", ["p"])])
+    return stored, comments
+
+
+_REDESIGN = ["redesign", "--branch", "add-oauth", "--reason", "Every claim of checked covers unread data."]
+
+
+def test_a_redesign_whose_comment_failed_is_recorded_by_the_retry(monkeypatch):
+    """#230: the state was saved before the comment, so the retry refused and the reason was lost."""
+    stored, comments = _stub_redesign(monkeypatch)
+
+    def fail(issue, text):
+        raise CommandFailed(1, ["gh"], "", "503")
+
+    monkeypatch.setattr(github, "comment", fail)
+    with pytest.raises(CommandFailed):
+        cli.main(_REDESIGN)
+    monkeypatch.setattr(github, "comment", lambda issue, text: comments.append(text))
+    cli.main(_REDESIGN)
+    assert len(comments) == 1 and "Every claim of checked covers unread data." in comments[0]
+    assert [r["run"] for r in parse_block(stored["body"])["redesigns"]] == [2]
+
+
+def test_a_redesign_is_recorded_only_once_it_is_pushed(monkeypatch):
+    """#234: the round it buys reviews what the PR shows, not the local branch."""
+    stored, comments = _stub_redesign(monkeypatch, pr_head="b2b2b2b2b2")
+    with pytest.raises(SystemExit, match="Push it first"):
+        cli.main(_REDESIGN)
+    assert comments == [] and parse_block(stored["body"])["redesigns"] == []
 
 
 def test_escalating_a_redesign_is_refused_as_the_runs_to_make(monkeypatch, tmp_path):
