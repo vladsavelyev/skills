@@ -37,9 +37,9 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 | Depth for the next round | `feature depth` |
 | Default reviewer | `feature reviewer` |
 | Options for the reviewer's effort | `feature effort --depth <depth> --model-options '<json>'` |
-| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
+| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <problem#> ...] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
-| Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
+| Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED, 40 REDESIGN; 1/2 mean the command failed |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
 
 ## Review round
@@ -57,6 +57,8 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    - Then `feature gate`. `OPEN`: don't review; report it, unless your arguments ask for a fresh
      review. `NEEDS_DECISION`: don't review either; the budget is spent or the loop churns, and only
      the user buys another round (`feature budget --set`, which reopens the gate). Report it.
+     `REDESIGN`: don't review either; a kind of bug came back after its fix, and the caller's fix
+     round redesigns first, so a review now would read code about to be replaced. Report it.
 2. **Describe the PR.** A branch from `feature start` got its title and description before any
    code existed. When they no longer fit what the branch does (always on its first ship), rewrite
    them. It runs in this order, with no headers:
@@ -198,7 +200,7 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
      a guard the intent doesn't need.
    - Same meaning as an OPEN problem → skip.
    - Same as a CLOSED fixed problem → regression. `feature problem block <#> --reason
-     "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, count it in `--regressions`).
+     "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, in `--regressions`).
      Never `gh issue reopen`.
    - A new bug, but the same mistake as a CLOSED fixed problem in a new place: a fix at the root of
      that problem's cause would have prevented this one too → file it with `--repeats <#>`. It tells
@@ -232,7 +234,8 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    root-cause fix.
 8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
    `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
-   the CLI counts them by severity and lists them on the round's line in the PR body. Write
+   the CLI counts them by severity and lists them on the round's line in the PR body, which shows
+   once they're all closed. Write
    `--summary` as a real sentence about what was reviewed and found, never a bare "clean pass";
    name any spec, design and comment findings in it. Pass the effort the reviewer ran at as
    `--depth`, and its grade as `--risk`, `--door`, `--blast-radius`, `--complexity` and `--why`,

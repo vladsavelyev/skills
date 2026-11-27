@@ -16,6 +16,8 @@ The mapping lives here, not in the skill, so the same inputs always buy the same
 from dataclasses import dataclass
 from fnmatch import fnmatch
 
+from .state import found_in
+
 SIZES = ("S", "M", "L", "XL")
 LEVELS = ("low", "med", "high")
 # Whether reverting the PR undoes what a bug in it did: a two-way door can be walked back through,
@@ -131,6 +133,7 @@ class Review:
     changed_lines: int
     history: list[dict]
     next_depth: str
+    open_problems: frozenset[int]
 
 
 def _next_round(last: dict, depth: str) -> str:
@@ -162,14 +165,18 @@ def _grade_lines(review: Review) -> list[str]:
 def render(*, issue: int, review: Review | None) -> str:
     """The content of the PR body's ship block: one quote, with no header, so it reads as a footnote
     to the author's description. Once a review has graded the PR, it opens with the reviewer's latest grade;
-    then the closing reference to the feature issue, and one line per review round. A round's line
-    lists what it found, which never changes afterwards. GitHub breaks a PR body's lines where they
-    break here."""
+    then the closing reference to the feature issue, and one line per review round whose problems are
+    all closed. A round's line lists what it found, which never changes afterwards, and it waits
+    until every one of those problems is fixed or `wontfix`: the block reports a round once its
+    findings are dealt with, never a list of problems still waiting for their fix. GitHub breaks a PR
+    body's lines where they break here."""
     # `closes` is what makes GitHub close the issue on merge; a bare `#39` would only link it.
     reference = f"**Tracking issue:** closes #{issue}"
     if review is None:
         return f"> {reference}"
     runs = [e for e in review.history if "run" in e]
-    rounds = [_round_line(e) for e in runs]
-    rounds[-1] += _next_round(runs[-1], review.next_depth)
+    shown = [e for e in runs if not found_in([e]) & review.open_problems]
+    rounds = [_round_line(e) for e in shown]
+    if shown and shown[-1] is runs[-1]:
+        rounds[-1] += _next_round(runs[-1], review.next_depth)
     return "\n".join(f"> {line}" for line in [*_grade_lines(review), reference, *rounds])

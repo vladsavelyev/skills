@@ -80,7 +80,9 @@ def main() -> None:
     # mode this replaced was an agent reviewing round after round chasing a clean sweep.
     print(
         "Before the merge, the gate decides whether to review again: REVIEW_AGAIN means close "
-        "the open problems and run ONE more review round; NEEDS_DECISION means STOP "
+        "the open problems and run ONE more review round; REDESIGN means a kind of bug came back "
+        "after its fix: redesign in a fix round without asking, closing the problems the redesign "
+        "fixes, `feature redesign --reason '<cause>'`, then review it; NEEDS_DECISION means STOP "
         "reviewing, still close the open problems (the budget limits reviews, not fixes), and "
         "`feature escalate --reason '<recommendation>'` for a human. Nothing ships as debt: "
         "every open problem blocks, at every severity, until it is fixed (`feature problem "

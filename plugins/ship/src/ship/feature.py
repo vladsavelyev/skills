@@ -6,6 +6,8 @@ base origin lacks) rather than ending the process, so each caller says it its ow
 prints it and exits, the merge guard denies the merge, the Stop hook reports it.
 """
 
+from dataclasses import dataclass
+
 from . import budget, gate, github, problems
 from .errors import Refusal
 from .gitwiring import (
@@ -20,7 +22,7 @@ from .gitwiring import (
     remote_ref,
     sensitive_patterns,
 )
-from .state import budget_run, fixes, parse_block
+from .state import budget_run, fixes, parse_block, redesigns
 
 
 def resolve_issue(branch: str) -> int:
@@ -38,6 +40,34 @@ def load_state(branch: str) -> tuple[int, dict, str]:
     issue = resolve_issue(branch)
     body = github.get_issue_body(issue)
     return issue, parse_block(body), body
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """A feature as one command reads it: its tracking issue, the state in its body, and its problems."""
+
+    issue: int
+    state: dict
+    body: str
+    subs: list[dict]
+
+    def problem(self, number: int) -> dict:
+        """`number` as one of the feature's problems. Refuses any other number: resolving and
+        disposing edit exactly the state the gate reads, and pointed at the wrong number (a typo, a
+        PR number, the feature issue itself) they would quietly change what blocks a merge or close
+        something unrelated."""
+        sub = next((s for s in self.subs if s["number"] == number), None)
+        if sub is None:
+            raise Refusal(
+                f"#{number} is not a problem sub-issue of feature #{self.issue} — refusing to touch it. "
+                f"Run `feature problem list` to see this feature's problems."
+            )
+        return sub
+
+
+def snapshot(branch: str) -> Snapshot:
+    issue, state, body = load_state(branch)
+    return Snapshot(issue, state, body, github.sub_issues(issue))
 
 
 def resolve_budget(state: dict) -> tuple[int, bool, list[str]]:
@@ -121,6 +151,11 @@ def unreviewed(state: dict, head: str, subs: list[dict]) -> list[str]:
     return gate.needs_review(changes, low_fixes=low_fixes, sensitive=sensitive_patterns())
 
 
+def dismissed(subs: list[dict]) -> frozenset[int]:
+    """The problems closed as not relevant (`wontfix`): no find among them recurs (`gate.recurrences`)."""
+    return frozenset(s["number"] for s in subs if s["state"] == "CLOSED" and problems.is_wontfix(s))
+
+
 def decide(branch: str, state: dict, subs: list[dict], merged: bool, *, head: str | None = None) -> gate.GateDecision:
     """The merge gate for `branch`, from its state and its problems (`github.sub_issues`), judged at
     `head` (default `review_head`)."""
@@ -132,6 +167,8 @@ def decide(branch: str, state: dict, subs: list[dict], merged: bool, *, head: st
         budget=rounds,
         unreviewed=unreviewed(state, head or review_head(branch, state, merged), subs),
         budget_answers=budget_run(state) if pinned else None,
+        redesigns=redesigns(state),
+        dismissed=dismissed(subs),
         pr_merged=merged,
     )
 
