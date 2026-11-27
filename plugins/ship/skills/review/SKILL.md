@@ -39,7 +39,7 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 | Options for the reviewer's effort | `feature effort --depth <depth> --model-options '<json>'` |
 | Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <problem#> ...] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
-| Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
+| Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED, 40 REDESIGN; 1/2 mean the command failed |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
 
 ## Review round
@@ -57,6 +57,8 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    - Then `feature gate`. `OPEN`: don't review; report it, unless your arguments ask for a fresh
      review. `NEEDS_DECISION`: don't review either; the budget is spent or the loop churns, and only
      the user buys another round (`feature budget --set`, which reopens the gate). Report it.
+     `REDESIGN`: don't review either; a kind of bug came back after its fix, and the caller's fix
+     round redesigns first, so a review now would read code about to be replaced. Report it.
 2. **Describe the PR.** A branch from `feature start` got its title and description before any
    code existed. When they no longer fit what the branch does (always on its first ship), rewrite
    them. It runs in this order, with no headers:
