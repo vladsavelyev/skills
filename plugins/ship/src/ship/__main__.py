@@ -201,17 +201,18 @@ def cmd_pr(args: argparse.Namespace) -> None:
 
 
 def _block_content(feat: feature.Snapshot) -> str:
-    """The content of the PR body's ship block, rendered from `feat`: the reference to its issue, and
-    once a review has graded the PR, the reviewer's latest grade and every round whose problems are
-    all closed. Every command that writes the block renders it here, so the block always shows the
-    current state."""
+    """The content of the PR body's ship block, rendered from `feat`: the reference to its issue, the link to each
+    environment the PR is deployed to now, and once a review has graded the PR, the reviewer's latest grade and every
+    round whose problems are all closed. Every command that writes the block renders it here, so the block always
+    shows the current state."""
     state = feat.state
     # `feature reconcile` reads schema-1 states too; those predate grading, so they show the
     # reference alone.
     history = state["review_history"] if state["schema"] == SCHEMA else []
     grade = assess.last_grade(history)
+    deployments = github.pr_deployments(state["pr"])
     if grade is None:
-        return assess.render(issue=feat.issue, review=None)
+        return assess.render(issue=feat.issue, review=None, deployments=deployments)
     files, lines = github.pr_diff_stats(state["pr"])
     still_open = problems.blocking(feat.subs)
     review = assess.Review(
@@ -222,7 +223,7 @@ def _block_content(feat: feature.Snapshot) -> str:
         history=history,
         open_problems=frozenset(s["number"] for s in still_open),
     )
-    return assess.render(issue=feat.issue, review=review)
+    return assess.render(issue=feat.issue, review=review, deployments=deployments)
 
 
 def _checked_block(change: feature.Draft, *, done: str | None = None) -> str:

@@ -1,5 +1,7 @@
 """Tests for the GitHub layer helpers that have branching logic worth pinning."""
 
+import json
+
 import pytest
 
 from ship import github
@@ -174,6 +176,47 @@ def test_personal_account_aborts_unless_exactly_one(others):
     ]
     with pytest.raises(Refusal):
         github.personal_account(accounts)
+
+
+def _deployment(environment: str, state: str, url: str | None) -> dict:
+    return {"environment": environment, "state": state, "latestStatus": {"environmentUrl": url}}
+
+
+def _fake_timeline(monkeypatch, pages: list[list[dict]]) -> None:
+    """Stub github.run so the timeline query answers `pages`, one JSON document per page as
+    `gh api graphql --paginate --jq` prints them."""
+
+    def fake_run(cmd):
+        if cmd[:3] == ["gh", "repo", "view"]:
+            return "o\tr"
+        assert cmd[:4] == ["gh", "api", "graphql", "--paginate"] and "n=7" in cmd, cmd
+        return "\n".join(json.dumps(page) for page in pages)
+
+    monkeypatch.setattr(github, "run", fake_run)
+
+
+def test_pr_deployments_lists_each_environments_latest_deployment_while_it_is_active(monkeypatch):
+    # In timeline order, over two pages: the preview was redeployed, so its second deployment
+    # counts; the whole deploy's latest has no URL, so its earlier one with a URL is not shown.
+    _fake_timeline(
+        monkeypatch,
+        [
+            [_deployment("rio-preview", "INACTIVE", None), _deployment("verticals", "ACTIVE", "https://v.test/rio/")],
+            [_deployment("rio-preview", "ACTIVE", "https://v.test/pr-7/"), _deployment("verticals", "ACTIVE", None)],
+        ],
+    )
+    assert github.pr_deployments(7) == [("rio-preview", "https://v.test/pr-7/")]
+
+
+def test_pr_deployments_passes_over_a_removed_preview(monkeypatch):
+    _fake_timeline(
+        monkeypatch,
+        [
+            [_deployment("rio-preview", "ACTIVE", "https://v.test/pr-7/")],
+            [_deployment("rio-preview", "INACTIVE", None)],
+        ],
+    )
+    assert github.pr_deployments(7) == []
 
 
 def test_set_pr_description_uploads_each_attachment(monkeypatch):

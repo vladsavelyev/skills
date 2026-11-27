@@ -178,6 +178,48 @@ def set_pr_block(pr: int, content: str, issue: int) -> bool:
     return True
 
 
+def pr_deployments(pr: int) -> list[tuple[str, str]]:
+    """`(environment, url)` for each environment the PR's commits are deployed to now: GitHub links a
+    deployment of a PR's commit to the PR's timeline, and for each environment the latest one counts,
+    if it is still active and its status gives a URL. A deleted deployment leaves its event with no
+    deployment, and is passed over. Fully paginated, so a long-lived PR's last deployment is seen."""
+    owner, name = _owner_repo()
+    q = (
+        "query($o:String!,$r:String!,$n:Int!,$endCursor:String){repository(owner:$o,name:$r)"
+        "{pullRequest(number:$n){timelineItems(itemTypes:[DEPLOYED_EVENT],first:100,after:$endCursor){"
+        "pageInfo{hasNextPage,endCursor} nodes{... on DeployedEvent{deployment{environment state "
+        "latestStatus{environmentUrl}}}}}}}}"
+    )
+    out = run(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "--paginate",
+            "-f",
+            f"query={q}",
+            "-f",
+            f"o={owner}",
+            "-f",
+            f"r={name}",
+            "-F",
+            f"n={pr}",
+            "--jq",
+            "[.data.repository.pullRequest.timelineItems.nodes[].deployment | select(. != null)]",
+        ]
+    )
+    latest: dict[str, dict] = {}  # in timeline order, so the last one per environment wins
+    for page in out.splitlines():
+        if page.strip():
+            for deployment in json.loads(page):
+                latest[deployment["environment"]] = deployment
+    return [
+        (environment, d["latestStatus"]["environmentUrl"])
+        for environment, d in latest.items()
+        if d["state"] == "ACTIVE" and d["latestStatus"] and d["latestStatus"]["environmentUrl"]
+    ]
+
+
 def set_pr_description(pr: int, text: str, title: str | None, content: str, attach: list[str]) -> None:
     """Replace the PR's description with `text` (and its title with `title`), with ship's block
     set to `content` below it. `text` may carry the block already (the body fetched and edited): the

@@ -16,6 +16,12 @@ from ship.shell import CommandFailed
 from ship.state import SCHEMA, StaleSchema, new_state, parse_block, render_block
 
 
+@pytest.fixture(autouse=True)
+def _no_deployments(monkeypatch):
+    """Every command that writes the PR's block reads the PR's deployments from GitHub: here the PR has none."""
+    monkeypatch.setattr(github, "pr_deployments", lambda number: [])
+
+
 def _problem(number: int, sev: str, *, state: str = "OPEN", extra: tuple[str, ...] = ()) -> dict:
     return {"number": number, "title": f"problem {number}", "state": state, "labels": [sev, *extra]}
 

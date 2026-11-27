@@ -7,6 +7,7 @@ stats. Before anyone has read a change, `path_risk` judges it from the paths it 
 gate's question of whether a commit needs a review at all.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatch
 
@@ -127,19 +128,25 @@ def _grade_lines(review: Review) -> list[str]:
     return [door, f"**Blast radius:** {grade['blast_radius'].strip()}", complexity]
 
 
-def render(*, issue: int, review: Review | None) -> str:
+def render(*, issue: int, review: Review | None, deployments: Sequence[tuple[str, str]] = ()) -> str:
     """The content of the PR body's ship block: one quote, with no header, so it reads as a footnote
     to the author's description. Once a review has graded the PR, it opens with the reviewer's latest grade;
-    then the closing reference to the feature issue, and one line per review round whose problems are
-    all closed. A round's line lists what it found, which never changes afterwards, and it waits
-    until every one of those problems is fixed or `wontfix`: the block reports a round once its
-    findings are dealt with, never a list of problems still waiting for their fix. GitHub breaks a PR
-    body's lines where they break here."""
+    then the URL of each environment the PR is deployed to now (`deployments`, `(environment, url)` pairs), named for
+    its environment when there are several, the closing reference to the feature issue, and one line per review round
+    whose problems are all closed. A round's line lists what it found, which never changes afterwards, and it waits
+    until every one of those problems is fixed or `wontfix`: the block reports a round once its findings are dealt
+    with, never a list of problems still waiting for their fix. GitHub breaks a PR body's lines where they break
+    here."""
+    several = len(deployments) > 1
+    head = [
+        f"**Deployed preview**{f' ({environment})' if several else ''}: [{url}]({url})"
+        for environment, url in deployments
+    ]
     # `closes` is what makes GitHub close the issue on merge; a bare `#39` would only link it.
-    reference = f"**Tracking issue:** closes #{issue}"
+    head.append(f"**Tracking issue:** closes #{issue}")
     if review is None:
-        return f"> {reference}"
+        return "\n".join(f"> {line}" for line in head)
     runs = [e for e in review.history if "run" in e]
     shown = [e for e in runs if not found_in([e]) & review.open_problems]
     rounds = [_round_line(e) for e in shown]
-    return "\n".join(f"> {line}" for line in [*_grade_lines(review), reference, *rounds])
+    return "\n".join(f"> {line}" for line in [*_grade_lines(review), *head, *rounds])

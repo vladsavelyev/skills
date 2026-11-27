@@ -143,3 +143,24 @@ def test_a_reopened_problem_takes_its_rounds_line_down_again():
         "> **Tracking issue:** closes #35",
         "> **Review round 2**. Findings: 1 med (#36), 1 low (#38).",
     ]
+
+
+def test_render_links_the_preview_before_the_reference():
+    out = assess.render(
+        issue=35,
+        review=_review(_GRADE, _ROUNDS),
+        deployments=[("rio-preview", "https://v.test/pr-7/")],
+    )
+    assert out.splitlines()[3:5] == [
+        "> **Deployed preview**: [https://v.test/pr-7/](https://v.test/pr-7/)",
+        "> **Tracking issue:** closes #35",
+    ]
+
+
+def test_render_names_each_preview_for_its_environment_when_there_are_several():
+    deployments = [("rio-preview", "https://v.test/pr-7/"), ("staging", "https://staging.test/")]
+    assert assess.render(issue=39, review=None, deployments=deployments).splitlines() == [
+        "> **Deployed preview** (rio-preview): [https://v.test/pr-7/](https://v.test/pr-7/)",
+        "> **Deployed preview** (staging): [https://staging.test/](https://staging.test/)",
+        "> **Tracking issue:** closes #39",
+    ]

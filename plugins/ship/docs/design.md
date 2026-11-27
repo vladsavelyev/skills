@@ -136,6 +136,7 @@ for GitHub to close the tracking issue:
 > **Risk: low**, two-way door: a bad write is visible and fixed by hand
 > **Blast radius:** ship's own block in this repo's PR bodies
 > **Complexity:** low, size M (8 files, 412 lines)
+> **Deployed preview**: [https://example.com/previews/pr-40/](https://example.com/previews/pr-40/)
 > **Tracking issue:** closes #39
 > **Review round 1**. Findings: 1 low (#40).
 > **Review round 2**. Findings: 4 med (#41, #42, #43, #44).
@@ -169,6 +170,16 @@ problems are open, so the writers pass in the sub-issues they read anyway: `revi
 once a round is graded. A problem closed or reopened outside ship (by hand on GitHub) shows at the
 block's next write. Handed-off problems are still open, so a merged PR's round that left one keeps
 its line hidden.
+
+The `Deployed preview` line, above the reference, gives the URL of each environment the PR is
+deployed to now, so a reviewer reading the block can click through what changed; with several,
+each line names its environment (`Deployed preview (staging)`). It comes from GitHub, not the
+feature's state: GitHub puts each deployment of a PR's commit on the PR's timeline, and for each
+environment the latest one counts while it is active and its status gives a URL
+(`github.pr_deployments`). A repository's deploys say where they serve that way, with no
+configuration in ship: a preview workflow creates a deployment with the preview's URL, and
+deactivates or deletes it when the preview goes. The link is as fresh as the block's last write,
+and absent when nothing is deployed.
 
 Every body ship writes has exactly one block. It is created once; every later write finds it and
 rewrites what is between its tags. `feature describe` accepts the new description with or without
