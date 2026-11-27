@@ -56,8 +56,8 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _save(change: feature.Draft) -> None:
-    feature.save(change, updated=_now())
+def _save(change: feature.Draft, *, published: str | None = None) -> None:
+    feature.save(change, updated=_now(), published=published)
 
 
 def _blocking(issue: int) -> list[dict]:
@@ -362,6 +362,7 @@ def _record_review(args: argparse.Namespace, branch: str, change: feature.Draft)
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
     blocking = problems.blocking(subs)
+    feature.check(change)
     _write_block(feature.Snapshot(issue, state, change.body, subs))
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     github.comment(
@@ -371,7 +372,7 @@ def _record_review(args: argparse.Namespace, branch: str, change: feature.Draft)
         f"{args.summary}\n\n"
         f"Gate: {decision}",
     )
-    _save(change)
+    _save(change, published="the PR's ship block and the round's comment")
     print(f"Recorded review run {run_num} for #{issue}")
     print(f"GATE {decision}")
     print(f"  → {decision.next_step}")
@@ -711,10 +712,11 @@ def _escalate(args: argparse.Namespace, branch: str, change: feature.Draft) -> N
         sys.exit(f"Refusing to escalate #{issue}: {refusal}")
     # The questions first: the escalation is what ends a held ship run, so it must never land without
     # each problem saying what the user is asked.
+    feature.check(change)
     for number in args.problem:
         github.comment(number, f"⏸ Waiting on the user's call: {args.reason}")
     set_status(state, "needs-decision")
-    _save(change)
+    _save(change, published="the question on each problem" if args.problem else None)
     asked = f"Needs the user's call: {', '.join(f'#{n}' for n in args.problem)}\n\n" if args.problem else ""
     github.comment(
         issue,
@@ -757,6 +759,7 @@ def _record_redesign(args: argparse.Namespace, branch: str, change: feature.Draf
     rounds = max(decision.budget, used + 1)
     chains = gate.redesign_chains(state["review_history"], dismissed=feature.dismissed(subs))
     record_redesign(state, rounds=rounds, chains=chains, reason=args.reason)
+    feature.check(change)
     github.comment(
         issue,
         f"🔁 **Redesigned** after run {state['review_runs']}. {args.reason}\n\n"
@@ -764,7 +767,7 @@ def _record_redesign(args: argparse.Namespace, branch: str, change: feature.Draf
         f"Review budget {rounds} round(s), so a review covers the redesign: "
         f"{', '.join(sha[:9] for sha in commits)}.",
     )
-    _save(change)
+    _save(change, published="the redesign's comment")
     print(f"Recorded the redesign on #{issue}; review budget {rounds} round(s). Review it next.")
 
 
@@ -926,12 +929,15 @@ def _record_outcome(change: feature.Draft, note: str, *, status: str, already_cl
     thing again (a duplicated timeline comment is harmless; a feature marked merged whose issue is
     still open would be skipped by every future `feature reconcile` — permanently orphaned).
     """
+    feature.check(change)
     if already_closed:
         github.comment(change.issue, note)
     else:
         github.close_issue(change.issue, note)
     set_status(change.state, status)
-    _save(change)
+    _save(
+        change, published="the outcome's comment" if already_closed else "the outcome's comment and the issue's close"
+    )
 
 
 def _reconcile_note(pr: int, blocking: list[dict]) -> str:

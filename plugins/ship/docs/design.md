@@ -114,8 +114,11 @@ in between. Every command that changes a feature runs inside `feature.changing` 
 for one that changes only problems and the PR's block): this machine's lock on the feature, held from
 its read to its last write, so two sessions here take turns. Its write (`feature.save`) re-reads the
 issue, keeps the prose around the block as it is now, and refuses if the block changed since the
-read, which is a command on another machine or a hand edit: writing back would undo it. What no check
-can cover is a write from another machine in the instant between that re-read and the edit.
+read, which is a command on another machine or a hand edit: writing back would undo it. A command that
+publishes something before that write (a comment, the PR's block, the issue's close) checks the same
+way first (`feature.check`), so a conflict already there stops it before anything goes out; one that
+lands while it publishes is refused at the write, naming what went out. What no check can cover is a
+write from another machine in the instant between that re-read and the edit.
 
 ### The PR body
 

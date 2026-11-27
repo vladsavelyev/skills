@@ -126,16 +126,31 @@ def changing(branch: str, *, raw: bool = False) -> Iterator[Draft]:
         yield Draft(*load_state(branch, raw=raw))
 
 
-def save(change: Draft, *, updated: str) -> None:
-    """Write `change`'s state into its issue's body as it is now, so an edit to the prose around the block is kept.
-    Refuses if the block changed since the read: a command on another machine, which the lock doesn't reach, or a
-    hand edit. Writing it back would undo that change."""
+def _unchanged_body(change: Draft, *, published: str | None = None) -> str:
     current = github.get_issue_body(change.issue)
     if _canonical(parse_block_raw(current)) != change.baseline_json:
+        written = (
+            "nothing was written" if published is None else f"the state wasn't written, though {published} went out"
+        )
         raise StateChanged(
             f"#{change.issue}'s state changed since this command read it, by another machine or by hand. Writing it "
-            f"back would undo that change, so nothing was written: run the command again."
+            f"back would undo that change, so {written}: run the command again."
         )
+    return current
+
+
+def check(change: Draft) -> None:
+    """Refuse, as `save` does, if the block changed since `change` was read. A command that publishes something before
+    its state write checks first, so a conflict already there stops it before anything goes out."""
+    _unchanged_body(change)
+
+
+def save(change: Draft, *, updated: str, published: str | None = None) -> None:
+    """Write `change`'s state into its issue's body as it is now, so an edit to the prose around the block is kept.
+    Refuses if the block changed since the read: a command on another machine, which the lock doesn't reach, or a
+    hand edit. Writing it back would undo that change. `published` names what the command published before, for the
+    refusal to say."""
+    current = _unchanged_body(change, published=published)
     change.state["updated"] = updated
     change.body = replace_block(current, change.state)
     github.set_issue_body(change.issue, change.body)

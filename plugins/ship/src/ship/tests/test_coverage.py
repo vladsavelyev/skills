@@ -158,7 +158,7 @@ def sync(repo, monkeypatch):
     monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
     monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, repo, ""))
     monkeypatch.setattr(github, "comment", lambda issue, note: None)
-    monkeypatch.setattr(cli, "_save", lambda change: None)
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: None)
 
     def run(git_town):
         monkeypatch.setattr(cli, "git_town_sync", lambda stack: git_town())

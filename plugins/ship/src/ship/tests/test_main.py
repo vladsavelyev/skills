@@ -130,7 +130,7 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
     monkeypatch.setattr(
         feature, "load_state", lambda name, raw=False: (7, new_state(branch=name, base="x", updated="t"), "")
     )
-    monkeypatch.setattr(cli, "_save", lambda change: None)
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: None)
     monkeypatch.setattr(github, "open_pr_for_branch", lambda name: pr)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
     monkeypatch.setattr(github, "sub_issues", lambda issue: [])
@@ -379,7 +379,7 @@ def test_escalate_offers_what_the_gate_says_next(monkeypatch):
     )
     _stub_gate(monkeypatch, _merged_state(), [], decision)
     monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
-    monkeypatch.setattr(cli, "_save", lambda change: None)
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: None)
     monkeypatch.setattr(github, "comment", lambda number, body: posted.append(body))
     cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="budget spent", problem=[]))
     assert "not fixes" in posted[0] and "ship the rest as debt" not in posted[0]
@@ -392,7 +392,9 @@ def _stub_escalate(
     decision = decision or cli.gate.GateDecision(verdict=verdict, reasons=[], next_step="next", rounds_used=2, budget=2)
     _stub_gate(monkeypatch, _merged_state(), blocking, decision)
     monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
-    monkeypatch.setattr(cli, "_save", lambda change: posted.append((change.issue, f"saved {change.state['status']}")))
+    monkeypatch.setattr(
+        cli, "_save", lambda change, published=None: posted.append((change.issue, f"saved {change.state['status']}"))
+    )
     monkeypatch.setattr(github, "comment", lambda number, body: posted.append((number, body)))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setenv(hold.SESSION_ENV, "s1")
@@ -492,7 +494,7 @@ def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
     monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(5, "sev:low")])
     monkeypatch.setattr(cli, "_reconcile_block", lambda branch, number: None)
     monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
-    monkeypatch.setattr(cli, "_save", lambda change: did.append(f"save {change.state['fixes']}"))
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: did.append(f"save {change.state['fixes']}"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(f"close {note}"))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=["abc12", "def34"]))
     full = ["abc12" * 8, "def34" * 8]
@@ -504,7 +506,7 @@ def test_resolve_without_a_commit_records_no_fix(monkeypatch):
     _stub_issue(monkeypatch, _merged_state())
     monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(5, "sev:low")])
     monkeypatch.setattr(cli, "_reconcile_block", lambda branch, number: None)
-    monkeypatch.setattr(cli, "_save", lambda change: pytest.fail("wrote the state"))
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: pytest.fail("wrote the state"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(note))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=[]))
     assert did == ["Resolved."]
@@ -517,12 +519,25 @@ _RECORD = (
 
 
 def _stub_review_record(
-    monkeypatch, state: dict | None = None, subs: list[dict] | None = None, *, stub_block: bool = True
+    monkeypatch,
+    state: dict | None = None,
+    subs: list[dict] | None = None,
+    *,
+    stub_block: bool = True,
+    on_github: bool = False,
 ) -> list[str]:
+    """`on_github` keeps the feature's issue as `_stub_issue` does, for `review record` to read and write; else the
+    command changes `state` in place and writes nothing."""
     did: list[str] = []
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     state = state or _merged_state()
-    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, ""))
+    if on_github:
+        _stub_issue(monkeypatch, state)
+    else:
+        monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, ""))
+        monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
+        monkeypatch.setattr(feature, "check", lambda change: None)
+        monkeypatch.setattr(cli, "_save", lambda change, published=None: did.append("save"))
     monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
     monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [_problem(8, "sev:med")])
@@ -533,9 +548,29 @@ def _stub_review_record(
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
     monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment"))
-    monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
-    monkeypatch.setattr(cli, "_save", lambda change: did.append("save"))
     return did
+
+
+def _changed_on_the_laptop() -> None:
+    github.set_issue_body(7, render_block(parse_block(github.get_issue_body(7)) | {"last_prompt": "from the laptop"}))
+
+
+def test_review_record_refuses_before_publishing_anything_when_the_state_changed_since_its_read(monkeypatch):
+    did = _stub_review_record(monkeypatch, on_github=True)
+    monkeypatch.setattr(github, "pr_base_branch", lambda number: _changed_on_the_laptop() or "main")
+    with pytest.raises(SystemExit, match="so nothing was written"):
+        cli.main(_RECORD)
+    assert did == [] and parse_block(github.get_issue_body(7))["last_prompt"] == "from the laptop"
+
+
+def test_review_record_says_what_went_out_when_the_state_changes_while_it_publishes(monkeypatch):
+    did = _stub_review_record(monkeypatch, on_github=True)
+    monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment") or _changed_on_the_laptop())
+    with pytest.raises(
+        SystemExit, match="the state wasn't written, though the PR's ship block and the round's comment"
+    ):
+        cli.main(_RECORD)
+    assert did == ["block", "comment"] and parse_block(github.get_issue_body(7))["review_runs"] == 0
 
 
 def test_recording_a_review_holds_nobody(monkeypatch, tmp_path):
@@ -1194,7 +1229,7 @@ def test_reconcile_refuses_to_write_over_a_change_made_while_it_closes_out(monke
         close(number, note, not_planned)
 
     monkeypatch.setattr(github, "close_issue", close_while_the_laptop_writes)
-    with pytest.raises(SystemExit, match="changed since this command read it"):
+    with pytest.raises(SystemExit, match="though the outcome's comment and the issue's close went out"):
         cli.main(["reconcile"])
     assert (repo.state["last_prompt"], repo.state["status"]) == ("from the laptop", "in-review")
 
