@@ -1,9 +1,12 @@
 """Tests for the command-layer logic worth pinning: the merge close-out's ordering and wording."""
 
+import fcntl
 import json
-from contextlib import contextmanager
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
@@ -122,15 +125,11 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
     monkeypatch.setattr(cli, "parent_branch", lambda name: parent)
     monkeypatch.setattr(cli, "set_parent_branch", lambda name, base: did["parent"].append(base))
 
-    def open_issue(name, base, title):
+    def open_issue(name, base, title, pr):
         did["issue"] = base
-        return 7
+        return feature.Snapshot(7, new_state(branch=name, base=base, updated="t") | {"pr": pr}, "", [])
 
     monkeypatch.setattr(cli, "_open_feature_issue", open_issue)
-    monkeypatch.setattr(
-        feature, "load_state", lambda name, raw=False: (7, new_state(branch=name, base="x", updated="t"), "")
-    )
-    monkeypatch.setattr(cli, "_save", lambda change, published=None: None)
     monkeypatch.setattr(github, "open_pr_for_branch", lambda name: pr)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
     monkeypatch.setattr(github, "sub_issues", lambda issue: [])
@@ -1249,3 +1248,52 @@ def test_sync_refuses_a_stale_schema_before_it_syncs(monkeypatch):
     with pytest.raises(StaleSchema):
         cli.main(["sync", "--branch", "add-oauth"])
     assert synced == []
+
+
+@pytest.fixture
+def lock_waited(monkeypatch) -> threading.Event:
+    """Set once a command finds its feature's lock held by another and waits for it."""
+    waited = threading.Event()
+
+    def flock(fd, operation):
+        try:
+            return fcntl.flock(fd, operation)
+        except BlockingIOError:
+            waited.set()
+            raise
+
+    monkeypatch.setattr(feature, "fcntl", SimpleNamespace(flock=flock, LOCK_EX=fcntl.LOCK_EX, LOCK_NB=fcntl.LOCK_NB))
+    return waited
+
+
+def _waits_for_the_lock(lock_waited: threading.Event, branch: str, command, written: list) -> None:
+    with ThreadPoolExecutor(1) as pool:
+        with feature.locked(branch):
+            run = pool.submit(command)
+            assert lock_waited.wait(timeout=10), "the command didn't wait for the feature's lock"
+            assert written == []
+        run.result()
+    assert written
+
+
+def test_adopt_holds_the_feature_from_its_tracking_check_to_its_last_write(monkeypatch, lock_waited):
+    did = _stub_adopt(monkeypatch, parent=None, pr=None, pr_base=None)
+    written = []
+    open_issue = cli._open_feature_issue
+    monkeypatch.setattr(cli, "_open_feature_issue", lambda *a: written.append("issue") or open_issue(*a))
+    _waits_for_the_lock(lock_waited, "child", lambda: cli.cmd_adopt(_adopt_args()), written)
+    assert did["issue"] == "main"
+
+
+def test_problem_add_holds_the_feature_while_it_files(monkeypatch, lock_waited):
+    monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
+    calls = _stub_filing(monkeypatch, [])
+    args = cli.argparse.Namespace(branch="add-oauth", title="t", sev="low", body="d", body_file=None, repeats=None)
+    _waits_for_the_lock(lock_waited, "add-oauth", lambda: cli.cmd_problem_add(args), calls)
+
+
+def test_hand_off_holds_the_feature_while_it_hands_the_problem_off(monkeypatch, lock_waited):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
+    _stub_pr(monkeypatch, "MERGED")
+    args = cli.argparse.Namespace(branch="add-oauth", number=8, reason="fix in a separate PR")
+    _waits_for_the_lock(lock_waited, "add-oauth", lambda: cli.cmd_problem_hand_off(args), did)

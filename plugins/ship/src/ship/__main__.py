@@ -77,9 +77,13 @@ def _reconcile_block(branch: str, number: int) -> None:
 # ── commands ────────────────────────────────────────────────────────────────
 
 
-def _open_feature_issue(name: str, base: str, title: str | None) -> int:
-    """Create the tracking issue with an initial state block and wire it to the branch."""
+def _open_feature_issue(name: str, base: str, title: str | None, pr: int | None) -> feature.Snapshot:
+    """Create the tracking issue with an initial state block, linked to `pr` if there is one, and wire it to the
+    branch."""
     state = new_state(branch=name, base=base, updated=_now())
+    if pr is not None:
+        state["pr"] = pr
+        set_status(state, "in-review")
     resolved_title = title or name.replace("-", " ").capitalize()
     body = (
         f"## {resolved_title}\n\n"
@@ -88,7 +92,7 @@ def _open_feature_issue(name: str, base: str, title: str | None) -> int:
     )
     issue = github.create_issue(resolved_title, body, labels=["feature"])
     set_feature_issue(name, issue)
-    return issue
+    return feature.Snapshot(issue, state, body, [])
 
 
 def cmd_start(args: argparse.Namespace) -> None:
@@ -130,6 +134,11 @@ def cmd_start(args: argparse.Namespace) -> None:
 def cmd_adopt(args: argparse.Namespace) -> None:
     """Wire an already-existing branch into tracking (no new branch/worktree)."""
     name = args.branch or current_branch()
+    with feature.locked(name):
+        _adopt(args, name)
+
+
+def _adopt(args: argparse.Namespace, name: str) -> None:
     if feature_issue(name) is not None:
         sys.exit(f"Branch '{name}' is already tracked (issue #{feature_issue(name)}).")
 
@@ -157,19 +166,14 @@ def cmd_adopt(args: argparse.Namespace) -> None:
     # Adopting is the first thing that needs the labels, and creating them is idempotent, so make
     # sure of them every time instead of asking the agent to guess whether this repo has them.
     github.init_labels()
-    issue = _open_feature_issue(name, base, args.title)
-
+    feat = _open_feature_issue(name, base, args.title, pr)
     if pr is not None:
-        with feature.changing(name) as change:
-            change.state["pr"] = pr
-            set_status(change.state, "in-review")
-            _save(change)
-            _write_block(change.snapshot())
-        github.comment(issue, f"🔗 Linked PR #{pr}.")
+        _write_block(feat)
+        github.comment(feat.issue, f"🔗 Linked PR #{pr}.")
 
     print(f"Adopted existing branch '{name}'")
     print(f"  base branch : {base}")
-    print(f"  issue       : #{issue}")
+    print(f"  issue       : #{feat.issue}")
     if pr is not None:
         print(f"  linked PR   : #{pr}")
 
@@ -434,10 +438,11 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
         detail = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     else:
         detail = args.body or f"Found during review of feature #{parent}."
-    if args.repeats is not None:
-        _require_fixed(feature.snapshot(branch), args.repeats)
-        detail = problems.with_repeat(detail, args.repeats)
-    child = _add_problem(parent, args.title, args.sev, detail)
+    with feature.locked(branch):
+        if args.repeats is not None:
+            _require_fixed(feature.snapshot(branch), args.repeats)
+            detail = problems.with_repeat(detail, args.repeats)
+        child = _add_problem(parent, args.title, args.sev, detail)
     print(f"Added problem #{child} ({args.sev}) under feature #{parent}")
 
 
@@ -487,7 +492,13 @@ def cmd_problem_hand_off(args: argparse.Namespace) -> None:
     the gate exists to stop; after it, the fix needs a new PR anyway, and the feature's close-out
     shouldn't wait for one. A PR closed unmerged never landed its problems: those close as `wontfix`.
     """
-    feat = feature.snapshot(args.branch or current_branch())
+    branch = args.branch or current_branch()
+    with feature.locked(branch):
+        _hand_off(args, branch)
+
+
+def _hand_off(args: argparse.Namespace, branch: str) -> None:
+    feat = feature.snapshot(branch)
     sub = feat.problem(args.number)
     if sub["state"] != "OPEN":
         sys.exit(f"#{args.number} is already closed.")
