@@ -1022,7 +1022,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
         pr_state = states[swept["pr"]]
         if args.dry_run:
             decision = _decide(row, swept, pr_state)
-            print(decision.said)
+            print(decision.line)
             tally[decision.outcome] += 1
             continue
         with feature.locked(swept["branch"]):
@@ -1085,11 +1085,8 @@ class Outcome(Enum):
 
 @dataclass(frozen=True)
 class _Decision:
-    """What `feature reconcile` does with one feature, decided from one read of it: a dry run prints `said`, a real
-    run carries it out (`_carry_out`). `blocking` is a close-out's open problems, every one handed off."""
-
     outcome: Outcome
-    said: str
+    line: str
     blocking: list[dict] = field(default_factory=list)
 
 
@@ -1142,10 +1139,9 @@ def _upgrade(state: dict) -> str:
 
 
 def _carry_out(decision: _Decision, row: dict, change: feature.Draft, unreadable: list[tuple[int, str]]) -> bool:
-    """Carry out `decision` on the feature as `change` read it under its lock; whether it did, for the tally."""
     subject, state, pr = f"#{row['number']} ({row['title']})", change.state, change.state["pr"]
     if decision.outcome is Outcome.HUMAN:
-        print(decision.said)
+        print(decision.line)
         return True
     if decision.outcome is Outcome.REPAIRED:
         if not _publish_block(change):
