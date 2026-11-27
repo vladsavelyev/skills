@@ -6,7 +6,13 @@ base origin lacks) rather than ending the process, so each caller says it its ow
 prints it and exits, the merge guard denies the merge, the Stop hook reports it.
 """
 
-from dataclasses import dataclass
+import fcntl
+import hashlib
+import json
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 
 from . import budget, gate, github, problems
 from .errors import Refusal
@@ -22,7 +28,8 @@ from .gitwiring import (
     remote_ref,
     sensitive_patterns,
 )
-from .state import budget_run, fixes, parse_block, redesigns
+from .state import budget_run, fixes, parse_block, parse_block_raw, redesigns, replace_block
+from .statedir import ship_state_dir
 
 
 def resolve_issue(branch: str) -> int:
@@ -35,11 +42,12 @@ def resolve_issue(branch: str) -> int:
     return issue
 
 
-def load_state(branch: str) -> tuple[int, dict, str]:
-    """Return (issue_number, state_dict, raw_body) for a branch's feature issue."""
+def load_state(branch: str, *, raw: bool = False) -> tuple[int, dict, str]:
+    """Return (issue_number, state_dict, raw_body) for a branch's feature issue. `raw` skips the schema check, for
+    `feature migrate`, which upgrades the block."""
     issue = resolve_issue(branch)
     body = github.get_issue_body(issue)
-    return issue, parse_block(body), body
+    return issue, (parse_block_raw if raw else parse_block)(body), body
 
 
 @dataclass(frozen=True)
@@ -68,6 +76,96 @@ class Snapshot:
 def snapshot(branch: str) -> Snapshot:
     issue, state, body = load_state(branch)
     return Snapshot(issue, state, body, github.sub_issues(issue))
+
+
+class StateChanged(Refusal):
+    """The state block changed between a command's read and its write."""
+
+
+@contextmanager
+def locked(branch: str) -> Iterator[None]:
+    """This machine's lock on the feature of `branch`, held by every command that changes it, from its read to its
+    last write: its state block, its problems and its PR's ship block. GitHub replaces an issue or PR body whole and
+    has no conditional write, so two commands interleaving would each write back what it read, and the later would
+    undo the earlier. A branch of the same name in another repo shares the lock, which only makes one wait. The file
+    is named by a digest of the branch: a name git accepts can be longer than a filename may be."""
+    path = ship_state_dir() / "locks" / f"{hashlib.sha256(branch.encode()).hexdigest()}.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(f"Waiting for another `feature` command changing '{branch}' to finish…", file=sys.stderr, flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+@dataclass
+class Draft:
+    """A feature's state as a command changing it read it, under `locked`, and what it will write back (`save`)."""
+
+    issue: int
+    state: dict
+    body: str
+    baseline_json: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.baseline_json = _canonical(self.state)
+
+    def snapshot(self) -> Snapshot:
+        return Snapshot(self.issue, self.state, self.body, github.sub_issues(self.issue))
+
+
+def _canonical(state: dict) -> str:
+    return json.dumps(state, sort_keys=True)
+
+
+def draft(branch: str, *, raw: bool = False) -> Draft:
+    """The feature of `branch` read as `changing` reads it, for a command already holding its lock."""
+    return Draft(*load_state(branch, raw=raw))
+
+
+@contextmanager
+def changing(branch: str, *, raw: bool = False) -> Iterator[Draft]:
+    """The feature of `branch`, read under its lock for a command that changes it (`raw` as in `load_state`)."""
+    with locked(branch):
+        yield draft(branch, raw=raw)
+
+
+def _unchanged_body(change: Draft, *, written: str) -> str:
+    current = github.get_issue_body(change.issue)
+    if _canonical(parse_block_raw(current)) != change.baseline_json:
+        raise StateChanged(
+            f"#{change.issue}'s state changed since this command read it, by another machine or by hand. Writing it "
+            f"back would undo that change, so {written}: run the command again."
+        )
+    return current
+
+
+def check(change: Draft, *, done: str | None = None) -> None:
+    """Refuse, as `save` does, if the block changed since `change` was read. A command that publishes something checks
+    first, so a conflict already there stops it before that goes out. `done` names what the command did before, for
+    the refusal to say."""
+    _unchanged_body(
+        change, written="nothing was written" if done is None else f"nothing more was written, though {done} went out"
+    )
+
+
+def save(change: Draft, *, updated: str, published: str | None = None) -> None:
+    """Write `change`'s state into its issue's body as it is now, so an edit to the prose around the block is kept.
+    Refuses if the block changed since the read: a command on another machine, which the lock doesn't reach, or a
+    hand edit. Writing it back would undo that change. `published` names what the command published before, for the
+    refusal to say."""
+    current = _unchanged_body(
+        change,
+        written="nothing was written"
+        if published is None
+        else f"the state wasn't written, though {published} went out",
+    )
+    change.state["updated"] = updated
+    change.body = replace_block(current, change.state)
+    github.set_issue_body(change.issue, change.body)
+    change.baseline_json = _canonical(change.state)
 
 
 def resolve_budget(state: dict) -> tuple[int, bool, list[str]]:
@@ -175,8 +273,12 @@ def decide(branch: str, state: dict, subs: list[dict], merged: bool, *, head: st
 
 def gate_for(branch: str) -> tuple[int, dict, list[dict], gate.GateDecision]:
     issue, state, _ = load_state(branch)
+    return issue, state, *judge(branch, issue, state)
+
+
+def judge(branch: str, issue: int, state: dict) -> tuple[list[dict], gate.GateDecision]:
     subs = github.sub_issues(issue)
-    return issue, state, problems.blocking(subs), decide(branch, state, subs, pr_merged(state))
+    return problems.blocking(subs), decide(branch, state, subs, pr_merged(state))
 
 
 def blocking_refs(blocking: list[dict]) -> str:

@@ -9,8 +9,11 @@ See docs/design.md for the design and full command reference.
 import argparse
 import json
 import sys
-from pathlib import Path
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum, auto
+from pathlib import Path
 
 from . import assess, budget, feature, gate, github, hold, problems, reviewer, tidy
 from .errors import Refusal
@@ -41,7 +44,6 @@ from .state import (
     new_state,
     parse_block_raw,
     render_block,
-    replace_block,
     record_fix,
     record_redesign,
     record_review,
@@ -56,31 +58,32 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _save_state(issue: int, body: str, state: dict) -> None:
-    state["updated"] = _now()
-    github.set_issue_body(issue, replace_block(body, state))
+def _save(change: feature.Draft, *, published: str | None = None) -> None:
+    feature.save(change, updated=_now(), published=published)
 
 
 def _blocking(issue: int) -> list[dict]:
     return problems.blocking(github.sub_issues(issue))
 
 
-def _reconcile_block(branch: str, number: int) -> None:
+def _reconcile_block(branch: str, number: int, *, done: str | None) -> None:
     """Re-render the PR's ship block from the feature as GitHub has it now, once a command has changed
-    problem `number`, if a review round found it: that round's line shows only once every problem it
-    found is closed (`assess.render`)."""
-    feat = feature.snapshot(branch)
-    if feat.state["pr"] is None or number not in found_in(feat.state["review_history"]):
+    problem `number` (`done` names how, for a refusal to say), if a review round found it: that round's
+    line shows only once every problem it found is closed (`assess.render`)."""
+    change = feature.draft(branch)
+    if change.state["pr"] is None or number not in found_in(change.state["review_history"]):
         return
-    _write_block(feat)
+    _publish_block(change, done=done)
 
 
 # ── commands ────────────────────────────────────────────────────────────────
 
 
-def _open_feature_issue(name: str, base: str, title: str | None) -> int:
-    """Create the tracking issue with an initial state block and wire it to the branch."""
+def _open_feature_issue(name: str, base: str, title: str | None, pr: int | None) -> feature.Draft:
     state = new_state(branch=name, base=base, updated=_now())
+    if pr is not None:
+        state["pr"] = pr
+        set_status(state, "in-review")
     resolved_title = title or name.replace("-", " ").capitalize()
     body = (
         f"## {resolved_title}\n\n"
@@ -89,7 +92,7 @@ def _open_feature_issue(name: str, base: str, title: str | None) -> int:
     )
     issue = github.create_issue(resolved_title, body, labels=["feature"])
     set_feature_issue(name, issue)
-    return issue
+    return feature.Draft(issue, state, body)
 
 
 def cmd_start(args: argparse.Namespace) -> None:
@@ -131,6 +134,11 @@ def cmd_start(args: argparse.Namespace) -> None:
 def cmd_adopt(args: argparse.Namespace) -> None:
     """Wire an already-existing branch into tracking (no new branch/worktree)."""
     name = args.branch or current_branch()
+    with feature.locked(name):
+        _adopt(args, name)
+
+
+def _adopt(args: argparse.Namespace, name: str) -> None:
     if feature_issue(name) is not None:
         sys.exit(f"Branch '{name}' is already tracked (issue #{feature_issue(name)}).")
 
@@ -158,44 +166,39 @@ def cmd_adopt(args: argparse.Namespace) -> None:
     # Adopting is the first thing that needs the labels, and creating them is idempotent, so make
     # sure of them every time instead of asking the agent to guess whether this repo has them.
     github.init_labels()
-    issue = _open_feature_issue(name, base, args.title)
-
+    feat = _open_feature_issue(name, base, args.title, pr)
     if pr is not None:
-        _, state, body = feature.load_state(name)
-        state["pr"] = pr
-        set_status(state, "in-review")
-        _save_state(issue, body, state)
-        _write_block(feature.Snapshot(issue, state, body, github.sub_issues(issue)))
-        github.comment(issue, f"🔗 Linked PR #{pr}.")
+        _publish_block(feat, done=f"feature issue #{feat.issue}")
+        github.comment(feat.issue, f"🔗 Linked PR #{pr}.")
 
     print(f"Adopted existing branch '{name}'")
     print(f"  base branch : {base}")
-    print(f"  issue       : #{issue}")
+    print(f"  issue       : #{feat.issue}")
     if pr is not None:
         print(f"  linked PR   : #{pr}")
 
 
 def cmd_prompt(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    issue, state, body = feature.load_state(branch)
-    state["last_prompt"] = args.text
-    if state["status"] == "planning":
-        set_status(state, "in-progress")
-    _save_state(issue, body, state)
-    print(f"Recorded prompt for #{issue}")
+    with feature.changing(branch) as change:
+        change.state["last_prompt"] = args.text
+        if change.state["status"] == "planning":
+            set_status(change.state, "in-progress")
+        _save(change)
+    print(f"Recorded prompt for #{change.issue}")
 
 
 def cmd_pr(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    issue, state, body = feature.load_state(branch)
-    state["pr"] = args.number
-    set_status(state, "in-review")
-    _save_state(issue, body, state)
-    # Native link: `closes #<issue>` in the PR body so GitHub shows the connection in the PR
-    # sidebar and the issue timeline — not just a comment that no linked-issues view reads.
-    _write_block(feature.Snapshot(issue, state, body, github.sub_issues(issue)))
-    github.comment(issue, f"🔗 Linked PR #{args.number}.")
-    print(f"Linked PR #{args.number} to feature #{issue}")
+    with feature.changing(branch) as change:
+        change.state["pr"] = args.number
+        set_status(change.state, "in-review")
+        _save(change)
+        # Native link: `closes #<issue>` in the PR body so GitHub shows the connection in the PR
+        # sidebar and the issue timeline — not just a comment that no linked-issues view reads.
+        _publish_block(change, done=f"the link to PR #{args.number}")
+    github.comment(change.issue, f"🔗 Linked PR #{args.number}.")
+    print(f"Linked PR #{args.number} to feature #{change.issue}")
 
 
 def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
@@ -242,21 +245,29 @@ def _block_content(feat: feature.Snapshot) -> str:
     return assess.render(issue=feat.issue, review=review)
 
 
-def _write_block(feat: feature.Snapshot) -> bool:
-    """Set the linked PR's ship block from `feat`; True if the body changed."""
-    return github.set_pr_block(feat.state["pr"], _block_content(feat), feat.issue)
+def _checked_block(change: feature.Draft, *, done: str | None = None) -> str:
+    """The PR's ship block rendered from `change`, checked (`feature.check`) only after the render: rendering reads
+    GitHub, and a change to the feature made meanwhile would go out written over."""
+    content = _block_content(change.snapshot())
+    feature.check(change, done=done)
+    return content
+
+
+def _publish_block(change: feature.Draft, *, done: str | None = None) -> bool:
+    """Set the linked PR's ship block from `change`, the one way to; True if the body changed."""
+    return github.set_pr_block(change.state["pr"], _checked_block(change, done=done), change.issue)
 
 
 def cmd_describe(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    feat = feature.snapshot(branch)
-    pr = feat.state["pr"]
-    if pr is None:
-        sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
     text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     if not text.strip():
         sys.exit("Refusing to set an empty PR description.")
-    github.set_pr_description(pr, text, args.title, _block_content(feat), args.attach)
+    with feature.changing(branch) as change:
+        pr = change.state["pr"]
+        if pr is None:
+            sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
+        github.set_pr_description(pr, text, args.title, _checked_block(change), args.attach)
     print(f"Updated the description of PR #{pr}")
 
 
@@ -299,7 +310,12 @@ def _round_finds(issue: int, subs: list[dict], numbers: list[int]) -> tuple[dict
 
 def cmd_review_record(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
-    issue, state, body = feature.load_state(branch)
+    with feature.changing(branch) as change:
+        _record_review(args, branch, change)
+
+
+def _record_review(args: argparse.Namespace, branch: str, change: feature.Draft) -> None:
+    issue, state = change.issue, change.state
     if state["pr"] is None:
         sys.exit(
             f"Refusing to record a review for #{issue}: no PR is linked. Push the branch and "
@@ -358,7 +374,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # half-recorded round is not.) Reporting the verdict here is the point of the command — it's when
     # the agent learns whether to fix and review again or to stop and escalate.
     blocking = problems.blocking(subs)
-    _write_block(feature.Snapshot(issue, state, body, subs))
+    _publish_block(change)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     github.comment(
         issue,
@@ -367,9 +383,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
         f"{args.summary}\n\n"
         f"Gate: {decision}",
     )
-    # Re-read the body: it was fetched before several seconds of network calls, and writing the stale
-    # copy back would silently revert any human edit to the prose around the state block.
-    _save_state(issue, github.get_issue_body(issue), state)
+    _save(change, published="the PR's ship block and the round's comment")
     print(f"Recorded review run {run_num} for #{issue}")
     print(f"GATE {decision}")
     print(f"  → {decision.next_step}")
@@ -431,26 +445,31 @@ def cmd_problem_add(args: argparse.Namespace) -> None:
         detail = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     else:
         detail = args.body or f"Found during review of feature #{parent}."
-    if args.repeats is not None:
-        _require_fixed(feature.snapshot(branch), args.repeats)
-        detail = problems.with_repeat(detail, args.repeats)
-    child = _add_problem(parent, args.title, args.sev, detail)
+    with feature.locked(branch):
+        if args.repeats is not None:
+            _require_fixed(feature.snapshot(branch), args.repeats)
+            detail = problems.with_repeat(detail, args.repeats)
+        child = _add_problem(parent, args.title, args.sev, detail)
     print(f"Added problem #{child} ({args.sev}) under feature #{parent}")
 
 
 def cmd_problem_resolve(args: argparse.Namespace) -> None:
     """Close a fixed problem, recording its fix commits for the gate (`gate.needs_review`)."""
     branch = args.branch or current_branch()
-    feat = feature.snapshot(branch)
-    sub = feat.problem(args.number)
-    commits = [full_sha(c) for c in args.commit]
-    if commits:
-        # State first: if the close fails, the problem still blocks, and a re-run records nothing twice.
-        record_fix(feat.state, args.number, commits)
-        _save_state(feat.issue, feat.body, feat.state)
-    note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
-    github.close_issue(args.number, note)
-    _reconcile_block(branch, args.number)
+    with feature.changing(branch) as change:
+        sub = change.snapshot().problem(args.number)
+        commits = [full_sha(c) for c in args.commit]
+        if commits:
+            # State first: if the close fails, the problem still blocks, and a re-run records nothing twice.
+            record_fix(change.state, args.number, commits)
+            _save(change)
+        note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
+        github.close_issue(args.number, note)
+        _reconcile_block(
+            branch,
+            args.number,
+            done=f"the record of the fix and #{args.number}'s close" if commits else f"#{args.number}'s close",
+        )
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
 
@@ -462,18 +481,19 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     so a problem that matters is fixed, and one that doesn't is closed here with the reason on it.
     """
     branch = args.branch or current_branch()
-    feat = feature.snapshot(branch)
-    sub = feat.problem(args.number)
-    if sub["state"] == "OPEN":
-        # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
-        github.init_labels()
-        # Label first, close second: if the close fails, the problem is still open and still blocks,
-        # and a re-run finishes the job.
-        github.add_label(args.number, problems.WONTFIX)
-        github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
-    elif not problems.is_wontfix(sub):
-        sys.exit(f"#{args.number} is already closed.")
-    _reconcile_block(branch, args.number)
+    with feature.locked(branch):
+        sub = feature.snapshot(branch).problem(args.number)
+        closing = sub["state"] == "OPEN"
+        if closing:
+            # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
+            github.init_labels()
+            # Label first, close second: if the close fails, the problem is still open and still blocks,
+            # and a re-run finishes the job.
+            github.add_label(args.number, problems.WONTFIX)
+            github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
+        elif not problems.is_wontfix(sub):
+            sys.exit(f"#{args.number} is already closed.")
+        _reconcile_block(branch, args.number, done=f"#{args.number}'s close" if closing else None)
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
 
@@ -484,7 +504,13 @@ def cmd_problem_hand_off(args: argparse.Namespace) -> None:
     the gate exists to stop; after it, the fix needs a new PR anyway, and the feature's close-out
     shouldn't wait for one. A PR closed unmerged never landed its problems: those close as `wontfix`.
     """
-    feat = feature.snapshot(args.branch or current_branch())
+    branch = args.branch or current_branch()
+    with feature.locked(branch):
+        _hand_off(args, branch)
+
+
+def _hand_off(args: argparse.Namespace, branch: str) -> None:
+    feat = feature.snapshot(branch)
     sub = feat.problem(args.number)
     if sub["state"] != "OPEN":
         sys.exit(f"#{args.number} is already closed.")
@@ -529,21 +555,26 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
     block again; the `wontfix` label goes too, so the record doesn't call a live problem irrelevant.
     """
     branch = args.branch or current_branch()
-    feat = feature.snapshot(branch)
-    sub = feat.problem(args.number)
+    with feature.locked(branch):
+        _block_problem(args, branch)
+
+
+def _block_problem(args: argparse.Namespace, branch: str) -> None:
+    sub = feature.snapshot(branch).problem(args.number)
     stale = problems.WONTFIX in sub["labels"]
     # An open problem still labelled `wontfix` is a block whose label removal failed after the reopen;
     # the re-run finishes it rather than refusing.
     if sub["state"] == "OPEN" and not stale:
-        _reconcile_block(branch, args.number)
+        _reconcile_block(branch, args.number, done=None)
         print(f"#{args.number} is open, so it already blocks the gate.")
         return
     # Reopen first: if removing the label fails afterwards, the problem is open and blocks with a
     # stale label, which a re-run fixes. The other order could leave it closed and unlabelled,
     # looking fixed.
-    if sub["state"] != "OPEN":
+    reopened = sub["state"] != "OPEN"
+    if reopened:
         github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
-    _reconcile_block(branch, args.number)
+    _reconcile_block(branch, args.number, done=f"#{args.number}'s reopen" if reopened else None)
     if stale:
         github.remove_label(args.number, problems.WONTFIX)
     github.comment(args.number, f"⛔ Blocking again: {args.reason}")
@@ -655,7 +686,12 @@ def cmd_gate(args: argparse.Namespace) -> None:
 def cmd_budget(args: argparse.Namespace) -> None:
     """Show — or override — how many review rounds this feature gets before a human decides."""
     branch = args.branch or current_branch()
-    issue, state, body = feature.load_state(branch)
+    with feature.changing(branch) as change:
+        _set_budget(args, change)
+
+
+def _set_budget(args: argparse.Namespace, change: feature.Draft) -> None:
+    issue, state = change.issue, change.state
     used = len(gate.rounds_since_invalidation(state["review_history"]))
     if args.set is not None:
         # Below the rounds already spent, the budget can only ever read "spent" — which pins the gate
@@ -666,11 +702,11 @@ def cmd_budget(args: argparse.Namespace) -> None:
                 f"the gate at NEEDS_DECISION. Pass {used + 1} or more to buy another round."
             )
         set_budget(state, args.set)
-        _save_state(issue, body, state)
+        _save(change)
         github.comment(issue, f"🎚 Review budget set to {args.set} round(s).")
     elif args.auto:
         set_budget(state, None)
-        _save_state(issue, body, state)
+        _save(change)
         github.comment(issue, "🎚 Review budget back to auto-sizing from the PR diff.")
 
     rounds, _, why = feature.resolve_budget(state)
@@ -686,16 +722,25 @@ def cmd_escalate(args: argparse.Namespace) -> None:
     and parks the feature at `needs-decision` (visible on the board).
     """
     branch = args.branch or current_branch()
-    issue, state, blocking, decision = feature.gate_for(branch)
+    with feature.changing(branch) as change:
+        _escalate(args, branch, change)
+    if (session := hold.current_session()) is not None:
+        hold.release(session, branch=branch, checkout=main_checkout_root())
+    print(f"Escalated #{change.issue} for a human decision; status is now needs-decision.")
+
+
+def _escalate(args: argparse.Namespace, branch: str, change: feature.Draft) -> None:
+    issue, state = change.issue, change.state
+    blocking, decision = feature.judge(branch, issue, state)
     if refusal := gate.escalation_refusal(decision, open_problems=[s["number"] for s in blocking], named=args.problem):
         sys.exit(f"Refusing to escalate #{issue}: {refusal}")
     # The questions first: the escalation is what ends a held ship run, so it must never land without
     # each problem saying what the user is asked.
+    feature.check(change)
     for number in args.problem:
         github.comment(number, f"⏸ Waiting on the user's call: {args.reason}")
-    body = github.get_issue_body(issue)
     set_status(state, "needs-decision")
-    _save_state(issue, body, state)
+    _save(change, published="the question on each problem" if args.problem else None)
     asked = f"Needs the user's call: {', '.join(f'#{n}' for n in args.problem)}\n\n" if args.problem else ""
     github.comment(
         issue,
@@ -705,9 +750,6 @@ def cmd_escalate(args: argparse.Namespace) -> None:
         f"Open problems, every one blocking: {len(blocking)} — {feature.blocking_refs(blocking)}\n\n"
         f"Next: {decision.next_step}",
     )
-    if (session := hold.current_session()) is not None:
-        hold.release(session, branch=branch, checkout=main_checkout_root())
-    print(f"Escalated #{issue} for a human decision; status is now needs-decision.")
 
 
 def cmd_redesign(args: argparse.Namespace) -> None:
@@ -717,7 +759,12 @@ def cmd_redesign(args: argparse.Namespace) -> None:
     issue, and what tells the gate the recurrence is answered.
     """
     branch = args.branch or current_branch()
-    issue, state, _ = feature.load_state(branch)
+    with feature.changing(branch) as change:
+        _record_redesign(args, branch, change)
+
+
+def _record_redesign(args: argparse.Namespace, branch: str, change: feature.Draft) -> None:
+    issue, state = change.issue, change.state
     subs = github.sub_issues(issue)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     blocking = problems.blocking(subs)
@@ -736,6 +783,7 @@ def cmd_redesign(args: argparse.Namespace) -> None:
     rounds = max(decision.budget, used + 1)
     chains = gate.redesign_chains(state["review_history"], dismissed=feature.dismissed(subs))
     record_redesign(state, rounds=rounds, chains=chains, reason=args.reason)
+    feature.check(change)
     github.comment(
         issue,
         f"🔁 **Redesigned** after run {state['review_runs']}. {args.reason}\n\n"
@@ -743,7 +791,7 @@ def cmd_redesign(args: argparse.Namespace) -> None:
         f"Review budget {rounds} round(s), so a review covers the redesign: "
         f"{', '.join(sha[:9] for sha in commits)}.",
     )
-    _save_state(issue, github.get_issue_body(issue), state)
+    _save(change, published="the redesign's comment")
     print(f"Recorded the redesign on #{issue}; review budget {rounds} round(s). Review it next.")
 
 
@@ -788,16 +836,15 @@ def cmd_migrate(args: argparse.Namespace) -> None:
     label the repo doesn't have. Labels first, then the state block.
     """
     branch = args.branch or current_branch()
-    issue = feature.resolve_issue(branch)
     github.init_labels()
-    body = github.get_issue_body(issue)
-    state = parse_block_raw(body)
-    if state.get("schema") == SCHEMA:
-        print(f"Workflow labels are up to date; #{issue} is already at schema {SCHEMA}.")
-        return
-    was = state.get("schema")
-    _save_state(issue, body, migrate(state))
-    print(f"Workflow labels are up to date; migrated #{issue} state from schema {was} to {SCHEMA}.")
+    with feature.changing(branch, raw=True) as change:
+        was = change.state.get("schema")
+        if was == SCHEMA:
+            print(f"Workflow labels are up to date; #{change.issue} is already at schema {SCHEMA}.")
+            return
+        change.state = migrate(change.state)
+        _save(change)
+    print(f"Workflow labels are up to date; migrated #{change.issue} state from schema {was} to {SCHEMA}.")
 
 
 def cmd_merge(args: argparse.Namespace) -> None:
@@ -812,7 +859,13 @@ def cmd_merge(args: argparse.Namespace) -> None:
     review a merged PR). What the gate still had outstanding goes into the record instead.
     """
     branch = args.branch or current_branch()
-    issue, state, blocking, decision = feature.gate_for(branch)
+    with feature.changing(branch) as change:
+        _merge(args, branch, change)
+
+
+def _merge(args: argparse.Namespace, branch: str, change: feature.Draft) -> None:
+    issue, state = change.issue, change.state
+    blocking, decision = feature.judge(branch, issue, state)
     # "Merged" is a claim about the world, and this command writes it into the permanent record.
     # Verify it instead of trusting the caller's timing: run too early and the feature reads as
     # shipped while the PR is still open — or was closed unmerged, in which case the work never
@@ -851,7 +904,7 @@ def cmd_merge(args: argparse.Namespace) -> None:
     # The issue may already be closed: the PR's `Closes #<issue>` reference fires the moment it
     # merges into the default branch, which is usually seconds before anyone runs this. Comment
     # either way, close only if it's still open.
-    _record_outcome(issue, state, note, status="merged", already_closed=github.get_issue(issue)["state"] != "OPEN")
+    _record_outcome(change, note, status="merged", already_closed=github.get_issue(issue)["state"] != "OPEN")
     print(f"Marked feature #{issue} merged and closed it.")
     if decision.reasons:
         print(f"  shipped with: {'; '.join(decision.reasons)}")
@@ -892,7 +945,7 @@ def cmd_tidy(args: argparse.Namespace) -> None:
     print(f"Deleted the branch {branch}")
 
 
-def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_closed: bool) -> None:
+def _record_outcome(change: feature.Draft, note: str, *, status: str, already_closed: bool) -> None:
     """Post the outcome, close the issue, then write the terminal `status` — in that order.
 
     ORDER IS THE RETRY STRATEGY, as in `review record`: the state write goes last, so a failure to
@@ -900,14 +953,15 @@ def _record_outcome(issue: int, state: dict, note: str, *, status: str, already_
     thing again (a duplicated timeline comment is harmless; a feature marked merged whose issue is
     still open would be skipped by every future `feature reconcile` — permanently orphaned).
     """
+    feature.check(change)
     if already_closed:
-        github.comment(issue, note)
+        github.comment(change.issue, note)
     else:
-        github.close_issue(issue, note)
-    set_status(state, status)
-    # Re-read the body: it was fetched before several network calls, and writing a stale copy back
-    # would silently revert any human edit to the prose around the state block.
-    _save_state(issue, github.get_issue_body(issue), state)
+        github.close_issue(change.issue, note)
+    set_status(change.state, status)
+    _save(
+        change, published="the outcome's comment" if already_closed else "the outcome's comment and the issue's close"
+    )
 
 
 def _reconcile_note(pr: int, blocking: list[dict]) -> str:
@@ -958,111 +1012,39 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
     unreadable: list[tuple[int, str]] = []
     pending: list[tuple[dict, dict]] = []  # (issue row, state block)
     for row in rows:
-        try:
-            state = parse_block_raw(row["body"])
-        except ValueError as exc:
-            # Reported and non-zero at the end, never skipped silently: a `feature`-labelled issue
-            # whose state block is missing or hand-mangled is exactly the thing that would otherwise
-            # sit orphaned while the sweep claimed success.
-            unreadable.append((row["number"], str(exc)))
-            continue
-        # Read `pr` and `status` — the two fields every schema has carried — WITHOUT the usual
-        # schema check, because the features that need this sweep most are the oldest ones, whose
-        # branches are long deleted: `feature migrate` resolves its issue through the branch's git
-        # config, so it cannot reach them at all, and refusing to read them here would leave them
-        # permanently orphaned. A schema this CLI has never written is still refused (those fields
-        # could mean anything), and nothing is written back until the block has been migrated.
-        if state.get("schema") not in (1, SCHEMA):
-            unreadable.append((row["number"], f"state block has unknown schema {state.get('schema')!r}"))
-            continue
-        if state.get("pr") is not None and state.get("status") not in TERMINAL_STATUS:
+        state = _swept_state(row, unreadable)
+        if state is not None and state.get("pr") is not None and state.get("status") not in TERMINAL_STATUS:
             pending.append((row, state))
 
     states = github.pr_states([state["pr"] for _, state in pending])
-    closed_out, abandoned, repaired, needs_human = 0, 0, 0, 0
-    for row, state in pending:
-        issue, pr = row["number"], state["pr"]
-        pr_state = states[pr]
-        if pr_state == "OPEN":
-            # Still in flight. Repair its PR body's block if it is stale (a reference from before the
-            # closing link, or none, so this one closes itself on merge) or written more than once.
-            # Its state block is left alone even if stale: a live feature is reachable from its own
-            # branch, where `feature migrate` can upgrade it loudly and the gate can be re-derived.
-            stale = "" if state["schema"] == SCHEMA else f" (state is schema {state['schema']}; run `feature migrate`)"
-            if args.dry_run:
-                # Whether the body actually needs an edit is only knowable by reading it, which is
-                # what the real run does — don't claim a count here that a dry run can't know.
-                print(f"#{issue} ({row['title']}): PR #{pr} open → block repaired if stale{stale}")
-            elif _write_block(feature.Snapshot(issue, state, row["body"], github.sub_issues(issue))):
-                print(f"#{issue} ({row['title']}): block repaired — PR #{pr} closes it on merge{stale}")
-                repaired += 1
-            continue
-        if pr_state == "CLOSED":
-            # Closed unmerged: the work never landed, so this ends as `abandoned`, never `merged`.
-            # First rule out the one case where the feature is alive anyway — the branch was
-            # re-proposed under a new PR the state block doesn't know about. Closing that feature
-            # would bury work in flight, so hand it back with the number to link instead.
-            successor = github.open_pr_for_branch(state["branch"])
-            if successor is not None:
-                print(
-                    f"#{issue} ({row['title']}): PR #{pr} was closed unmerged, but branch "
-                    f"'{state['branch']}' has open PR #{successor} — run `feature pr {successor}`"
-                )
-                needs_human += 1
-                continue
-
-        # From here the feature reaches a terminal status, so the state block gets written — which
-        # means an old schema has to be upgraded first, right here: `feature migrate` resolves its
-        # issue through the branch's git config and these branches are gone.
-        blocking = _blocking(issue)
-        # Every open problem needs a decision first, merged or abandoned alike: once the feature is
-        # closed nothing would ever come back to an undecided one.
-        if undecided := problems.undecided(blocking):
-            print(
-                f"#{issue} ({row['title']}): PR #{pr} {pr_state}, but {len(undecided)} open problem(s) need a "
-                f"decision first: {feature.blocking_refs(undecided)} — `feature problem hand-off|wontfix <#> --reason …`"
-            )
-            needs_human += 1
-            continue
-        merged = pr_state == "MERGED"
-        upgrade = "" if state["schema"] == SCHEMA else f" + state upgraded from schema {state['schema']}"
+    tally: Counter[Outcome] = Counter()
+    for row, swept in pending:
+        pr_state = states[swept["pr"]]
         if args.dry_run:
-            outcome = f"would close out{upgrade}" if merged else f"would close as abandoned{upgrade}"
-            print(f"#{issue} ({row['title']}): PR #{pr} {pr_state}, status '{state['status']}' → {outcome}")
-            if merged:
-                closed_out += 1
-            else:
-                abandoned += 1
+            decision = _decide(row, swept, pr_state)
+            print(decision.line)
+            tally[decision.outcome] += 1
             continue
-        if state["schema"] != SCHEMA:
-            # The review budget and convergence trend the migration reconstructs no longer decide
-            # anything for a finished feature — but the block still has to be readable by every
-            # later command, and hand-editing 20 issue bodies is not a plan.
-            try:
-                state = migrate(state)
-            except ValueError as exc:
-                unreadable.append((issue, f"could not migrate its schema-{state['schema']} state block: {exc}"))
+        with feature.locked(swept["branch"]):
+            row = github.get_issue(row["number"])
+            if (now := _swept_state(row, unreadable)) is None:
                 continue
-        _record_outcome(
-            issue,
-            state,
-            _reconcile_note(pr, blocking) if merged else _abandoned_note(pr, blocking),
-            status="merged" if merged else "abandoned",
-            already_closed=row["state"] != "OPEN",
-        )
-        if merged:
-            print(f"#{issue} ({row['title']}): closed out — merged in PR #{pr}{upgrade}")
-            closed_out += 1
-        else:
-            print(f"#{issue} ({row['title']}): closed as abandoned — PR #{pr} never merged{upgrade}")
-            abandoned += 1
+            if (now["pr"], now["status"]) != (swept["pr"], swept["status"]):
+                print(
+                    f"#{row['number']} ({row['title']}): changed by another command meanwhile, now PR "
+                    f"#{now['pr']} and '{now['status']}', so left as it is"
+                )
+                continue
+            decision = _decide(row, now, pr_state)
+            if _carry_out(decision, row, feature.Draft(row["number"], now, row["body"]), unreadable):
+                tally[decision.outcome] += 1
 
     scope = f"feature for branch '{args.branch}'" if args.branch else f"{len(rows)} feature issue(s)"
     did = "would close" if args.dry_run else "closed"
-    tail = "" if args.dry_run else f", repaired {repaired}"
+    tail = "" if args.dry_run else f", repaired {tally[Outcome.REPAIRED]}"
     print(
-        f"Scanned {scope}: {did} out {closed_out} merged, {did} {abandoned} abandoned"
-        f"{tail}, {needs_human} needing a human decision."
+        f"Scanned {scope}: {did} out {tally[Outcome.MERGED]} merged, {did} {tally[Outcome.ABANDONED]} abandoned"
+        f"{tail}, {tally[Outcome.HUMAN]} needing a human decision."
     )
     if unreadable:
         print(f"\n{len(unreadable)} feature issue(s) could not be reconciled:")
@@ -1071,16 +1053,142 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
         sys.exit("Fix those by hand (the state block is in the issue body) and re-run.")
 
 
+def _swept_state(row: dict, unreadable: list[tuple[int, str]]) -> dict | None:
+    """The state block of feature issue `row`, or None once `unreadable` says why it can't be read.
+
+    Reported and non-zero at the end, never skipped silently: a `feature`-labelled issue whose state block is
+    missing or hand-mangled is exactly the thing that would otherwise sit orphaned while the sweep claimed success.
+
+    Read `pr` and `status` — the two fields every schema has carried — WITHOUT the usual schema check, because the
+    features that need this sweep most are the oldest ones, whose branches are long deleted: `feature migrate`
+    resolves its issue through the branch's git config, so it cannot reach them at all, and refusing to read them
+    here would leave them permanently orphaned. A schema this CLI has never written is still refused (those fields
+    could mean anything), and nothing is written back until the block has been migrated.
+    """
+    try:
+        state = parse_block_raw(row["body"])
+    except ValueError as exc:
+        unreadable.append((row["number"], str(exc)))
+        return None
+    if state.get("schema") not in (1, SCHEMA):
+        unreadable.append((row["number"], f"state block has unknown schema {state.get('schema')!r}"))
+        return None
+    return state
+
+
+class Outcome(Enum):
+    REPAIRED = auto()
+    HUMAN = auto()
+    MERGED = auto()
+    ABANDONED = auto()
+
+
+@dataclass(frozen=True)
+class _Decision:
+    outcome: Outcome
+    line: str
+    blocking: list[dict] = field(default_factory=list)
+
+
+def _decide(row: dict, state: dict, pr_state: str) -> _Decision:
+    subject, pr = f"#{row['number']} ({row['title']})", state["pr"]
+    if pr_state == "OPEN":
+        # Still in flight. Repair its PR body's block if it is stale (a reference from before the
+        # closing link, or none, so this one closes itself on merge) or written more than once.
+        # Its state block is left alone even if stale: a live feature is reachable from its own
+        # branch, where `feature migrate` can upgrade it loudly and the gate can be re-derived.
+        # Whether the body actually needs an edit is only knowable by reading it, which is what
+        # the real run does — so a dry run doesn't claim a count it can't know.
+        return _Decision(Outcome.REPAIRED, f"{subject}: PR #{pr} open → block repaired if stale{_stale(state)}")
+    if pr_state == "CLOSED":
+        # Closed unmerged: the work never landed, so this ends as `abandoned`, never `merged`.
+        # First rule out the one case where the feature is alive anyway — the branch was
+        # re-proposed under a new PR the state block doesn't know about. Closing that feature
+        # would bury work in flight, so hand it back with the number to link instead.
+        successor = github.open_pr_for_branch(state["branch"])
+        if successor is not None:
+            return _Decision(
+                Outcome.HUMAN,
+                f"{subject}: PR #{pr} was closed unmerged, but branch '{state['branch']}' has open PR "
+                f"#{successor} — run `feature pr {successor}`",
+            )
+    blocking = _blocking(row["number"])
+    # Every open problem needs a decision first, merged or abandoned alike: once the feature is
+    # closed nothing would ever come back to an undecided one.
+    if undecided := problems.undecided(blocking):
+        return _Decision(
+            Outcome.HUMAN,
+            f"{subject}: PR #{pr} {pr_state}, but {len(undecided)} open problem(s) need a decision first: "
+            f"{feature.blocking_refs(undecided)} — `feature problem hand-off|wontfix <#> --reason …`",
+        )
+    merged = pr_state == "MERGED"
+    would = "would close out" if merged else "would close as abandoned"
+    return _Decision(
+        Outcome.MERGED if merged else Outcome.ABANDONED,
+        f"{subject}: PR #{pr} {pr_state}, status '{state['status']}' → {would}{_upgrade(state)}",
+        blocking,
+    )
+
+
+def _stale(state: dict) -> str:
+    return "" if state["schema"] == SCHEMA else f" (state is schema {state['schema']}; run `feature migrate`)"
+
+
+def _upgrade(state: dict) -> str:
+    return "" if state["schema"] == SCHEMA else f" + state upgraded from schema {state['schema']}"
+
+
+def _carry_out(decision: _Decision, row: dict, change: feature.Draft, unreadable: list[tuple[int, str]]) -> bool:
+    subject, state, pr = f"#{row['number']} ({row['title']})", change.state, change.state["pr"]
+    if decision.outcome is Outcome.HUMAN:
+        print(decision.line)
+        return True
+    if decision.outcome is Outcome.REPAIRED:
+        if not _publish_block(change):
+            return False
+        print(f"{subject}: block repaired — PR #{pr} closes it on merge{_stale(state)}")
+        return True
+    # The feature reaches a terminal status, so the state block gets written — which means an old
+    # schema has to be upgraded first, right here: `feature migrate` resolves its issue through the
+    # branch's git config and these branches are gone. The review budget and convergence trend the
+    # migration reconstructs no longer decide anything for a finished feature — but the block still
+    # has to be readable by every later command, and hand-editing 20 issue bodies is not a plan.
+    upgrade = _upgrade(state)
+    try:
+        change.state = migrate(state)
+    except ValueError as exc:
+        unreadable.append((row["number"], f"could not migrate its schema-{state['schema']} state block: {exc}"))
+        return False
+    merged = decision.outcome is Outcome.MERGED
+    _record_outcome(
+        change,
+        _reconcile_note(pr, decision.blocking) if merged else _abandoned_note(pr, decision.blocking),
+        status="merged" if merged else "abandoned",
+        already_closed=row["state"] != "OPEN",
+    )
+    if merged:
+        print(f"{subject}: closed out — merged in PR #{pr}{upgrade}")
+    else:
+        print(f"{subject}: closed as abandoned — PR #{pr} never merged{upgrade}")
+    return True
+
+
 def cmd_sync(args: argparse.Namespace) -> None:
     """Sync the branch with its base (recursively, via git-town). If a merge of the base since the
     last review resolved code by hand, invalidate that review, so the next round starts a fresh
     budget. Delegates the actual sync to git-town; does not auto-resolve conflicts."""
     branch = args.branch or current_branch()
-    issue, state, _ = feature.load_state(branch)
-
+    # Refuse an unreadable state before the sync, which can't be taken back; it's read again under the lock once done.
+    feature.load_state(branch)
     print(f"Syncing {branch} via git-town{' (stack)' if args.stack else ''}…")
     git_town_sync(stack=args.stack)
     after = run_head_sha()
+    with feature.changing(branch) as change:
+        _record_sync(change, after)
+
+
+def _record_sync(change: feature.Draft, after: str) -> None:
+    issue, state = change.issue, change.state
 
     last = state["last_review"]
     if last is None:
@@ -1097,8 +1205,7 @@ def cmd_sync(args: argparse.Namespace) -> None:
     if stale:
         state["review_history"].append({"event": "base-advanced", "sha": after, "at": _now()})
     state["last_review"] = None
-    body = github.get_issue_body(issue)
-    _save_state(issue, body, state)
+    _save(change)
     note = f"🔄 Synced with base — now at {after} (reviewed at {last['sha']}), resolving conflicts in a merge."
     if stale:
         note += " Previous review invalidated; re-review and `feature review record` before merge."

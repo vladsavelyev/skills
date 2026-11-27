@@ -1,13 +1,19 @@
 """Tests for the command-layer logic worth pinning: the merge close-out's ordering and wording."""
 
+import fcntl
 import json
+import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
 from ship import __main__ as cli
 from ship import feature, github, hold, problems
 from ship.shell import CommandFailed
-from ship.state import SCHEMA, new_state, parse_block, render_block
+from ship.state import SCHEMA, StaleSchema, new_state, parse_block, render_block
 
 
 def _problem(number: int, sev: str, *, state: str = "OPEN", extra: tuple[str, ...] = ()) -> dict:
@@ -19,6 +25,20 @@ def _merged_state() -> dict:
     state["pr"] = 123
     state["status"] = "in-review"
     return state
+
+
+def _stub_issue(monkeypatch, state: dict) -> dict:
+    stored = {"body": render_block(state)}
+    monkeypatch.setattr(github, "use_owner_account", lambda: None)
+    monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
+    monkeypatch.setattr(github, "get_issue_body", lambda issue: stored["body"])
+    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: stored.update(body=body))
+    return stored
+
+
+def _stub_gate(monkeypatch, state: dict, blocking: list[dict], decision) -> None:
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, render_block(state)))
+    monkeypatch.setattr(feature, "judge", lambda branch, issue, state: (blocking, decision))
 
 
 def _stub_github(monkeypatch, *, calls: list[str], failing: str | None = None) -> None:
@@ -40,11 +60,11 @@ def _stub_github(monkeypatch, *, calls: list[str], failing: str | None = None) -
 def test_record_outcome_closes_then_writes_state(monkeypatch):
     calls: list[str] = []
     _stub_github(monkeypatch, calls=calls)
-    state = _merged_state()
-    cli._record_outcome(42, state, "✅ Merged.", status="merged", already_closed=False)
+    change = feature.Draft(42, _merged_state(), render_block(_merged_state()))
+    cli._record_outcome(change, "✅ Merged.", status="merged", already_closed=False)
     # The state write is LAST, and the close carries the note (one call, not close + comment).
     assert calls == ["close_issue", "set_issue_body"]
-    assert state["status"] == "merged"
+    assert change.state["status"] == "merged"
 
 
 def test_record_outcome_only_comments_when_already_closed(monkeypatch):
@@ -52,7 +72,12 @@ def test_record_outcome_only_comments_when_already_closed(monkeypatch):
     # close-out; `gh issue close` on a closed issue is not the way to find that out.
     calls: list[str] = []
     _stub_github(monkeypatch, calls=calls)
-    cli._record_outcome(42, _merged_state(), "✅ Merged.", status="merged", already_closed=True)
+    cli._record_outcome(
+        feature.Draft(42, _merged_state(), render_block(_merged_state())),
+        "✅ Merged.",
+        status="merged",
+        already_closed=True,
+    )
     assert calls == ["comment", "set_issue_body"]
 
 
@@ -62,11 +87,10 @@ def test_record_outcome_leaves_state_unwritten_if_closing_fails(monkeypatch):
     # means a re-run does the whole thing again.
     calls: list[str] = []
     _stub_github(monkeypatch, calls=calls, failing="close_issue")
-    state = _merged_state()
+    change = feature.Draft(42, _merged_state(), render_block(_merged_state()))
     with pytest.raises(CommandFailed):
-        cli._record_outcome(42, state, "✅ Merged.", status="merged", already_closed=False)
+        cli._record_outcome(change, "✅ Merged.", status="merged", already_closed=False)
     assert "set_issue_body" not in calls
-    assert state["status"] == "in-review"
 
 
 def test_reconcile_note_records_a_merge_with_no_open_problems():
@@ -99,13 +123,13 @@ def _stub_adopt(monkeypatch, *, parent: str | None, pr: int | None, pr_base: str
     monkeypatch.setattr(cli, "parent_branch", lambda name: parent)
     monkeypatch.setattr(cli, "set_parent_branch", lambda name, base: did["parent"].append(base))
 
-    def open_issue(name, base, title):
+    def open_issue(name, base, title, pr):
         did["issue"] = base
-        return 7
+        state = new_state(branch=name, base=base, updated="t") | {"pr": pr}
+        monkeypatch.setattr(github, "get_issue_body", lambda issue: render_block(state))
+        return feature.Draft(7, state, render_block(state))
 
     monkeypatch.setattr(cli, "_open_feature_issue", open_issue)
-    monkeypatch.setattr(feature, "load_state", lambda name: (7, new_state(branch=name, base="x", updated="t"), ""))
-    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
     monkeypatch.setattr(github, "open_pr_for_branch", lambda name: pr)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: pr_base)
     monkeypatch.setattr(github, "sub_issues", lambda issue: [])
@@ -152,7 +176,7 @@ def test_merge_refuses_while_any_problem_is_open(monkeypatch):
             _problem(8, "sev:low", state="CLOSED", extra=(problems.WONTFIX,)),
         ]
     )
-    monkeypatch.setattr(feature, "gate_for", lambda branch: (7, state, blocking, _decision(cli.gate.Verdict.MERGED)))
+    _stub_gate(monkeypatch, state, blocking, _decision(cli.gate.Verdict.MERGED))
     with pytest.raises(SystemExit) as exc:
         cli.cmd_merge(cli.argparse.Namespace(branch="add-oauth", force=False))
     refusal = str(exc.value)
@@ -167,10 +191,10 @@ def _decision(verdict, reasons: list[str] | None = None) -> "cli.gate.GateDecisi
 
 def _stub_close_out(monkeypatch, decision, blocking: list[dict]) -> list[str]:
     notes: list[str] = []
-    monkeypatch.setattr(feature, "gate_for", lambda branch: (7, _merged_state(), blocking, decision))
+    _stub_gate(monkeypatch, _merged_state(), blocking, decision)
     monkeypatch.setattr(github, "pr_state", lambda number: "OPEN")
     monkeypatch.setattr(github, "get_issue", lambda number: {"state": "OPEN"})
-    monkeypatch.setattr(cli, "_record_outcome", lambda issue, state, note, **kw: notes.append(note))
+    monkeypatch.setattr(cli, "_record_outcome", lambda change, note, **kw: notes.append(note))
     return notes
 
 
@@ -227,7 +251,7 @@ def _stub_gate_inputs(
     state = _merged_state()
     state["last_review"] = {"run": 1, "sha": reviewed, "new_blocking": 0, "new_low": 0, "regressions": 0, "summary": ""}
     state["review_history"] = [state["last_review"]]
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, ""))
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, ""))
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [])
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (2, False, []))
     monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
@@ -273,6 +297,7 @@ def test_a_low_problem_left_open_keeps_the_gate_shut(monkeypatch):
 def _stub_problem_edits(monkeypatch, sub: dict) -> list[str]:
     did: list[str] = []
     monkeypatch.setattr(feature, "snapshot", lambda branch: feature.Snapshot(7, _merged_state(), "", [sub]))
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, _merged_state(), ""))
     monkeypatch.setattr(github, "init_labels", lambda: did.append("init_labels"))
     monkeypatch.setattr(github, "add_label", lambda number, label: did.append(f"add {label}"))
     monkeypatch.setattr(github, "remove_label", lambda number, label: did.append(f"remove {label}"))
@@ -299,7 +324,7 @@ def test_wontfix_refuses_a_closed_problem(monkeypatch):
 
 
 def _stub_pr(monkeypatch, pr_state: str) -> None:
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, _merged_state(), ""))
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, _merged_state(), ""))
     monkeypatch.setattr(github, "pr_state", lambda number: pr_state)
 
 
@@ -352,9 +377,9 @@ def test_escalate_offers_what_the_gate_says_next(monkeypatch):
     decision = cli.gate.GateDecision(
         verdict=cli.gate.Verdict.NEEDS_DECISION, reasons=[], next_step=cli.gate._NEXT_DECISION, rounds_used=2, budget=2
     )
-    monkeypatch.setattr(feature, "gate_for", lambda branch: (7, _merged_state(), [], decision))
+    _stub_gate(monkeypatch, _merged_state(), [], decision)
     monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
-    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: None)
     monkeypatch.setattr(github, "comment", lambda number, body: posted.append(body))
     cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="budget spent", problem=[]))
     assert "not fixes" in posted[0] and "ship the rest as debt" not in posted[0]
@@ -365,10 +390,10 @@ def _stub_escalate(
 ) -> list[tuple[int, str]]:
     posted: list[tuple[int, str]] = []
     decision = decision or cli.gate.GateDecision(verdict=verdict, reasons=[], next_step="next", rounds_used=2, budget=2)
-    monkeypatch.setattr(feature, "gate_for", lambda branch: (7, _merged_state(), blocking, decision))
+    _stub_gate(monkeypatch, _merged_state(), blocking, decision)
     monkeypatch.setattr(github, "get_issue_body", lambda number: render_block(_merged_state()))
     monkeypatch.setattr(
-        cli, "_save_state", lambda issue, body, state: posted.append((issue, f"saved {state['status']}"))
+        cli, "_save", lambda change, published=None: posted.append((change.issue, f"saved {change.state['status']}"))
     )
     monkeypatch.setattr(github, "comment", lambda number, body: posted.append((number, body)))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
@@ -455,6 +480,7 @@ def test_closing_a_problem_holds_nobody(monkeypatch, tmp_path):
     monkeypatch.setattr(
         feature, "snapshot", lambda branch: feature.Snapshot(7, _merged_state(), "", [_problem(5, "sev:med")])
     )
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, _merged_state(), ""))
     monkeypatch.setattr(github, "init_labels", lambda: None)
     monkeypatch.setattr(github, "add_label", lambda number, label: None)
     monkeypatch.setattr(github, "close_issue", lambda number, note, not_planned=False: None)
@@ -465,12 +491,11 @@ def test_closing_a_problem_holds_nobody(monkeypatch, tmp_path):
 def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
     """The gate reads a low problem's fix commits from the state block to let them through unreviewed."""
     did: list[str] = []
-    state = _merged_state()
-    monkeypatch.setattr(
-        feature, "snapshot", lambda branch: feature.Snapshot(7, state, "body", [_problem(5, "sev:low")])
-    )
+    _stub_issue(monkeypatch, _merged_state())
+    monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(5, "sev:low")])
+    monkeypatch.setattr(cli, "_reconcile_block", lambda branch, number, done: None)
     monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
-    monkeypatch.setattr(cli, "_save_state", lambda issue, body, s: did.append(f"save {s['fixes']}"))
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: did.append(f"save {change.state['fixes']}"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(f"close {note}"))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=["abc12", "def34"]))
     full = ["abc12" * 8, "def34" * 8]
@@ -479,10 +504,10 @@ def test_resolve_records_its_fix_commits_before_closing(monkeypatch):
 
 def test_resolve_without_a_commit_records_no_fix(monkeypatch):
     did: list[str] = []
-    monkeypatch.setattr(
-        feature, "snapshot", lambda branch: feature.Snapshot(7, _merged_state(), "", [_problem(5, "sev:low")])
-    )
-    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: pytest.fail("wrote the state"))
+    _stub_issue(monkeypatch, _merged_state())
+    monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(5, "sev:low")])
+    monkeypatch.setattr(cli, "_reconcile_block", lambda branch, number, done: None)
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: pytest.fail("wrote the state"))
     monkeypatch.setattr(github, "close_issue", lambda number, note: did.append(note))
     cli.cmd_problem_resolve(cli.argparse.Namespace(branch="feat", number=5, commit=[]))
     assert did == ["Resolved."]
@@ -494,33 +519,55 @@ _RECORD = (
 ).split()
 
 
-def _stub_review_record(
-    monkeypatch, state: dict | None = None, subs: list[dict] | None = None, *, stub_block: bool = True
-) -> list[str]:
+def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict] | None = None) -> tuple[dict, list]:
+    stored = _stub_issue(monkeypatch, state or _merged_state())
     did: list[str] = []
-    monkeypatch.setattr(github, "use_owner_account", lambda: None)
-    state = state or _merged_state()
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, ""))
     monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
     monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [_problem(8, "sev:med")])
-    if stub_block:
-        monkeypatch.setattr(cli, "_write_block", lambda *args: did.append("block"))
+    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
+    monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: did.append("block") or True)
     decision = cli.gate.GateDecision(cli.gate.Verdict.REVIEW_AGAIN, ["open"], "fix", 1, 2)
     monkeypatch.setattr(feature, "decide", lambda *a, **k: decision)
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
     monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment"))
-    monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
-    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: did.append("save"))
-    return did
+    return stored, did
+
+
+def _stub_problem_bodies(monkeypatch, bodies: dict[int, str]) -> None:
+    """Each problem's body by its number; a problem not in `bodies` was filed as plain "repro"."""
+    feature_body = github.get_issue_body
+    monkeypatch.setattr(github, "get_issue_body", lambda n: feature_body(n) if n == 7 else bodies.get(n, "repro"))
+
+
+def _changed_on_the_laptop() -> None:
+    github.set_issue_body(7, render_block(parse_block(github.get_issue_body(7)) | {"last_prompt": "from the laptop"}))
+
+
+def test_review_record_refuses_before_publishing_anything_when_the_state_changed_since_its_read(monkeypatch):
+    _, did = _stub_review_record(monkeypatch)
+    monkeypatch.setattr(github, "pr_base_branch", lambda number: _changed_on_the_laptop() or "main")
+    with pytest.raises(SystemExit, match="so nothing was written"):
+        cli.main(_RECORD)
+    assert did == [] and parse_block(github.get_issue_body(7))["last_prompt"] == "from the laptop"
+
+
+def test_review_record_says_what_went_out_when_the_state_changes_while_it_publishes(monkeypatch):
+    _, did = _stub_review_record(monkeypatch)
+    monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment") or _changed_on_the_laptop())
+    with pytest.raises(
+        SystemExit, match="the state wasn't written, though the PR's ship block and the round's comment"
+    ):
+        cli.main(_RECORD)
+    assert did == ["block", "comment"] and parse_block(github.get_issue_body(7))["review_runs"] == 0
 
 
 def test_recording_a_review_holds_nobody(monkeypatch, tmp_path):
     _in_session(monkeypatch, tmp_path)
-    did = _stub_review_record(monkeypatch)
+    stored, _ = _stub_review_record(monkeypatch)
     cli.main(_RECORD)
-    assert "save" in did and hold.held("s1") == []
+    assert parse_block(stored["body"])["review_runs"] == 1 and hold.held("s1") == []
 
 
 def _add_args(repeats: int | None = None):
@@ -582,36 +629,38 @@ def test_problem_add_refuses_to_repeat_a_problem_that_was_never_fixed(monkeypatc
 def test_review_record_keeps_the_rounds_finds_filed_as_repeating_a_fixed_problem(monkeypatch):
     state = _merged_state()
     # #50 repeats a fixed problem too, but an earlier round found it: it's back as a regression.
-    state["review_history"] = [{"run": 1, "sha": "a1", "found": {"med": [50]}}]
+    state["review_history"] = [_round(1, {}) | {"found": {"med": [50]}}]
     state["review_runs"] = 1
     subs = [_problem(40, "sev:low"), _problem(41, "sev:high"), _problem(42, "sev:med"), _problem(50, "sev:med")]
-    _stub_review_record(monkeypatch, state, subs)
-    bodies = {7: "", 40: problems.with_repeat("repro", 30), 41: problems.with_repeat("repro", 31), 42: "repro"}
-    monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
+    stored, _ = _stub_review_record(monkeypatch, state, subs)
+    _stub_problem_bodies(monkeypatch, {40: problems.with_repeat("repro", 30), 41: problems.with_repeat("repro", 31)})
     found = _RECORD.index("8")
     cli.main([*_RECORD[:found], "40", "41", "42", "50", *_RECORD[found + 1 :], "--regressions", "50"])
-    assert state["review_history"][-1]["repeats"] == {"40": 30, "41": 31}
-    assert state["review_history"][-1]["regressed"] == [50] and state["review_history"][-1]["regressions"] == 1
+    recorded = parse_block(stored["body"])["review_history"][-1]
+    assert recorded["repeats"] == {"40": 30, "41": 31}
+    assert recorded["regressed"] == [50] and recorded["regressions"] == 1
 
 
 def test_a_low_find_bridges_the_recurrence_chain_its_redesign_covered(monkeypatch):
     """Round 2's #12 repeats #10 and is redesigned; round 3's low #14 repeats #12; round 4's #16
     repeats #14. That is the redesigned kind back, so a human decides."""
     state = _merged_state()
-    state["review_history"] = [{"run": 1, "sha": "a1", "found": {"med": [10]}}]
+    state["review_history"] = [_round(1, {}) | {"found": {"med": [10]}}]
     state["review_runs"] = 1
     subs = [_problem(10, "sev:med", state="CLOSED"), _problem(12, "sev:med", state="CLOSED")]
     subs += [_problem(14, "sev:low", state="CLOSED"), _problem(16, "sev:med")]
-    _stub_review_record(monkeypatch, state, subs)
-    bodies = {7: "", 12: problems.with_repeat("repro", 10), 14: problems.with_repeat("repro", 12)}
-    bodies[16] = problems.with_repeat("repro", 14)
-    monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
+    stored, _ = _stub_review_record(monkeypatch, state, subs)
+    repeats = {12: 10, 14: 12, 16: 14}
+    _stub_problem_bodies(monkeypatch, {n: problems.with_repeat("repro", r) for n, r in repeats.items()})
     found = _RECORD.index("8")
     for number in ("12", "14", "16"):
         cli.main([*_RECORD[:found], number, *_RECORD[found + 1 :]])
         if number == "12":
+            state = parse_block(stored["body"])
             chains = cli.gate.redesign_chains(state["review_history"], dismissed=frozenset())
             cli.record_redesign(state, rounds=5, chains=chains, reason="r")
+            stored["body"] = render_block(state)
+    state = parse_block(stored["body"])
     history = state["review_history"]
     d = cli.gate.evaluate(
         blocking_open=1,
@@ -629,11 +678,12 @@ def test_a_low_find_bridges_the_recurrence_chain_its_redesign_covered(monkeypatc
 @pytest.mark.parametrize("regressed", ["40", "9"])
 def test_review_record_refuses_a_regression_that_is_not_a_high_or_med_find(monkeypatch, regressed):
     subs = [_problem(40, "sev:low"), _problem(41, "sev:high")]
-    did = _stub_review_record(monkeypatch, _merged_state(), subs)
+    stored, did = _stub_review_record(monkeypatch, _merged_state(), subs)
+    body = stored["body"]
     found = _RECORD.index("8")
     with pytest.raises(SystemExit, match=f"--regressions #{regressed} is not a high/med problem in --found"):
         cli.main([*_RECORD[:found], "40", "41", *_RECORD[found + 1 :], "--regressions", regressed])
-    assert did == []
+    assert (did, stored["body"]) == ([], body)
 
 
 def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bought(monkeypatch, tmp_path):
@@ -644,7 +694,7 @@ def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bough
     subs = [_problem(12, "sev:high")]
     commits = []
     comments = []
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
+    stored = _stub_issue(monkeypatch, state)
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (state["review_budget"] or 2, False, []))
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
     monkeypatch.setattr(feature, "review_head", lambda branch, state, merged: "head")
@@ -653,9 +703,7 @@ def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bough
     monkeypatch.setattr(cli, "commits_since", lambda since, head: [(sha, ["p"]) for sha in commits])
     monkeypatch.setattr(cli, "full_sha", lambda rev: "c3c3c3c3c3")
     monkeypatch.setattr(github, "pr_head_sha", lambda pr: "c3c3c3c3c3")
-    monkeypatch.setattr(github, "get_issue_body", lambda issue: render_block(state))
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs)
-    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: comments.append(text))
     reason = "Every claim of checked covers unread data."
     redesign = ["redesign", "--branch", "add-oauth", "--reason", reason]
@@ -669,6 +717,7 @@ def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bough
     commits.append("c3c3c3c3c3")
     cli.main(redesign)
 
+    state = parse_block(stored["body"])
     assert state["redesigns"] == [{"run": 2, "chains": [10], "reason": reason}] and state["review_budget"] == 3
     assert "Redesigned" in comments[-1] and "#12 like #10" in comments[-1] and "c3c3c3c3c" in comments[-1]
     decision = feature.decide("add-oauth", state, subs, False)
@@ -683,11 +732,8 @@ def _stub_redesign(monkeypatch, *, pr_head: str = "c3c3c3c3c3") -> tuple[dict, l
     state = _merged_state()
     state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
     state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
-    stored = {"body": render_block(state)}
+    stored = _stub_issue(monkeypatch, state)
     comments: list[str] = []
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, parse_block(stored["body"]), stored["body"]))
-    monkeypatch.setattr(github, "get_issue_body", lambda issue: stored["body"])
-    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: stored.update(body=body))
     monkeypatch.setattr(github, "comment", lambda issue, text: comments.append(text))
     monkeypatch.setattr(github, "sub_issues", lambda issue: [_problem(12, "sev:high", state="CLOSED")])
     monkeypatch.setattr(github, "pr_head_sha", lambda pr: pr_head)
@@ -754,10 +800,10 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
     state = _merged_state()
     state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
     state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
-    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
+    stored = _stub_issue(monkeypatch, state)
     monkeypatch.setattr(github, "comment", lambda issue, text: None)
     cli.main(["budget", "--branch", "add-oauth", "--set", "4"])
+    state = parse_block(stored["body"])
     subs = [_problem(12, "sev:high")]
 
     def decide():
@@ -770,7 +816,7 @@ def test_a_bought_round_answers_the_recurrence_it_saw_not_the_next_one(monkeypat
 
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (3, False, []))
     cli.main(["budget", "--branch", "add-oauth", "--auto"])
-    assert state["review_budget_run"] is None
+    assert parse_block(stored["body"])["review_budget_run"] is None
 
 
 def test_reviewer_prints_the_default(capsys):
@@ -845,7 +891,7 @@ def _stub_pr_block(monkeypatch, state: dict, subs: list[dict]) -> list[str]:
 
     monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
+    _stub_issue(monkeypatch, state)
     monkeypatch.setattr(github, "sub_issues", lambda issue: list(subs))
     monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
     monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: blocks.append(content) or True)
@@ -861,7 +907,6 @@ def _stub_pr_block(monkeypatch, state: dict, subs: list[dict]) -> list[str]:
     )
     for name in ("init_labels", "comment"):
         monkeypatch.setattr(github, name, lambda *a, **k: None)
-    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
     monkeypatch.setattr(cli, "full_sha", lambda rev: rev * 8)
     return blocks
 
@@ -875,8 +920,7 @@ def test_a_round_is_recorded_without_its_line_while_its_problems_are_open(monkey
     state["review_history"].pop()
     state["review_runs"], state["last_review"] = 1, state["review_history"][-1]
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(8, "sev:med")]
-    _stub_review_record(monkeypatch, state, subs, stub_block=False)
-    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
+    _stub_review_record(monkeypatch, state, subs)
     written: list[str] = []
     monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: written.append(content) or True)
     cli.main(_RECORD)
@@ -924,19 +968,20 @@ def test_wontfix_still_refuses_a_problem_closed_as_fixed(monkeypatch):
     assert blocks == []
 
 
-def test_two_overlapping_closes_of_a_rounds_last_problems_show_its_line(monkeypatch):
-    """Both commands read the feature while #36 and #38 were open, and each closes one."""
+def test_two_overlapping_closes_of_a_rounds_last_problems_show_its_line(monkeypatch, tmp_path):
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med"), _problem(38, "sev:low")]
-    state = _graded_state()
-    blocks = _stub_pr_block(monkeypatch, state, subs)
-    fresh = feature.snapshot
-    stale = feature.snapshot("add-oauth")
-    # Each command reads the feature at its start, from before either close, and again once it closed its problem.
-    reads = iter([stale, None, stale, None])
-    monkeypatch.setattr(feature, "snapshot", lambda branch: next(reads) or fresh(branch))
-    cli.main(["problem", "resolve", "36", "--commit", "c3", "--branch", "add-oauth"])
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    add_label = github.add_label
+
+    def resolve_on_the_laptop_meanwhile(number, label):
+        with monkeypatch.context() as laptop:
+            laptop.setenv("XDG_STATE_HOME", str(tmp_path / "laptop"))
+            cli.main(["problem", "resolve", "36", "--commit", "c3", "--branch", "add-oauth"])
+        add_label(number, label)
+
+    monkeypatch.setattr(github, "add_label", resolve_on_the_laptop_meanwhile)
     cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
-    assert _ROUND_2 in blocks[-1]
+    assert _ROUND_2 not in blocks[0] and _ROUND_2 in blocks[-1]
 
 
 def test_a_block_rerun_after_its_block_write_failed_takes_the_line_down(monkeypatch):
@@ -992,11 +1037,32 @@ def test_a_round_recorded_while_a_problem_closes_stays_in_the_block(monkeypatch)
 
     def close_meanwhile(number, note, not_planned=False):
         close(number, note, not_planned)
-        monkeypatch.setattr(feature, "load_state", lambda branch: (7, later, render_block(later)))
+        github.set_issue_body(7, render_block(later))
 
     monkeypatch.setattr(github, "close_issue", close_meanwhile)
     cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
     assert "Review round 3" in blocks[-1] and _ROUND_2 in blocks[-1]
+
+
+@pytest.mark.parametrize(
+    ("command", "open_36", "went_out"),
+    [
+        (["problem", "resolve", "36", "--commit", "c3"], True, "the record of the fix and #36's close"),
+        (["problem", "wontfix", "36", "--reason", "by design"], True, "#36's close"),
+        (["problem", "block", "36", "--reason", "back again"], False, "#36's reopen"),
+        (["pr", "123"], True, "the link to PR #123"),
+    ],
+)
+def test_a_command_refuses_to_publish_the_block_over_a_change_made_while_it_renders_it(
+    monkeypatch, command, open_36, went_out
+):
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="OPEN" if open_36 else "CLOSED")]
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    relinked = _graded_state() | {"pr": 124}
+    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: github.set_issue_body(7, render_block(relinked)) or (3, 40))
+    with pytest.raises(SystemExit, match=re.escape(f"nothing more was written, though {went_out} went out")):
+        cli.main([*command, "--branch", "add-oauth"])
+    assert blocks == [] and parse_block(github.get_issue_body(7))["pr"] == 124
 
 
 def test_closing_a_problem_no_round_found_leaves_the_block_alone(monkeypatch):
@@ -1034,3 +1100,307 @@ def test_add_problem_at_the_limit_with_every_problem_open_refuses_before_filing(
     with pytest.raises(SystemExit, match="GitHub's limit"):
         cli._add_problem(7, "t", "low", "d")
     assert calls == []
+
+
+def test_two_commands_changing_one_feature_at_once_both_land(monkeypatch, lock_waited):
+    stored = _stub_issue(monkeypatch, _merged_state())
+    monkeypatch.setattr(github, "comment", lambda issue, text: None)
+    first_read = threading.Event()
+    load_state = feature.load_state
+
+    def read_until_the_second_waits(branch, raw=False):
+        read = load_state(branch, raw=raw)
+        if not first_read.is_set():
+            first_read.set()
+            assert lock_waited.wait(timeout=10), "the second command didn't wait for the first"
+        return read
+
+    monkeypatch.setattr(feature, "load_state", read_until_the_second_waits)
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(cli.main, ["prompt", "ship it", "--branch", "add-oauth"])
+        assert first_read.wait(timeout=10)
+        second = pool.submit(cli.main, ["budget", "--set", "4", "--branch", "add-oauth"])
+        first.result()
+        second.result()
+    state = parse_block(stored["body"])
+    assert (state["last_prompt"], state["review_budget"]) == ("ship it", 4)
+
+
+def test_a_change_made_elsewhere_between_the_read_and_the_write_is_refused_not_undone(monkeypatch):
+    stored = _stub_issue(monkeypatch, _merged_state())
+    with feature.changing("add-oauth") as change:
+        elsewhere = parse_block(stored["body"]) | {"last_prompt": "from the laptop"}
+        github.set_issue_body(7, render_block(elsewhere))
+        change.state["review_budget"] = 4
+        with pytest.raises(feature.StateChanged, match="nothing was written"):
+            cli._save(change)
+    assert parse_block(stored["body"])["last_prompt"] == "from the laptop"
+
+
+def test_the_write_keeps_an_edit_to_the_prose_around_the_block(monkeypatch):
+    stored = _stub_issue(monkeypatch, _merged_state())
+    with feature.changing("add-oauth") as change:
+        stored["body"] = "Notes added by hand.\n\n" + stored["body"]
+        change.state["review_budget"] = 4
+        cli._save(change)
+    assert stored["body"].startswith("Notes added by hand.") and parse_block(stored["body"])["review_budget"] == 4
+
+
+class _Repo:
+    def __init__(self, monkeypatch, state: dict, prs: dict[int, str]):
+        self.issue = {"number": 7, "title": "A feature", "state": "OPEN", "body": render_block(state)}
+        self.prs = prs
+        self.successor: int | None = None
+        self.notes: list[str] = []
+        self.blocks: list[int] = []
+        monkeypatch.setattr(github, "use_owner_account", lambda: None)
+        monkeypatch.setattr(github, "feature_issues", lambda: [dict(self.issue)])
+        monkeypatch.setattr(github, "get_issue", lambda number: dict(self.issue))
+        monkeypatch.setattr(github, "get_issue_body", lambda number: self.issue["body"])
+        monkeypatch.setattr(github, "set_issue_body", lambda number, body: self.issue.update(body=body))
+        monkeypatch.setattr(github, "pr_states", lambda numbers: {n: self.prs[n] for n in numbers})
+        monkeypatch.setattr(github, "pr_state", lambda number: self.prs[number])
+        monkeypatch.setattr(github, "sub_issues", lambda number: [])
+        monkeypatch.setattr(github, "open_pr_for_branch", lambda branch: self.successor)
+        monkeypatch.setattr(github, "comment", lambda number, note: self.notes.append(note))
+        monkeypatch.setattr(github, "close_issue", self._close)
+        monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: self.blocks.append(pr) or True)
+
+    def _close(self, number, note, not_planned=False):
+        self.notes.append(note)
+        self.issue["state"] = "CLOSED"
+
+    @property
+    def state(self) -> dict:
+        return parse_block(self.issue["body"])
+
+    def change(self, **fields) -> None:
+        self.issue["body"] = render_block(self.state | fields)
+
+    def before_lock(self, monkeypatch, other) -> None:
+        locked = feature.locked
+
+        @contextmanager
+        def after_other(branch):
+            other()
+            with locked(branch):
+                yield
+
+        monkeypatch.setattr(feature, "locked", after_other)
+
+
+def test_reconcile_closes_out_a_feature_whose_pr_merged(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    cli.main(["reconcile"])
+    assert (repo.state["status"], repo.issue["state"]) == ("merged", "CLOSED")
+    assert "Merged in PR #123" in repo.notes[-1]
+
+
+def test_reconcile_closes_a_feature_whose_pr_closed_unmerged_as_abandoned(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "CLOSED"})
+    cli.main(["reconcile"])
+    assert (repo.state["status"], repo.issue["state"]) == ("abandoned", "CLOSED")
+    assert "Abandoned" in repo.notes[-1]
+
+
+def test_reconcile_repairs_the_block_of_a_feature_whose_pr_is_open(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
+    cli.main(["reconcile"])
+    assert repo.blocks == [123] and repo.state["status"] == "in-review" and repo.notes == []
+
+
+def test_reconcile_leaves_an_open_prs_block_that_needs_no_repair_uncounted(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
+    monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: repo.blocks.append(pr) and False)
+    cli.main(["reconcile"])
+    assert capsys.readouterr().out == (
+        "Scanned 1 feature issue(s): closed out 0 merged, closed 0 abandoned, repaired 0, 0 needing a human decision.\n"
+    )
+
+
+def test_reconcile_hands_back_a_feature_whose_branch_has_a_new_pr(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "CLOSED"})
+    repo.successor = 130
+    cli.main(["reconcile"])
+    assert (repo.state["status"], repo.issue["state"], repo.notes) == ("in-review", "OPEN", [])
+    assert capsys.readouterr().out == (
+        "#7 (A feature): PR #123 was closed unmerged, but branch 'add-oauth' has open PR #130 — run `feature pr 130`\n"
+        "Scanned 1 feature issue(s): closed out 0 merged, closed 0 abandoned, repaired 0, 1 needing a human decision.\n"
+    )
+
+
+def test_reconcile_leaves_a_merged_feature_with_an_undecided_problem_for_a_human(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    monkeypatch.setattr(github, "sub_issues", lambda number: [_problem(8, "sev:med")])
+    cli.main(["reconcile"])
+    assert (repo.state["status"], repo.issue["state"], repo.notes) == ("in-review", "OPEN", [])
+    out = capsys.readouterr().out
+    assert "#7 (A feature): PR #123 MERGED, but 1 open problem(s) need a decision first: #8 [sev:med]" in out
+    assert "1 needing a human decision." in out
+
+
+def test_reconcile_upgrades_a_schema_1_block_as_it_closes_the_feature_out(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state() | {"schema": 1, "last_review": None}, {123: "MERGED"})
+    cli.main(["reconcile"])
+    assert (repo.state["schema"], repo.state["status"], repo.issue["state"]) == (SCHEMA, "merged", "CLOSED")
+    assert "#7 (A feature): closed out — merged in PR #123 + state upgraded from schema 1\n" in capsys.readouterr().out
+
+
+def test_reconcile_reports_a_schema_1_block_it_cannot_upgrade(monkeypatch, capsys):
+    state = _merged_state() | {"schema": 1}
+    del state["last_review"]
+    repo = _Repo(monkeypatch, state, {123: "MERGED"})
+    with pytest.raises(SystemExit, match="Fix those by hand"):
+        cli.main(["reconcile"])
+    assert (repo.issue["state"], repo.notes) == ("OPEN", [])
+    assert "#7: could not migrate its schema-1 state block" in capsys.readouterr().out
+
+
+def test_reconcile_leaves_a_feature_another_command_closed_out_meanwhile(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    repo.before_lock(monkeypatch, lambda: repo.change(status="merged"))
+    cli.main(["reconcile"])
+    assert repo.notes == [] and repo.issue["state"] == "OPEN"
+    assert "changed by another command meanwhile" in capsys.readouterr().out
+
+
+def test_reconcile_leaves_a_feature_relinked_to_a_new_pr_meanwhile(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED", 124: "OPEN"})
+    repo.before_lock(monkeypatch, lambda: repo.change(pr=124))
+    cli.main(["reconcile"])
+    assert (repo.state["pr"], repo.state["status"], repo.issue["state"]) == (124, "in-review", "OPEN")
+    assert "changed by another command meanwhile" in capsys.readouterr().out
+
+
+def test_reconcile_refuses_a_schema_it_never_wrote_that_a_block_got_meanwhile(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
+    repo.before_lock(monkeypatch, lambda: repo.change(schema=99))
+    with pytest.raises(SystemExit, match="Fix those by hand"):
+        cli.main(["reconcile"])
+    assert repo.blocks == [] and "#7: state block has unknown schema 99" in capsys.readouterr().out
+
+
+def test_reconcile_reports_a_block_mangled_meanwhile_as_unreadable(monkeypatch, capsys):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    repo.before_lock(monkeypatch, lambda: repo.issue.update(body="The block was deleted by hand."))
+    with pytest.raises(SystemExit, match="Fix those by hand"):
+        cli.main(["reconcile"])
+    assert repo.notes == [] and "1 feature issue(s) could not be reconciled" in capsys.readouterr().out
+
+
+def test_reconcile_refuses_to_write_over_a_change_made_while_it_closes_out(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "MERGED"})
+    close = repo._close
+
+    def close_while_the_laptop_writes(number, note, not_planned=False):
+        repo.change(last_prompt="from the laptop")
+        close(number, note, not_planned)
+
+    monkeypatch.setattr(github, "close_issue", close_while_the_laptop_writes)
+    with pytest.raises(SystemExit, match="though the outcome's comment and the issue's close went out"):
+        cli.main(["reconcile"])
+    assert (repo.state["last_prompt"], repo.state["status"]) == ("from the laptop", "in-review")
+
+
+def test_reconcile_refuses_to_repair_the_block_over_a_change_made_while_it_renders_it(monkeypatch):
+    repo = _Repo(monkeypatch, _merged_state(), {123: "OPEN"})
+    monkeypatch.setattr(github, "sub_issues", lambda number: repo.change(pr=124) or [])
+    with pytest.raises(SystemExit, match="nothing was written"):
+        cli.main(["reconcile"])
+    assert repo.blocks == []
+
+
+def test_describe_refuses_to_publish_over_a_change_made_while_it_renders_the_block(monkeypatch, tmp_path):
+    _stub_issue(monkeypatch, _merged_state())
+    relinked = _merged_state() | {"pr": 124}
+    monkeypatch.setattr(github, "sub_issues", lambda issue: github.set_issue_body(7, render_block(relinked)) or [])
+    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
+    published: list[int] = []
+    monkeypatch.setattr(github, "set_pr_description", lambda pr, *args: published.append(pr))
+    (tmp_path / "body.md").write_text("Why it changed.")
+    with pytest.raises(SystemExit, match="nothing was written"):
+        cli.main(["describe", "--body-file", str(tmp_path / "body.md"), "--branch", "add-oauth"])
+    assert published == []
+
+
+@pytest.mark.parametrize(
+    ("pr_state", "said"),
+    [
+        ("MERGED", "#7 (A feature): PR #123 MERGED, status 'in-review' → would close out\n"),
+        ("CLOSED", "#7 (A feature): PR #123 CLOSED, status 'in-review' → would close as abandoned\n"),
+        ("OPEN", "#7 (A feature): PR #123 open → block repaired if stale\n"),
+    ],
+)
+def test_a_dry_run_reconcile_says_what_it_would_do_and_writes_nothing(monkeypatch, capsys, pr_state, said):
+    repo = _Repo(monkeypatch, _merged_state(), {123: pr_state})
+    body = repo.issue["body"]
+    cli.main(["reconcile", "--dry-run"])
+    assert (repo.issue["body"], repo.notes, repo.blocks) == (body, [], [])
+    merged, abandoned = int(pr_state == "MERGED"), int(pr_state == "CLOSED")
+    assert capsys.readouterr().out == said + (
+        f"Scanned 1 feature issue(s): would close out {merged} merged, would close {abandoned} abandoned, "
+        "0 needing a human decision.\n"
+    )
+
+
+def test_sync_refuses_a_stale_schema_before_it_syncs(monkeypatch):
+    synced: list[bool] = []
+    _stub_issue(monkeypatch, _merged_state() | {"schema": 1})
+    monkeypatch.setattr(cli, "git_town_sync", lambda stack: synced.append(stack))
+    with pytest.raises(StaleSchema):
+        cli.main(["sync", "--branch", "add-oauth"])
+    assert synced == []
+
+
+@pytest.fixture
+def lock_waited(monkeypatch) -> threading.Event:
+    waited = threading.Event()
+
+    def flock(fd, operation):
+        try:
+            return fcntl.flock(fd, operation)
+        except BlockingIOError:
+            waited.set()
+            raise
+
+    monkeypatch.setattr(feature, "fcntl", SimpleNamespace(flock=flock, LOCK_EX=fcntl.LOCK_EX, LOCK_NB=fcntl.LOCK_NB))
+    return waited
+
+
+def _waits_for_the_lock(lock_waited: threading.Event, branch: str, command, written: list) -> None:
+    with ThreadPoolExecutor(1) as pool:
+        with feature.locked(branch):
+            run = pool.submit(command)
+            assert lock_waited.wait(timeout=10), "the command didn't wait for the feature's lock"
+            assert written == []
+        run.result()
+    assert written
+
+
+def test_adopt_holds_the_feature_from_its_tracking_check_to_its_last_write(monkeypatch, lock_waited):
+    did = _stub_adopt(monkeypatch, parent=None, pr=None, pr_base=None)
+    written = []
+    open_issue = cli._open_feature_issue
+    monkeypatch.setattr(cli, "_open_feature_issue", lambda *a: written.append("issue") or open_issue(*a))
+    _waits_for_the_lock(lock_waited, "child", lambda: cli.cmd_adopt(_adopt_args()), written)
+    assert did["issue"] == "main"
+
+
+def test_problem_add_holds_the_feature_while_it_files(monkeypatch, lock_waited):
+    monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
+    calls = _stub_filing(monkeypatch, [])
+    args = cli.argparse.Namespace(branch="add-oauth", title="t", sev="low", body="d", body_file=None, repeats=None)
+    _waits_for_the_lock(lock_waited, "add-oauth", lambda: cli.cmd_problem_add(args), calls)
+
+
+def test_hand_off_holds_the_feature_while_it_hands_the_problem_off(monkeypatch, lock_waited):
+    did = _stub_problem_edits(monkeypatch, _problem(8, "sev:low"))
+    _stub_pr(monkeypatch, "MERGED")
+    args = cli.argparse.Namespace(branch="add-oauth", number=8, reason="fix in a separate PR")
+    _waits_for_the_lock(lock_waited, "add-oauth", lambda: cli.cmd_problem_hand_off(args), did)
+
+
+def test_a_long_non_ascii_branch_takes_its_lock():
+    branch = "feature/" + "исправить-гонку-при-записи-состояния-фичи-из-двух-сессий"
+    with feature.locked(branch):
+        pass
