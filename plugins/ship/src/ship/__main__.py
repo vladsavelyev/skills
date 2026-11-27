@@ -349,10 +349,12 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     # round, and the gate's counts can't disagree with the labels the gate reads.
     subs = github.sub_issues(issue)
     found, new_serious, new_low = _round_finds(issue, subs, args.found)
-    if args.regressions > new_serious:
+    serious = {n for sev, nums in found.items() if f"sev:{sev}" != problems.LOW_SEV for n in nums}
+    regressed = sorted(set(args.regressions))
+    if stray := [n for n in regressed if n not in serious]:
         sys.exit(
-            f"Refusing to record a review for #{issue}: --regressions {args.regressions} is more than "
-            f"the {new_serious} high/med problem(s) in --found, and a regression is one of those."
+            f"Refusing to record a review for #{issue}: --regressions {', '.join(f'#{n}' for n in stray)} is not "
+            f"a high/med problem in --found, and a regression is one of those."
         )
     earlier = found_in(state["review_history"])
     entry = record_review(
@@ -360,11 +362,12 @@ def cmd_review_record(args: argparse.Namespace) -> None:
         sha=args.sha,
         new_blocking=new_serious,
         new_low=new_low,
-        regressions=args.regressions,
+        regressions=len(regressed),
         summary=args.summary,
     )
     run_num = entry["run"]
     entry["found"] = found
+    entry["regressed"] = regressed
     entry["repeats"] = problems.recurring(found, earlier=earlier, body=github.get_issue_body)
     entry["depth"] = args.depth
     entry["grade"] = {
@@ -387,7 +390,7 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     github.comment(
         issue,
         f"🔍 Review run {run_num} ({args.sha}): {new_serious} new high/med, {new_low} new low, "
-        f"{args.regressions} regression(s). {len(blocking)} problem(s) open, every one blocking. "
+        f"{len(regressed)} regression(s). {len(blocking)} problem(s) open, every one blocking. "
         f"{args.summary}\n\n"
         f"Gate: {decision}",
     )
@@ -745,19 +748,23 @@ def cmd_redesign(args: argparse.Namespace) -> None:
     subs = github.sub_issues(issue)
     decision = feature.decide(branch, state, subs, feature.pr_merged(state))
     blocking = problems.blocking(subs)
-    if refusal := gate.redesign_refusal(decision, open_problems=[s["number"] for s in blocking]):
+    head = feature.review_head(branch, state, False)
+    commits = (
+        [] if state["last_review"] is None else [sha for sha, _ in commits_since(state["last_review"]["sha"], head)]
+    )
+    if refusal := gate.redesign_refusal(decision, open_problems=[s["number"] for s in blocking], commits=commits):
         sys.exit(f"Refusing to record a redesign on #{issue}: {refusal}")
-    unreviewed = feature.unreviewed(state, feature.review_head(branch, state, False), subs)
     used = len(gate.rounds_since_invalidation(state["review_history"]))
     rounds = max(decision.budget, used + 1)
-    record_redesign(state, rounds)
+    chains = gate.redesign_chains(state["review_history"], dismissed=feature.dismissed(subs))
+    record_redesign(state, rounds=rounds, chains=chains, reason=args.reason)
     _save_state(issue, body, state)
     github.comment(
         issue,
         f"🔁 **Redesigned** after run {state['review_runs']}. {args.reason}\n\n"
         f"Why: {'; '.join(decision.reasons)}\n\n"
         f"Review budget {rounds} round(s), so a review covers the redesign: "
-        f"{', '.join(sha[:9] for sha in unreviewed)}.",
+        f"{', '.join(sha[:9] for sha in commits)}.",
     )
     print(f"Recorded the redesign on #{issue}; review budget {rounds} round(s). Review it next.")
 
@@ -1202,8 +1209,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument(
         "--regressions",
         type=int,
-        default=0,
-        help="Count of previously-closed BLOCKING (high/med) problems re-opened this run — a churn signal",
+        nargs="*",
+        default=[],
+        metavar="PROBLEM",
+        help="The high/med problems in --found that were fixed and are back (`problem block`): a fix that didn't hold",
     )
     r.add_argument("--summary", required=True)
     r.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="Effort the reviewer ran at")

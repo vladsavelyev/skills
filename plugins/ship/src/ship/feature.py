@@ -20,7 +20,7 @@ from .gitwiring import (
     remote_ref,
     sensitive_patterns,
 )
-from .state import budget_run, fixes, parse_block, redesign_run
+from .state import budget_run, fixes, parse_block, redesigns
 
 
 def resolve_issue(branch: str) -> int:
@@ -121,6 +121,11 @@ def unreviewed(state: dict, head: str, subs: list[dict]) -> list[str]:
     return gate.needs_review(changes, low_fixes=low_fixes, sensitive=sensitive_patterns())
 
 
+def dismissed(subs: list[dict]) -> frozenset[int]:
+    """The problems closed as not relevant (`wontfix`): no find among them recurs (`gate.recurrences`)."""
+    return frozenset(s["number"] for s in subs if s["state"] == "CLOSED" and problems.is_wontfix(s))
+
+
 def decide(branch: str, state: dict, subs: list[dict], merged: bool, *, head: str | None = None) -> gate.GateDecision:
     """The merge gate for `branch`, from its state and its problems (`github.sub_issues`), judged at
     `head` (default `review_head`)."""
@@ -132,7 +137,8 @@ def decide(branch: str, state: dict, subs: list[dict], merged: bool, *, head: st
         budget=rounds,
         unreviewed=unreviewed(state, head or review_head(branch, state, merged), subs),
         budget_answers=budget_run(state) if pinned else None,
-        redesign_answers=redesign_run(state),
+        redesigns=redesigns(state),
+        dismissed=dismissed(subs),
         pr_merged=merged,
     )
 

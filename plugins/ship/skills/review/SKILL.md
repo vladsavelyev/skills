@@ -37,7 +37,7 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 | Depth for the next round | `feature depth` |
 | Default reviewer | `feature reviewer` |
 | Options for the reviewer's effort | `feature effort --depth <depth> --model-options '<json>'` |
-| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
+| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <problem#> ...] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
 | Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED; 1/2 mean the command failed |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
@@ -198,7 +198,7 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
      a guard the intent doesn't need.
    - Same meaning as an OPEN problem → skip.
    - Same as a CLOSED fixed problem → regression. `feature problem block <#> --reason
-     "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, count it in `--regressions`).
+     "rediscovered: <repro>"`, and pass it in `--found` (and, if high/med, in `--regressions`).
      Never `gh issue reopen`.
    - A new bug, but the same mistake as a CLOSED fixed problem in a new place: a fix at the root of
      that problem's cause would have prevented this one too → file it with `--repeats <#>`. It tells

@@ -587,8 +587,19 @@ def test_review_record_keeps_the_rounds_high_and_med_finds_filed_as_repeating_a_
     bodies = {7: "", 41: problems.with_repeat("repro", 31), 42: "repro"}
     monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
     found = _RECORD.index("8")
-    cli.main([*_RECORD[:found], "40", "41", "42", "50", *_RECORD[found + 1 :], "--regressions", "1"])
+    cli.main([*_RECORD[:found], "40", "41", "42", "50", *_RECORD[found + 1 :], "--regressions", "50"])
     assert state["review_history"][-1]["repeats"] == {"41": 31}
+    assert state["review_history"][-1]["regressed"] == [50] and state["review_history"][-1]["regressions"] == 1
+
+
+@pytest.mark.parametrize("regressed", ["40", "9"])
+def test_review_record_refuses_a_regression_that_is_not_a_high_or_med_find(monkeypatch, regressed):
+    subs = [_problem(40, "sev:low"), _problem(41, "sev:high")]
+    did = _stub_review_record(monkeypatch, _merged_state(), subs)
+    found = _RECORD.index("8")
+    with pytest.raises(SystemExit, match=f"--regressions #{regressed} is not a high/med problem in --found"):
+        cli.main([*_RECORD[:found], "40", "41", *_RECORD[found + 1 :], "--regressions", regressed])
+    assert did == []
 
 
 def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bought(monkeypatch, tmp_path):
@@ -599,25 +610,31 @@ def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bough
     state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
     state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
     subs = [_problem(12, "sev:high")]
-    unreviewed = []
+    commits = []
     comments = []
     monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
     monkeypatch.setattr(feature, "resolve_budget", lambda state: (state["review_budget"] or 2, False, []))
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
     monkeypatch.setattr(feature, "review_head", lambda branch, state, merged: "head")
-    monkeypatch.setattr(feature, "unreviewed", lambda state, head, subs: list(unreviewed))
+    # The redesign is all docs (#228): `needs_review` leaves none of its commits for a review.
+    monkeypatch.setattr(feature, "unreviewed", lambda state, head, subs: [])
+    monkeypatch.setattr(cli, "commits_since", lambda since, head: [(sha, ["p"]) for sha in commits])
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs)
     monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: comments.append(text))
-    redesign = ["redesign", "--branch", "add-oauth", "--reason", "Every claim of checked covers unread data."]
+    reason = "Every claim of checked covers unread data."
+    redesign = ["redesign", "--branch", "add-oauth", "--reason", reason]
 
     with pytest.raises(SystemExit, match="#12 still open"):
         cli.main(redesign)
     subs[0] = _problem(12, "sev:high", state="CLOSED")
-    unreviewed.append("c3c3c3c3c3")
+    assert feature.decide("add-oauth", state, subs, False).verdict is cli.gate.Verdict.REDESIGN
+    with pytest.raises(SystemExit, match="nothing was redesigned"):
+        cli.main(redesign)
+    commits.append("c3c3c3c3c3")
     cli.main(redesign)
 
-    assert state["redesign_run"] == 2 and state["review_budget"] == 3
+    assert state["redesigns"] == [{"run": 2, "chains": [10], "reason": reason}] and state["review_budget"] == 3
     assert "Redesigned" in comments[-1] and "#12 like #10" in comments[-1] and "c3c3c3c3c" in comments[-1]
     decision = feature.decide("add-oauth", state, subs, False)
     assert decision.verdict is cli.gate.Verdict.REVIEW_AGAIN

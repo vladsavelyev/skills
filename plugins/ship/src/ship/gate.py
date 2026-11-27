@@ -31,6 +31,7 @@ instead whether every filed problem is closed (fixed, or `wontfix` as not releva
 settle it says so out loud instead of asking for one more expensive round forever.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -145,33 +146,49 @@ def rounds_since_invalidation(history: list[dict]) -> list[dict]:
     return list(reversed(runs))
 
 
-def recurrence_reason(rounds: list[dict]) -> str | None:
-    """Why the last round says the fixes aren't holding, or None.
+def _links(history: list[dict]) -> dict[int, int]:
+    """Every `--repeats` link the recorded rounds of `history` keep: a problem -> the fixed one it repeats."""
+    return {int(problem): repeated for entry in history for problem, repeated in entry.get("repeats", {}).items()}
 
-    It found again what an earlier fix should have ruled out: the very problem, re-opened (a
-    regression), or a new problem of the same kind, which the review filed as repeating the fixed
-    one (`problem add --repeats`, kept per round as `repeats`). Either way a fix patched an instance
-    and the design still produces the bug, so the gate recommends a redesign over another round.
 
-    Only the last round counts: a human who saw an earlier recurrence and bought more rounds answered
-    it. Like the trend, it reads high/med finds only: a nit back again is not evidence the design is
-    wrong.
+def chain_root(problem: int, history: list[dict]) -> int:
+    """The first problem of `problem`'s recurrence chain: the one it repeats, and the one that one repeats,
+    back to a problem that repeats none. A link always points at an older issue, fixed when the newer one
+    was filed (`problem add --repeats`), so the walk ends."""
+    links = _links(history)
+    while problem in links:
+        problem = links[problem]
+    return problem
+
+
+def recurrences(entry: dict, *, dismissed: frozenset[int]) -> dict[int, int]:
+    """What round `entry` found again of a kind an earlier fix should have ruled out, each find with the
+    problem it brings back: a fixed problem re-opened (a regression, `regressed`, which brings back itself),
+    or a new one filed as repeating a fixed one (`problem add --repeats`, kept as `repeats`). A find since
+    closed as `wontfix` (`dismissed`) is no recurrence: it wasn't a bug.
+
+    Like the trend, it reads high/med finds only: a nit back again is not evidence the design is wrong.
+    Rounds recorded before `repeats` or `regressed` existed name no find, so nothing recurs in them:
+    kept ON PURPOSE, as they are written into feature issues of PRs in flight.
     """
-    if not rounds or rounds[-1].get("placeholder"):
-        return None
-    last = rounds[-1]
-    back = []
-    if last["regressions"]:
-        back.append(f"re-opened {last['regressions']} fixed high/med problem(s)")
-    # Rounds recorded before `repeats` existed carry no links. Kept ON PURPOSE: they are already
-    # written into feature issues of PRs in flight.
-    if repeats := last.get("repeats"):
+    back = {int(problem): repeated for problem, repeated in entry.get("repeats", {}).items()}
+    back |= {problem: problem for problem in entry.get("regressed", [])}
+    return {problem: back[problem] for problem in sorted(back) if problem not in dismissed}
+
+
+def _recurrence_reason(entry: dict, back: dict[int, int]) -> str:
+    """Why round `entry`, which brought `back` (`recurrences`), says the fixes aren't holding: a fix
+    patched an instance and the design still produces the bug."""
+    regressed = [problem for problem, repeated in back.items() if problem == repeated]
+    repeats = {problem: repeated for problem, repeated in back.items() if problem != repeated}
+    said = []
+    if regressed:
+        said.append(f"re-opened {len(regressed)} fixed high/med problem(s) ({', '.join(f'#{n}' for n in regressed)})")
+    if repeats:
         pairs = ", ".join(f"#{problem} like #{repeated}" for problem, repeated in repeats.items())
-        back.append(f"found {len(repeats)} new high/med problem(s) of a kind already fixed ({pairs})")
-    if not back:
-        return None
+        said.append(f"found {len(repeats)} new high/med problem(s) of a kind already fixed ({pairs})")
     cause = "the fixes patch instances, not the cause, so redesign rather than review again"
-    return f"run {last['run']} {' and '.join(back)}: {cause}"
+    return f"run {entry['run']} {' and '.join(said)}: {cause}"
 
 
 def rising_reason(rounds: list[dict]) -> str | None:
@@ -253,13 +270,12 @@ def escalation_refusal(decision: GateDecision, *, open_problems: list[int], name
     return None
 
 
-def redesign_refusal(decision: GateDecision, *, open_problems: list[int]) -> str | None:
+def redesign_refusal(decision: GateDecision, *, open_problems: list[int], commits: list[str]) -> str | None:
     """Why `feature redesign` must not record a redesign yet, or None if it may.
 
-    Recording it buys the round that reviews it, so it needs a recurrence to answer and every problem
-    closed (by the redesign, or fixed or `wontfix` beside it). Then the gate stays at REDESIGN only
-    while commits wait for a review: with none, the recurring finds were closed as not relevant, and
-    the gate is OPEN.
+    Recording it buys the round that reviews it, so it needs a recurrence to answer, every problem
+    closed (by the redesign, or fixed or `wontfix` beside it), and `commits` since the last review,
+    which are the redesign.
     """
     if decision.verdict is not Verdict.REDESIGN:
         return f"the gate is {decision.verdict}, not REDESIGN: no recurrence is waiting for a redesign."
@@ -268,7 +284,17 @@ def redesign_refusal(decision: GateDecision, *, open_problems: list[int]) -> str
             f"{', '.join(f'#{n}' for n in sorted(open_problems))} still open. Close each the redesign fixes "
             f"with its commits (`feature problem resolve <#> --commit <sha>…`), and fix or `wontfix` the rest."
         )
+    if not commits:
+        return "no commit since the last review, so nothing was redesigned. Commit and push the redesign first."
     return None
+
+
+def redesign_chains(history: list[dict], *, dismissed: frozenset[int]) -> list[int]:
+    """The recurrence chains (`chain_root`) the last round of `history` brought back, which a redesign
+    answering it covers."""
+    rounds = rounds_since_invalidation(history)
+    back = recurrences(rounds[-1], dismissed=dismissed) if rounds else {}
+    return sorted({chain_root(repeated, history) for repeated in back.values()})
 
 
 def evaluate(
@@ -279,7 +305,8 @@ def evaluate(
     budget: int,
     unreviewed: list[str],
     budget_answers: int | None = None,
-    redesign_answers: int | None = None,
+    redesigns: Sequence[dict] = (),
+    dismissed: frozenset[int] = frozenset(),
     pr_merged: bool = False,
 ) -> GateDecision:
     """Decide the gate from the open problems and whether a review covers the current code.
@@ -300,14 +327,21 @@ def evaluate(
     `budget_answers` is the run an explicit budget was set after (`feature budget --set`), or None
     when the budget is auto-sized.
 
-    `redesign_answers` is the run a redesign answered (`feature redesign`), or None if the run never
-    redesigned. A recurrence after it is one the redesign didn't stop, which goes to a human.
+    `redesigns` are the run's redesigns (`state.redesigns`): each the run it answered and the
+    recurrence chains it covered. A recurrence stays REDESIGN, even with every problem closed and
+    nothing left for `needs_review`, until a redesign answers its round: the redesign may be all docs.
+    Then the round that reviews it is due whatever it touched. A chain back after its redesign is one
+    the redesign didn't stop, which goes to a human; another chain gets its own redesign.
+
+    `dismissed` are the problems closed as `wontfix`: a recurrence among them is none.
 
     `pr_merged` short-circuits to MERGED but keeps the reasons: the loop is over either way, and the
     close-out record names what was still outstanding when the PR went in.
     """
     rounds = rounds_since_invalidation(history)
     used = len(rounds)
+    last = rounds[-1] if rounds else None
+    redesigned = {r["run"] for r in redesigns}
 
     reasons: list[str] = []
     if blocking_open > 0:
@@ -319,27 +353,32 @@ def evaluate(
             f"{len(unreviewed)} commit(s) since the last review at {last_review['sha'][:9]} have never been "
             f"reviewed: {', '.join(sha[:9] for sha in unreviewed)}"
         )
-
-    if pr_merged:
-        return GateDecision(Verdict.MERGED, reasons, _NEXT_MERGED, used, budget)
-    if not reasons:
-        return GateDecision(Verdict.OPEN, [], _NEXT_OPEN, used, budget)
+    if last is not None and last["run"] in redesigned:
+        reasons.append(f"the redesign after run {last['run']} has not been reviewed")
 
     # A budget raised, or a redesign made, after a round outranks that round's churn signals: they
     # answered it, and re-deriving the signals from the same unchanged history would make `budget
     # --set` a silent no-op and send the run to redesign again what it just redesigned. A round
     # recorded after it is new evidence, judged on its own: a pinned budget once hid every later
     # recurrence.
-    if not (rounds and rounds[-1]["run"] in (budget_answers, redesign_answers)):
-        # The recurrence goes first, ahead of a spent budget too: it is the one signal that says what
-        # to do instead of another round.
-        if recurring := recurrence_reason(rounds):
-            if redesign_answers is not None and rounds[-1]["run"] > redesign_answers:
-                again = f"{recurring}, though the run already redesigned after run {redesign_answers}"
-                return GateDecision(Verdict.NEEDS_DECISION, [*reasons, again], _NEXT_REDESIGN_FAILED, used, budget)
-            return GateDecision(Verdict.REDESIGN, [*reasons, recurring], _NEXT_REDESIGN, used, budget)
-        if rising := rising_reason(rounds):
-            return GateDecision(Verdict.NEEDS_DECISION, [*reasons, rising], _NEXT_DECISION, used, budget)
+    judged = last is not None and last["run"] not in {budget_answers, *redesigned}
+    back = recurrences(last, dismissed=dismissed) if judged else {}
+
+    if pr_merged:
+        return GateDecision(Verdict.MERGED, reasons, _NEXT_MERGED, used, budget)
+    if not reasons and not back:
+        return GateDecision(Verdict.OPEN, [], _NEXT_OPEN, used, budget)
+    # The recurrence goes first, ahead of a spent budget too: it is the one signal that says what to do
+    # instead of another round.
+    if back:
+        recurring = _recurrence_reason(last, back)
+        chains = {chain_root(repeated, history) for repeated in back.values()}
+        if missed := [r["run"] for r in redesigns if r["run"] < last["run"] and chains & set(r["chains"])]:
+            again = f"{recurring}, though the run already redesigned for that kind after run {missed[-1]}"
+            return GateDecision(Verdict.NEEDS_DECISION, [*reasons, again], _NEXT_REDESIGN_FAILED, used, budget)
+        return GateDecision(Verdict.REDESIGN, [*reasons, recurring], _NEXT_REDESIGN, used, budget)
+    if judged and (rising := rising_reason(rounds)):
+        return GateDecision(Verdict.NEEDS_DECISION, [*reasons, rising], _NEXT_DECISION, used, budget)
     if used >= budget:
         return GateDecision(
             Verdict.NEEDS_DECISION,
