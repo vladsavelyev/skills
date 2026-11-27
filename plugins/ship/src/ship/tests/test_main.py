@@ -3,7 +3,6 @@
 import fcntl
 import json
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -31,6 +30,7 @@ def _stub_issue(monkeypatch, state: dict) -> dict:
     """The tracking issue's body on GitHub, holding `state`: each read parses it afresh, as `gh` would, and each
     write replaces it. Returns it as {"body": …}."""
     stored = {"body": render_block(state)}
+    monkeypatch.setattr(github, "use_owner_account", lambda: None)
     monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
     monkeypatch.setattr(github, "get_issue_body", lambda issue: stored["body"])
     monkeypatch.setattr(github, "set_issue_body", lambda issue, body: stored.update(body=body))
@@ -1088,30 +1088,26 @@ def test_add_problem_at_the_limit_with_every_problem_open_refuses_before_filing(
     assert calls == []
 
 
-def _slow_issue(monkeypatch, state: dict) -> dict:
-    """The tracking issue as `_stub_issue` keeps it, with each read slow enough that two commands started together
-    both read it before either writes."""
-    stored = _stub_issue(monkeypatch, state)
+def test_two_commands_changing_one_feature_at_once_both_land(monkeypatch, lock_waited):
+    stored = _stub_issue(monkeypatch, _merged_state())
+    monkeypatch.setattr(github, "comment", lambda issue, text: None)
+    first_read = threading.Event()
     load_state = feature.load_state
 
-    def slow(branch, raw=False):
+    def read_until_the_second_waits(branch, raw=False):
         read = load_state(branch, raw=raw)
-        time.sleep(0.3)
+        if not first_read.is_set():
+            first_read.set()
+            assert lock_waited.wait(timeout=10), "the second command didn't wait for the first"
         return read
 
-    monkeypatch.setattr(feature, "load_state", slow)
-    monkeypatch.setattr(github, "comment", lambda issue, text: None)
-    return stored
-
-
-def test_two_commands_changing_one_feature_at_once_both_land(monkeypatch):
-    stored = _slow_issue(monkeypatch, _merged_state())
-    commands = [["prompt", "ship it", "--branch", "add-oauth"], ["budget", "--set", "4", "--branch", "add-oauth"]]
-    threads = [threading.Thread(target=cli.main, args=(argv,)) for argv in commands]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    monkeypatch.setattr(feature, "load_state", read_until_the_second_waits)
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(cli.main, ["prompt", "ship it", "--branch", "add-oauth"])
+        assert first_read.wait(timeout=10)
+        second = pool.submit(cli.main, ["budget", "--set", "4", "--branch", "add-oauth"])
+        first.result()
+        second.result()
     state = parse_block(stored["body"])
     assert (state["last_prompt"], state["review_budget"]) == ("ship it", 4)
 
