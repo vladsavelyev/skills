@@ -855,6 +855,51 @@ def test_reopening_a_rounds_problem_takes_its_line_down(monkeypatch):
     assert "Review round 2" not in blocks[-1] and "Review round 1" in blocks[-1]
 
 
+def test_a_wontfix_rerun_after_its_block_write_failed_shows_the_line(monkeypatch):
+    """#229: the re-run refused "already closed" before the block write, so the round's line stayed hidden."""
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED"), _problem(38, "sev:low")]
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+
+    def unavailable(pr, content, issue):
+        raise CommandFailed(1, ["gh"], "", "503")
+
+    monkeypatch.setattr(github, "set_pr_block", unavailable)
+    with pytest.raises(CommandFailed):
+        cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
+    subs[2] = _problem(38, "sev:low", state="CLOSED", extra=(problems.WONTFIX,))
+    monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: blocks.append(content) or True)
+    cli.main(["problem", "wontfix", "38", "--reason", "by design", "--branch", "add-oauth"])
+    assert _ROUND_2 in blocks[-1]
+
+
+def test_wontfix_still_refuses_a_problem_closed_as_fixed(monkeypatch):
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED")]
+    blocks = _stub_pr_block(monkeypatch, _graded_state(), subs)
+    with pytest.raises(SystemExit, match="#36 is already closed"):
+        cli.main(["problem", "wontfix", "36", "--reason", "by design", "--branch", "add-oauth"])
+    assert blocks == []
+
+
+def test_a_block_written_while_a_problem_reopens_is_written_over(monkeypatch):
+    """#231: another session re-renders the block from GitHub between the hide and the reopen."""
+    subs = [_problem(30, "sev:med", state="CLOSED"), _problem(36, "sev:med", state="CLOSED")]
+    subs.append(_problem(38, "sev:low", state="CLOSED"))
+    state = _graded_state()
+    blocks = _stub_pr_block(monkeypatch, state, subs)
+
+    concurrent: list[str] = []
+
+    def reopen(number, body):
+        concurrent.append(cli._block_content(state, 7, subs))
+        blocks.append(concurrent[-1])
+        subs[1] = _problem(36, "sev:med")
+
+    monkeypatch.setattr(github, "reopen_issue", reopen)
+    cli.main(["problem", "block", "36", "--reason", "back again", "--branch", "add-oauth"])
+    assert _ROUND_2 in concurrent[0]
+    assert "Review round 2" not in blocks[-1]
+
+
 def test_closing_a_problem_no_round_found_leaves_the_block_alone(monkeypatch):
     """A failed check or a reviewer's comment, filed while babysitting: no round's line waits on it."""
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(50, "sev:med")]

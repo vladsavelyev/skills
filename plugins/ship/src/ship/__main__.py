@@ -448,7 +448,6 @@ def cmd_problem_resolve(args: argparse.Namespace) -> None:
         _save_state(feat.issue, feat.body, feat.state)
     note = f"Fixed in {', '.join(c[:9] for c in commits)}." if commits else "Resolved."
     github.close_issue(args.number, note)
-    # After the close: if the block's write fails, its round's line stays hidden, never shown early.
     _show_problem_change(feat, args.number, "CLOSED")
     print(f"Resolved problem #{args.number} [{problems.severity(sub)}]")
 
@@ -462,15 +461,16 @@ def cmd_problem_wontfix(args: argparse.Namespace) -> None:
     """
     feat = feature.snapshot(args.branch or current_branch())
     sub = feat.problem(args.number)
-    if sub["state"] != "OPEN":
+    # A problem already closed as `wontfix` is a re-run whose block write failed: it finishes that.
+    if sub["state"] == "OPEN":
+        # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
+        github.init_labels()
+        # Label first, close second: if the close fails, the problem is still open and still blocks,
+        # and a re-run finishes the job.
+        github.add_label(args.number, problems.WONTFIX)
+        github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
+    elif not problems.is_wontfix(sub):
         sys.exit(f"#{args.number} is already closed.")
-    # The label may be missing from a repo onboarded on an older CLI; creating them is idempotent.
-    github.init_labels()
-    # Label first, close second: if the close fails, the problem is still open and still blocks,
-    # and a re-run finishes the job.
-    github.add_label(args.number, problems.WONTFIX)
-    github.close_issue(args.number, f"🙅 Won't fix — not relevant: {args.reason}", not_planned=True)
-    # After the close: if the block's write fails, its round's line stays hidden, never shown early.
     _show_problem_change(feat, args.number, "CLOSED")
     print(f"Problem #{args.number} [{problems.severity(sub)}] closed as wontfix")
 
@@ -533,14 +533,15 @@ def cmd_problem_block(args: argparse.Namespace) -> None:
     # the re-run finishes it rather than refusing.
     if sub["state"] == "OPEN" and not stale:
         sys.exit(f"#{args.number} is open, so it already blocks the gate.")
-    # Before the reopen: its round's line goes first, so a failure in between leaves it hidden, never
-    # showing a round whose problem is open again; the re-run finishes the reopen.
+    # Its round's line goes before the reopen, so it never shows a problem open again, and again after:
+    # a block written in between, from GitHub where it was still closed, showed the line.
     _show_problem_change(feat, args.number, "OPEN")
     # Reopen first: if removing the label fails afterwards, the problem is open and blocks with a
     # stale label, which a re-run fixes. The other order could leave it closed and unlabelled,
     # looking fixed.
     if sub["state"] != "OPEN":
         github.reopen_issue(args.number, f"↩️ Re-opened: {args.reason}")
+    _show_problem_change(feat, args.number, "OPEN")
     if stale:
         github.remove_label(args.number, problems.WONTFIX)
     github.comment(args.number, f"⛔ Blocking again: {args.reason}")
