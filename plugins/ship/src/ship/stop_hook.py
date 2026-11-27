@@ -1,10 +1,12 @@
 """Stop hook: a session holding a feature (`hold.py`) can't end its turn until the gate settles.
 
 Claude Code runs it whenever the agent is about to end its turn. For each branch this session holds,
-it judges the gate. OPEN or MERGED: the run is over, and the hold goes. Anything else: it blocks the
-stop, and Claude Code hands the reason back to the agent, which goes on with what the gate asks
-for: fix the open problems, review again, or leave on the record (`feature escalate`, `feature
-release`).
+it first looks for a round of the branch among the session's in-flight background tasks, which the
+hook's input lists. If one runs, the turn may end: the round's completion wakes the session, and the
+first round tracks the branch as it runs, so nothing is judged yet. Otherwise it judges the gate.
+OPEN or MERGED: the run is over, and the hold goes. Anything else: it blocks the stop, and Claude
+Code hands the reason back to the agent, which goes on with what the gate asks for: fix the open
+problems, review again, or leave on the record (`feature escalate`, `feature release`).
 """
 
 import json
@@ -21,8 +23,8 @@ def _why(branch: str, issue: int, state: dict, blocking: list[dict], decision) -
     # open problems, and the way back to the run: the ship skill's loop says what each gate asks for.
     listed = "\n".join(f"  #{s['number']} [{problems.severity(s)}] {s['title']}" for s in blocking) or "  none"
     return (
-        f"ship: this session is shipping `{branch}` (PR #{state['pr']}, feature #{issue}), and its gate is "
-        f"{decision}. Don't end the turn here.\n"
+        f"ship: this session is shipping `{branch}` (PR #{state['pr']}, feature #{issue}), no round of it is "
+        f"running, and its gate is {decision}. Don't end the turn here.\n"
         f"Open problems:\n{listed}\n"
         f"{hold.work()}"
     )
@@ -37,10 +39,19 @@ def main() -> None:
     failed: list[str] = []
     own_token = "GH_TOKEN" in os.environ
     for held in holds:
-        branch, checkout = held["branch"], held["checkout"]
+        branch, checkout = held.branch, held.checkout
         if not Path(checkout).is_dir():
             hold.release(session, branch=branch, checkout=checkout)
             gone.append(f"ship: stopped holding `{branch}`: its checkout {checkout} is gone.")
+            continue
+        if "background_tasks" not in payload:
+            failed.append(
+                f"ship can't tell whether a round of `{branch}`, which this session holds, runs: this Claude Code's "
+                "Stop hook input has no `background_tasks`, so the hold can't be enforced. Update Claude Code "
+                "(`claude update`; 2.1.332 sends it)."
+            )
+            continue
+        if held.round_running(payload["background_tasks"]):
             continue
         os.chdir(checkout)
         if not own_token:
@@ -61,9 +72,9 @@ def main() -> None:
             hold.release(session, branch=branch, checkout=checkout)
             continue
         blocks.append(_why(branch, issue, state, blocking, decision))
-    # A gate that can't be judged (GitHub down) holds the stop once, so the agent retries; the next
-    # stop in a row goes through, with the error shown, so an outage can't trap the session. The
-    # hold stays: once the gate can be judged again, it holds as before.
+    # A gate that can't be judged (GitHub down, or no list of the session's tasks) holds the stop once,
+    # so the agent retries; the next stop in a row goes through, with the error shown, so an outage
+    # can't trap the session. The hold stays: once the gate can be judged again, it holds as before.
     if failed and not payload.get("stop_hook_active"):
         blocks += [
             f"{why}\nRetry what you were doing; if the gate still can't be judged, say so and end the turn."

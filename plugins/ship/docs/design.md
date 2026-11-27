@@ -87,21 +87,41 @@ idempotently no matter what humans add around it. Never blind-string-replace.
 
 `review_budget` is `null` for "auto-size from the PR diff at query time" (so a growing branch earns
 its extra round without anyone re-running a command) or an integer a human pinned with
-`feature budget --set`, and `review_budget_run` is the run it was set after. `review_history` is the append-only audit log the gate reads the
+`feature budget --set`, and `review_budget_run` is the run it was set after. `redesigns` lists the
+run's redesigns (`feature redesign`), each the run it answered, the recurrence chains it covered
+(`gate.chain_root`: the first problem of each kind it redesigned) and its reason; empty if the run
+never redesigned. `review_history` is the append-only audit log the gate reads the
 convergence trend from; `feature sync` appends an `{"event": "base-advanced", …}` marker to it
 when its merge resolved code by hand, and everything before the newest marker is excluded from both
 the trend and the budget count. `last_review` is only the *currently valid* clean-pass
 evidence, and is nulled on invalidation, which is why it duplicates the last history entry.
 `fixes` maps each commit `feature problem resolve --commit` recorded (full sha) to the problems it
 fixed; a block from before `fixes` has none. Each round written since `repeats` existed keeps, under
-that key, the high/med finds it filed as the same kind of bug as a fixed problem, each with that
-problem (`{"52": 46}`); a later re-find is a regression, counted apart. The link itself lives only
+that key, the finds it filed as the same kind of bug as a fixed problem, each with that problem
+(`{"52": 46}`), at every severity: a low find is a link in a recurrence chain too, though only a
+high/med one is a recurrence (`gate.recurrences`); a later re-find is a regression, kept apart as `regressed` (its numbers,
+with their count as `regressions`). The link itself lives only
 in the problem's issue body, the line `feature problem add --repeats` writes (`problems.with_repeat`),
 which `review record` reads back before its one state write: a copy in the state took a second
 write after the issue was filed, and a failed one lost the link for good.
 
 Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
 than read with guessed-at defaults.
+
+**Writes.** GitHub replaces an issue or PR body whole and has no conditional write, so a command that
+read the block, spent a few network calls, and wrote it back would undo whatever another command wrote
+in between. Every command that changes a feature runs inside `feature.changing` (or `feature.locked`,
+for one that changes only problems and the PR's block): this machine's lock on the feature, held from
+its read to its last write, so two sessions here take turns. Its write (`feature.save`) re-reads the
+issue, keeps the prose around the block as it is now, and refuses if the block changed since the
+read, which is a command on another machine or a hand edit: writing back would undo it. A command that
+publishes something before that write (a comment, the PR's block, the issue's close) checks the same
+way first (`feature.check`), after it has rendered what it publishes (the PR's block reads the
+problems and the diff), so a conflict already there stops it before anything goes out; one that
+lands while it publishes is refused at the write, naming what went out. Every write of the PR's
+block takes that check, the problem commands' too, which write no state, and a refusal after the
+command did something (linked the PR, closed or reopened a problem) names that. What no check can cover is a
+write from another machine in the instant between that re-read and the edit.
 
 ### The PR body
 
@@ -118,28 +138,38 @@ for GitHub to close the tracking issue:
 > **Complexity:** low, size M (8 files, 412 lines)
 > **Deployed preview**: [https://example.com/previews/pr-40/](https://example.com/previews/pr-40/)
 > **Tracking issue:** closes #39
-> **Review round 1** (high). Findings: 1 low (#40).
-> **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
-> **Review round 3** (medium). Findings: none. A re-review after new commits would run at low.
+> **Review round 1**. Findings: 1 low (#40).
+> **Review round 2**. Findings: 4 med (#41, #42, #43, #44).
+> **Review round 3**. Findings: none.
 <!-- /ship -->
 
 🤖 Claude Opus 5.5 in Claude Code (T3 Code)
 ```
 
 Every command that writes the block (`feature pr`, `feature describe`, `feature review record`,
-`feature reconcile`) renders the block's whole content from the feature's state (`assess.render`) and sets
-it between the tags (`prbody.py`), so the block always shows the current state. Before any review
-it is the reference line alone; once Sol has graded the PR, the grade comes first, so a reader
+`feature reconcile`, and `feature problem resolve`, `wontfix` and `block` for a problem a round found)
+renders the block's whole content from the feature's state and its problems' open or closed state
+(`assess.render`) and sets it between the tags (`prbody.py`), so the block always shows the current
+state. A `feature problem` command reads the problems for it after its own change, not from what it
+read at its start, so another command's change in between isn't written over. Before any review
+it is the reference line alone; once the reviewer has graded the PR, the grade comes first, so a reader
 finds the stakes before the review log. It is one quote with no header: a footnote to the
 author's description, not a section competing with it (a `## Risk` and `## Review` version read
 as overcomplicated). GitHub breaks a PR body's lines at single newlines, so each line stays a
 line. A body without the block gets it above the author's signature (a trailing one-line
-paragraph starting with `🤖`, the attribution line an agent harness asks for), or at the end. The grade is Sol's latest, its risk read as its two halves: the door (whether a revert
+paragraph starting with `🤖`, the attribution line an agent harness asks for), or at the end. The grade is the reviewer's latest, its risk read as its two halves: the door (whether a revert
 undoes what a bug did) and the blast radius (who or what a bug reaches). Each round's line lists
 what it found by severity (recorded with the round from `--found`), which never changes after the
-round. The latest round's line ends with the depth Sol's grade buys the next round. After a round
-that found no high or med problem no round is due (low problems' fixes need none), so it reads `A
-re-review after new commits would run at <depth>` instead of `Next round would run at <depth>`.
+round, and it shows only once every problem it lists is closed, fixed or `wontfix`. Until then the
+block has no line for that round: a round that found problems is reported once they're dealt with,
+never as a list of problems waiting for their fix (navari-stack #23 showed round 2's nine finds while
+all nine sat open; motivation.md #15). A round that found nothing shows at once, and a problem
+reopened by `problem block` takes its round's line down again. The feature state doesn't hold which
+problems are open, so the writers pass in the sub-issues they read anyway: `review record`, and the
+`problem` commands, which read them to check the number; `pr`, `describe` and `reconcile` read them
+once a round is graded. A problem closed or reopened outside ship (by hand on GitHub) shows at the
+block's next write. Handed-off problems are still open, so a merged PR's round that left one keeps
+its line hidden.
 
 The `Deployed preview` line, above the reference, gives the URL of each environment the PR is
 deployed to now, so a reviewer reading the block can click through what changed; with several,
@@ -198,13 +228,14 @@ feature adopt ──▶ in-review  (tracking issue; PR linked)
                                └─ budget spent or churning ──▶ needs-decision (human)
 ```
 
-### The merge gate (pure query, three outcomes, and one after the merge)
+### The merge gate (pure query, four outcomes, and one after the merge)
 
 | Verdict | Exit | When |
 | --- | --- | --- |
 | `OPEN` | 0 | Zero problems open, at any severity, and nothing since the last valid review needs one. |
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code outstanding, review budget remains, and the trend is converging. |
-| `NEEDS_DECISION` | 20 | The budget is spent, **or** the loop is visibly not converging. No more review rounds without a human. When a kind of bug came back after its fix, the gate recommends a redesign and the open problems wait for the human's call; otherwise they still get closed, since the budget limits reviews, not fixes. |
+| `NEEDS_DECISION` | 20 | The budget is spent, the loop is visibly not converging, **or** a redesign didn't hold. No more review rounds without a human. The open problems still get closed first, since the budget limits reviews, not fixes. |
+| `REDESIGN` | 40 | A kind of bug came back after its fix. The run redesigns, without asking, and reviews the result. |
 | `MERGED` | 30 | The PR has merged. Checked first, so it outranks the other three; its reasons still name what was outstanding when it went in. |
 
 The codes skip 1 and 2 deliberately: those already mean "the command failed" (`sys.exit(message)`
@@ -258,7 +289,8 @@ sensitive). Its own change is its diff from its parent, or for a merge of the ba
 `git merge-tree` makes of its parents: only what was resolved by hand. The base includes a
 squash-merged former parent's PR head, whose commits that PR reviewed. Why: motivation.md #12.
 
-A budget pinned after a round (`feature budget --set`) outranks that round's churn signals, because
+A budget pinned or a redesign recorded after a round (`feature budget --set`, `feature redesign`)
+outranks that round's churn signals, because
 churn exists to escalate *early* — a human who has seen that escalation and chosen to spend another
 round has already answered it. A round recorded after it is new evidence and is judged on its own:
 when the override held for every round until the budget ran out, a bug that came back in the
@@ -276,18 +308,26 @@ stuck, so the gate escalates early on either of two signals. Both read high/med 
 problems block like any other, but a nit back again, or a rising count of them, is not evidence the
 design is wrong.
 
-- **A kind of bug came back after its fix** (`gate.recurrence_reason`): the last round re-opened a
+- **A kind of bug came back after its fix** (`gate.recurrences`): the last round re-opened a
   fixed problem (a regression), or filed a new one as repeating a fixed one (`problem add
   --repeats`: a fix at the root of that one's cause would have prevented it too). The fix patched an
-  instance and the design still produces the bug, so another round of fixes and review only finds
-  the next one. The next step says to stop patching and recommends a redesign over another round:
-  a few competing designs, each critiqued blind by a separate agent, then one settled from the
-  critiques. The human still decides. This outranks a spent budget, being the one signal that says
-  what to do instead of another round. Why: motivation.md #15.
+  instance and the design still produces the bug, so another round of review would likely find
+  the next one. The verdict is `REDESIGN`, and the run makes it without asking: a fix round in
+  which a few competing designs are each critiqued blind by a separate agent, and the one settled
+  from the critiques is built. Only a design that crosses a one-way door (a public API, stored data,
+  a shared environment) comes back as a question before it is built. It closes the problems the redesign fixes and fixes the rest, then
+  `feature redesign` records it and pins the budget at one round more than used, so a round
+  reviews it. The gate stays at `REDESIGN` until `feature redesign` records it, even once every
+  problem is closed and nothing waits for `needs_review` (a redesign may be all docs), and the round
+  that reviews it is due whatever it touched. A recurrence closed as `wontfix` is none. If a later
+  round brings back a kind the redesign covered (a find whose chain of `--repeats` links leads to
+  it), the run's diagnosis missed: `NEEDS_DECISION`, and a human decides. A kind it didn't cover gets
+  its own redesign. This outranks a spent budget, being the one signal that says what to do
+  instead of another round. Why: motivation.md #15.
 - **High/med findings are rising** round over round (`gate.rising_reason`). More findings can also
   mean a PR too big for one round to cover, so the next step leaves the choice open.
 
-The link between problems comes from the review fork's dedup, not from Sol. Sol finds blind, so it
+The link between problems comes from the review fork's dedup, not from the reviewer. The reviewer finds blind, so it
 can't name a tracked problem, and a class name it made up would be worded differently every round,
 the way titles were when dedup tried to match them by fingerprint. The fork already reads each
 finding against the closed problems by meaning to catch regressions; whether a root-cause fix of
@@ -389,20 +429,21 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>` (the base must be on origin), a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
 | `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description (and optionally the title). The input may carry ship's block or not; the body gets exactly one, rendered fresh (see "The PR body"). `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
-| `feature depth [--branch <b>]` | Print the reasoning effort for the next review round (`assess.py`): size from the diff stats; risk from the paths touched (sensitive → high, docs/tests only → low) until a review has graded the PR, then the last grade's risk and complexity. |
 | `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `review` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
-| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <n>] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text> [--review-only]` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Unless `--review-only` (the user asked for the review alone), holds the Claude session running it until the gate settles. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
+| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <problem#> ...] --summary <text> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->] [--repeats <number>]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. `--repeats` names a fixed problem this one is the same kind of bug as: its body says so, and a round that finds it (high/med) tells the gate to recommend a redesign. Refuses a problem that is open or `wontfix`. |
-| `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. |
-| `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. |
+| `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. If a review round found it, rewrite the PR's ship block, which shows that round's line once all its problems are closed. |
+| `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. Rewrites the PR's ship block like `resolve`; run again on a problem it already closed, it only rewrites the block. |
 | `feature problem hand-off <number> --reason <why>` | Only once the PR has merged: posts the reason (a separate fix PR, or kept as an issue), then labels the open problem `handed-off`, which releases the close-out. It stays open, outside the feature. Refuses until then: that would be shipping debt. Old `follow-up` labels count as `handed-off`, and old `rejected` ones as `wontfix`. |
-| `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. Refuses an open problem, which already blocks. |
+| `feature problem block <number> --reason <why>` | Reopen a closed problem, dropping `wontfix`, so it holds the merge again: a regression of a fixed problem, or a `wontfix` reason a new repro answers. If a round found it, then rewrites the PR's ship block, which takes that round's line out. Run on an open problem, which already blocks, it only rewrites the block. |
 | `feature problem list [--open]` | List problem sub-issues with severity and whether each is blocking (open), handed off, fixed or `wontfix`. |
 | `feature budget [--set <n> \| --auto] [--branch <b>]` | Show the review-round budget and how much of it is used; `--set` pins it, `--auto` returns to diff-sizing. |
-| `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), unless the gate recommends a redesign; while the gate is `REVIEW_AGAIN` and no problem is named; and at `OPEN` or `MERGED`. |
+| `feature escalate --reason <text> [--problem <#> …] [--branch <b>]` | Park the feature at `needs-decision` and post the gate state + your recommendation for a human, and release this session's hold (see "Driving the loop to the end"). Refuses while an open problem isn't named with `--problem` (each named one gets the question posted on it), while the gate is `REVIEW_AGAIN` or `REDESIGN` and no problem is named; and at `OPEN` or `MERGED`. |
+| `feature redesign --reason <text> [--branch <b>]` | Record the redesign a `REDESIGN` gate asked for, on the tracking issue, and pin the budget at one round more than used so a review covers it. Refuses unless the gate is `REDESIGN`, every problem is closed, a commit since the last review is there to review, and the branch is pushed (the PR's head). |
+| `feature round <review\|fix> [--branch <b>]` | Hold the branch for the Claude session driving the ship run, and print the description to give the round's background subagent, by which the Stop hook knows it runs (see "Driving the loop to the end"). Refuses a command outside a Claude session. |
 | `feature release --reason <text> [--branch <b>]` | Let this session end its turn with the gate still shut: posts the reason and the gate on the tracking issue, then drops the hold. For a user who stopped the run, or a review that can't run. Refuses a branch the session doesn't hold. |
 | `feature migrate [--branch <b>]` | The upgrade path for a repo onboarded on an older CLI: (re-)creates the workflow labels (`wontfix` is newer than the original set, and `gh issue edit --add-label` hard-fails on a label the repo lacks) and upgrades the state block one-way. |
 | `feature gate [--branch <b>]` | Print the verdict and the next step. Exit 0 = `OPEN`, 10 = `REVIEW_AGAIN`, 20 = `NEEDS_DECISION`, 30 = `MERGED` (1 and 2 stay "the command itself failed"). |
@@ -413,14 +454,18 @@ All commands are `feature <cmd>` (or the `feature` console script).
 
 ## The ship run
 
-One call of the `ship` skill is a whole run, and it runs inline, in the agent's own session:
+One call of the `ship` skill is a whole run, and it runs inline, in the agent's own session. Each
+round runs in a background subagent (`Agent` with `run_in_background: true`) that calls the round's
+skill: the session holds the branch (`feature round`), starts the subagent with the description
+that names the round, and ends its turn; the subagent's completion notification wakes it with the
+report:
 
 ```
 Skill(ship:ship), in the caller's session
-  ┌─▶ Skill(ship:review) ─▶ one round in a fresh fork (below) ─▶ report: gate + open problems
+  ┌─▶ background subagent: Skill(ship:review) ─▶ one round in a fresh fork (below) ─▶ report: gate + open problems
   │ ┌▶ take in what the PR raised: a failed check, an unanswered review comment ─▶ `feature problem add`
   │ │   (a flake ─▶ rerun; a question ─▶ answered); the base moved on ─▶ `feature sync`
-  │ │ Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
+  │ │ background subagent: Skill(ship:fix) ─▶ another fresh fork, in the feature worktree, fixes each at its root cause:
   │ │   commit (apart from other work), push, `feature problem resolve <#> --commit <sha>`
   │ │   (or `feature problem wontfix` if it isn't relevant; a choice only the user can make waits);
   │ │   resolves a conflict `feature sync` stopped at
@@ -428,6 +473,8 @@ Skill(ship:ship), in the caller's session
   │ │ each filed comment answered in its thread, the thread resolved
   │ │ ┌▶ `feature gate`
   │ │ │  MERGED ─▶ Skill(ship:close)
+  │ ├─┼─ REDESIGN ─▶ the fix round redesigns (competing designs, critiqued blind, one built),
+  │ │ │    closing the problems it fixes ─▶ `feature redesign --reason`
   └─┼─┼─ REVIEW_AGAIN
     │ │  OPEN ─▶ evidence in the description, `gh pr ready` if asked to ship; then babysit:
     │ │    ready (checks green, threads resolved, no review pending, base current) ─▶ READY,
@@ -435,19 +482,19 @@ Skill(ship:ship), in the caller's session
     └─┼─── not ready, with something to take in
       └─── not ready otherwise ─▶ `watch_pull_request`, end the turn; T3 Code's wake
          NEEDS_DECISION ─▶ `feature escalate --reason` (every problem closed first)
-         NEEDS_DECISION recommending a redesign ─▶ `feature escalate --reason`, before any fix
          a problem for the user ─▶ `feature escalate --problem <#> --reason <question>`
 ```
 
 It ends only at an end state: `READY`, `MERGED`, `NEEDS_DECISION` escalated, a question for the
-user's call, or a run released on the record (`feature release`: the user stopped it, or Sol
-can't run). The caller drives the loop and the forks do the heavy work, so the caller's
-thread keeps their reports, not their reading. The finder, the triager and the fixer are three
-separate agents: Sol starts each round in a new thread with the PR number, a fresh fork dedups and
-files its findings with no memory of the fixes, and another fork fixes them. The fixer starts with
+user's call, or a run released on the record (`feature release`: the user stopped it, or the
+reviewer can't run). The caller drives the loop and the forks do the heavy work, so the caller's
+thread keeps their reports, not their reading. The finders, the triager and the fixer are separate
+agents: the two reviewers start each round, each in a new thread with the PR, a fresh fork merges,
+dedups and files their findings with no memory of the fixes, and another fork fixes them. The fixer starts with
 none of the caller's conversation, so the caller hands it what the code and the issues don't say
 (what the user asked of the change, a constraint they set, a fix they turned down). Why the fixes
-left the caller's thread: motivation.md #16.
+left the caller's thread: motivation.md #16. Why the rounds run in background subagents, not as
+skills the caller calls: motivation.md #19.
 
 ### Babysitting
 
@@ -460,7 +507,7 @@ reads the gate first, so a merged PR ends `MERGED` before anything syncs its bra
 What needs fixing goes through the same problems as the review's: a failed check this PR causes,
 and a reviewer's requested change or finding, are filed with `feature problem add`, quoting the
 source. The fixer fork fixes them like any other, the gate decides whether a fix needs a review (a
-`low` one's doesn't), and a later Sol round dedups against them. Once its problem closes, the
+`low` one's doesn't), and a later round dedups against them. Once its problem closes, the
 caller answers the comment with the fix commit or the `wontfix` reason, and resolves the thread. A
 reply disputing that reason reopens the problem (`feature problem block`), and a fixer still
 unconvinced puts it to the user with both sides. Questions are answered in the thread, flakes
@@ -477,14 +524,27 @@ pending, and the base hasn't moved on. Why babysitting joined the run: motivatio
 The skill saying "now fix them" is still advice, and advice is what failed (motivation.md #14). So
 the plugin holds the session instead (`hold.py`):
 
-- `feature review record`, `feature problem resolve` and `feature problem wontfix` hold the branch
-  for the Claude session that ran them (`CLAUDE_CODE_SESSION_ID`, which Claude Code gives every
-  Bash command of a session, its subagents and forked skills included). The hold is a file per
-  session under `$XDG_STATE_HOME/ship/holds/`, naming each branch with its repo's main checkout:
-  it survives the worktree's removal, the same branch name in two repos is two holds, and parallel
-  sessions never share one.
-- The Stop hook (`stop_hook.py`) runs whenever the agent is about to end its turn. For each branch
-  the session holds it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
+- `feature round`, run as each round starts, holds the branch for the Claude session driving the
+  run (`CLAUDE_CODE_SESSION_ID`, which Claude Code gives every Bash command of a session, its
+  subagents, background ones included, and forked skills too). It is the only command that holds:
+  the rounds' own commands (`feature review record`, `feature problem resolve`) run under the same
+  session id but hold nobody, so a review the user asks for alone, outside a run, holds nobody to
+  fixing. The hold is a file per session under `$XDG_STATE_HOME/ship/holds/`, naming each branch
+  with its repo's main checkout: it survives the worktree's removal, the same branch name in two
+  repos is two holds, and parallel sessions never share one.
+- The Stop hook (`stop_hook.py`) runs whenever the agent is about to end its turn; a subagent's
+  end is a `SubagentStop`, so it never holds a round itself. For each branch the session holds it
+  first looks for the branch's round among the session's in-flight background tasks, which Claude
+  Code lists in the hook's input (`background_tasks`): a `subagent` task whose description is the
+  one `feature round` printed (`ship review <branch> in <main checkout>`, or `ship fix …`): it names the
+  repo too, since a hold is a branch of one repo. If one runs, the turn
+  may end, since the subagent's completion wakes the session, and nothing is judged yet (the first
+  round tracks the branch as it runs). Reading Claude Code's own list, not a flag the run sets and
+  clears, is what keeps a crashed or cancelled round from switching the hold off. An input without
+  the list (a Claude Code older than the field) can't say whether a round runs: like a gate GitHub
+  can't answer, it holds the stop once, naming the missing field, and the next stop in a row goes
+  through with it shown. With no
+  round running it judges the gate: `OPEN` or `MERGED` drops the hold; anything else blocks
   the stop, and Claude Code hands the agent the reason: the gate with its reasons, the open
   problems, and a pointer back to the run with its two ways out (`hold.work`). It stays that short
   because it lands in the agent's context each time it fires, and the skill's loop already says
@@ -494,8 +554,7 @@ the plugin holds the session instead (`hold.py`):
 - The two ways out short of `OPEN` both write to the tracking issue and drop the hold.
   `feature escalate` refuses while an open problem isn't named with `--problem` (asked of the user)
   and, with budget left, unless one is: escalating is for what a human must decide, never a way
-  around a fix. A gate recommending a redesign is the exception: that call covers every open
-  problem, and fixing them first is the work a redesign throws away. `feature release` takes any reason, on the record.
+  around a fix. Nor is it for a redesign: at `REDESIGN` the run redesigns and goes on. `feature release` takes any reason, on the record.
 
 A gate the hook can't judge (a `gh` outage) blocks the stop once, with the error, and keeps the
 hold; the next stop in a row (`stop_hook_active`) goes through with the error shown, since a session
@@ -551,40 +610,46 @@ own, and so is one from a T3 thread running Codex, which Claude Code's hooks don
 
 ## The review round
 
-Each review round is one call of the `review` skill, which runs as a forked subagent
-(`context: fork`) inside the agent's own Claude Code process, not as a spawned `claude`
-subprocess. The caller (the ship run) never loads the skill's instructions; it gets back a short
-report with the gate verdict and the open problems. A fresh fork per round is what keeps the
-finder blind:
+Each review round is one call of the `review` skill, made by a background subagent the ship run
+starts for it. The skill runs as a forked subagent (`context: fork`) of that one, inside the
+agent's own Claude Code process, not as a spawned `claude` subprocess. The caller (the ship run)
+never loads the skill's instructions; the subagent's completion hands it a short report with the
+gate verdict and the open problems. A fresh fork per round is what keeps the finder blind:
 
 ```
-Skill(ship:ship) ─▶ Skill(ship:review) ─▶ forked subagent, fresh context
+Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ forked subagent, fresh context
    1. track the PR: worktree for its branch; `feature adopt` if untracked (links the open PR,
       takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
       PR's base isn't the tracked parent
    2. `feature describe` ─▶ title + description from the motivation and commit messages
-   3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
-   4. delegate_task(Sol, reasoningEffort=<depth>, "review PR #<n>, read only under <worktree>")
-      ─▶ raw defects, spec gaps, design smells, flaws comments cover + Sol's grade of risk and complexity
-         (Sol gets the recorded request as intent, never tracked state)
-   5. NOW load tracked state, and for each finding decide (real code + problems):
+   3. two reviewers, started together; `feature reviewer` ─▶ provider + model family of each
+      (the reviewer: the one the user named, else the default; the `/code-review` reviewer: Claude)
+      orchestrator_capabilities ─▶ each one's newest model and that model's options
+      `feature effort --model-options <json>` ─▶ the option that sets its effort to high
+      delegate_task(<reviewer>, <options>, "<the brief> for PR #<n>, read only under <worktree>")
+      ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
+         (the reviewer gets the recorded request as intent, never tracked state)
+      delegate_task(<the /code-review reviewer>, <options>, "/code-review high <PR URL> --max-findings all, read only, findings as text")
+      ─▶ raw defects from /code-review's own finders
+   4. NOW load tracked state, merge the two reviewers' findings (the same defect from both is one),
+      and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
        ├─ caused by THIS PR? no ─▶ not a problem: reported as pre-existing; the user picks a
        │                           separate fix PR or a plain issue
        └─ duplicate of a tracked problem? (judged by MEANING)
               ├─ matches an OPEN issue      ─▶ skip (already tracked)
-              ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + count it
+              ├─ matches a CLOSED fixed one ─▶ REGRESSION: `problem block` + name it
               ├─ new, but a root-cause fix of a CLOSED fixed one would have prevented it
               │                             ─▶ `feature problem add --repeats <that one>`
               ├─ matches a WONTFIX one      ─▶ skip, unless the repro answers its reason
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
                                                     (spec, design and comment findings: always low)
-   6. `feature review record --found <problems filed & regressed>
-                             --regressions <high/med reopened> --depth --risk --door --blast-radius --complexity --why`   (refuses if no PR linked;
-                             idempotent per sha, so a retry after a failed call spends no extra round)
-   7. report ─▶ the ship run: the verdict and every open problem, which it fixes before the next round
-      (when the gate recommends a redesign, it escalates without fixing; a merged PR stops at step 1:
-      the ship run hands it to Skill(ship:close))
+   5. `feature review record --found <problems filed & regressed>
+                             --regressions <high/med reopened #s> --risk --door --blast-radius --complexity --why`   (refuses if no PR linked;
+                             it writes state last, so a failed call records nothing and a retry records once)
+   6. report ─▶ the ship run: the verdict and every open problem, which it fixes before the next round
+      or an escalation, whatever the verdict (a merged PR stops at step 1: the ship run hands it to
+      Skill(ship:close))
 ```
 
 **Why scope the review through the PR.** The finder is handed the **PR number**, not a diff
@@ -600,12 +665,13 @@ against `main` for a stacked feature is caught before it can record a wrongly-sc
 Push + open the PR against the parent + `feature pr <n>` is a precondition of the review loop,
 not an afterthought.
 
-**Why the finder runs before tracked state is loaded.** The finder must find blind — no memory of
-prior runs, no list of already-filed problems to "just confirm." Rather than load that state and
-then instruct the agent not to pass it along (a rule it must remember to honor every run), the
-ordering enforces it structurally: the fork runs the finder FIRST, with only the PR number in
-hand, and loads `feature status` / open problems only afterward for its own dedup. There is
-nothing to leak because the leakable context doesn't exist yet.
+**Why the reviewers run before the problem list is loaded.** The reviewers must find blind — no
+memory of prior runs, no list of already-filed problems to "just confirm." Rather than load that
+state and then instruct the agent not to pass it along (a rule it must remember to honor every
+run), the ordering does most of it: the fork starts both reviewers before it loads the problem
+list, which it reads only afterward for its own dedup. Before them it reads `feature status` for
+one line, the user's recorded request, which goes into the brief as intent; for the rest of that
+output, the rule that the tasks carry nothing about tracked problems or earlier rounds holds.
 
 **Why the finder is pinned to the feature worktree.** Feature worktrees live *under* the main
 checkout (`.claude/worktrees/<name>`), so the main checkout's path is a prefix of the worktree
@@ -622,34 +688,53 @@ this feature's).
 review is a genuine independent sweep. If the finder ran in the caller's own context, the second
 and later runs in a session would be poisoned: the agent remembers the earlier runs, so instead
 of rediscovering issues blind it drifts into "confirm #12 and #14 got fixed" — a verification
-mindset that misses bugs the fixes themselves introduced. Each round delegates to a new Sol
+mindset that misses bugs the fixes themselves introduced. Each round delegates to a new reviewer
 thread that is handed only the PR number and worktree path, so run 1 and run 5 find with equal
-rigor. Sol is also a different model family from the agent that wrote the code, so it doesn't
-share the author's blind spots.
+rigor. The default reviewer is also a different model family from the agent that writes the code,
+so it doesn't share the author's blind spots. The default is a constant (`reviewer.DEFAULT`);
+the user overrides it for one run by naming a reviewer when they ask to ship, and the ship skill
+passes that name to every round of the run. T3 lists each model's options, and models differ in
+what they call their effort, so `feature effort` finds the effort option by its values
+(`low`…`max`) rather than by a provider's name for it. A table of each provider's spelling broke
+twice in review: a provider-wide entry gave one model a value it didn't list.
 
-**Why the depth is sized, and by whom.** A review round used to cost the same for a two-line docs
-fix and a migration, so Sol's reasoning effort is sized per round (`assess.py`). The first version
-had the fork read the whole diff to judge risk and complexity before Sol ran. That spent the most
-expensive, most context-heavy read on the least important decision, ahead of Sol reading the same
-diff properly, and `gh pr diff` refuses PRs over 300 files anyway. Now the first round is sized
-without reading the diff: size from its stats, risk from the paths it touches. Sol, which reads
-every line, grades risk and complexity as part of its review; the grade is recorded with the round,
-written into the PR body for the human, and sizes every later round. A cheap first guess that was
-too low gets corrected by the reviewer that found out. The mapping is code, not prose, so the same
-inputs always buy the same depth.
+**Why two reviewers.** One reviewer finds what one model finds. So every round also runs Claude
+Code's `/code-review` (`reviewer.CODE_REVIEW`), in its own Claude thread beside the reviewer, and the fork
+merges what both found before it verifies and files anything. The two differ in more than the
+model. The reviewer works from ship's brief, which asks for spec gaps, design smells, comments and
+the grade. `/code-review` runs its own finders and is maintained with Claude Code, so ship doesn't
+hand-roll a second review prompt (motivation.md #2). It gets the PR by URL, because by number a diff it can't read (a PR over 300 files)
+falls back to the checkout's own diff against the default branch, the wrong scope for a stacked
+PR; by URL it stops, and the round fails rather than review the wrong diff. It runs with
+`--max-findings all`: without
+it, `/code-review` reports only up to its level's limit, or up to the limit the user last typed in
+their own sessions, so a round would drop findings past it. A Claude child returns the findings as text: run
+on PR #264, it ran read-only and listed its three findings, each with file, failure scenario and fix.
+A round needs both: if either reviewer fails, the round records no review, because a round recorded
+on half its finders would read as the full sweep. Each round costs about twice as much as with one
+reviewer, which was the trade chosen.
 
-**Why risk is about stakes, and caps the depth.** PR #38 changed only how ship formats its own
-block in PR bodies, in this personal repo, where a bad write is visible and fixed by hand. Sol
-still graded it high twice ("whole-body rewrites can corrupt persistent author content"), so its
+**Why every round runs at high.** Rounds used to be sized from `low` to `max` (`assess.py`): risk set
+the base effort, and a large or complex diff bought one or two steps more, first from the diff's
+stats and paths, then from the reviewer's grade. A PR the reviewer graded high risk, high
+complexity and large ran every round after the first at `max`, and so did the next round it
+announced (a navari PR in November 2026 ran rounds 2 and 3 there, with a fourth due). The user ruled that no review runs above
+`high`, and one effort for every round needs no sizing, so the sizing went: every round runs at
+`reviewer.EFFORT`, and the round's line in the PR body no longer names an effort. Rounds recorded
+before then keep their `depth` in the feature issue, and the block ignores it. The reviewer still
+grades risk and complexity, for the human reading the PR body.
+
+**Why risk is about stakes.** PR #38 changed only how ship formats its own
+block in PR bodies, in this personal repo, where a bad write is visible and fixed by hand. The
+reviewer still graded it high twice ("whole-body rewrites can corrupt persistent author content"), so its
 rounds ran at high, then xhigh, with max next. The rubric listed "data loss or corruption" and
-"stored formats" as high without asking who a bug reaches or whether it can be undone, so Sol
-matched the subject, not the stakes. Its reasoning also mixed in how hard the parser was to get
+"stored formats" as high without asking who a bug reaches or whether it can be undone, so the
+reviewer matched the subject, not the stakes. Its reasoning also mixed in how hard the parser was to get
 right, which is complexity. Now risk is the cost of a missed bug, judged from the repo's stakes:
-reach and reversibility, which Sol names as the grade's blast radius and door (borrowed from
-mattpocock's `pr` skill), so a reader sees what the level rests on. Each risk level starts at the
-depth of the same name, and a low-risk PR reviews at low whatever its size or complexity: a big,
-intricate change still costs little to get wrong if nobody else is hit and it is easy to undo. For
-the same reason, many findings in a round raise complexity, not risk.
+reach and reversibility, which the reviewer names as the grade's blast radius and door (borrowed from
+mattpocock's `pr` skill), so a reader sees what the level rests on. A big, intricate change still
+costs little to get wrong if nobody else is hit and it is easy to undo, so many findings in a round
+raise complexity, not risk.
 
 **Why a subagent, not a headless `claude`.** An earlier design spawned `claude -p "/code-review"`
 as a *subprocess* and forced its findings into a JSON schema. That second, long-lived `claude`
@@ -658,6 +743,8 @@ review never finished. Verified empirically: no jetsam (OOM) events fired, and s
 calls succeed; only the long review child was killed, and only when spawned as a grandchild of a
 managed session. A subagent is a sub-task *inside the already-alive session process* — there is
 no second `claude` to reap — so it keeps the reaping fix while restoring reviewer independence.
+The reviewers are not grandchildren of the session either: T3 Code runs each `delegate_task` child,
+the `/code-review` one included, as a thread of its own, outside the session's process tree.
 
 **Dedup is semantic, not string-based.** An even earlier design fingerprinted `sha1(file +
 title)`, but two reviews word the same bug differently every time, so a title fingerprint almost
@@ -668,10 +755,10 @@ regression (reopen, count as new); distinct → file. It also checks each findin
 positives never reach the gate.
 
 **Evidence is a ladder, and a finding names its rung.** A finding that sounds right reads the same
-whether it is true or not, so Sol says how far it proved each one: *cited* (it read the line),
+whether it is true or not, so the reviewer says how far it proved each one: *cited* (it read the line),
 *traced* (it walked the failure step by step), or *ran* (a script or test against the real code
 fails as described). The agent takes each finding at least to traced, and to ran when that is
-cheap, and drops what stays at cited. Sol's brief also names where breakage hides past a symbol
+cheap, and drops what stays at cited. The reviewer's brief also names where breakage hides past a symbol
 search: wire formats, stored data another reader parses, flags, code a few hops downstream.
 Both come from pstack's `blast-radius` skill (`cursor/plugins`).
 
@@ -680,9 +767,10 @@ regressions, and counts them by their severity labels: the high/med ones are the
 `new_blocking` count (the stored key predates every-problem-blocks and keeps its name, since it is
 already written into feature issues), the low ones its `new_low` count. A clean pass is a bare
 `--found`, which (with zero open sub-issues) opens the gate. Every find blocks until it is closed;
-the round's line in the PR body lists them by severity. `--regressions` counts re-opened high/med
-problems only, and the round keeps its high/med finds filed with `--repeats` as `repeats`; both feed
-the recurrence signal, where a low-severity nit back again is not evidence the design is wrong.
+the round's line in the PR body lists them by severity. `--regressions` names the re-opened high/med
+problems among them, kept as `regressed`, and the round keeps its finds filed with `--repeats` as `repeats`; both feed
+the recurrence signal, which reads their high/med ones only: a low-severity nit back again is not evidence the design is
+wrong. A low find's link still joins the chain it is part of, so the kind it bridges stays one kind.
 
 **Closing a problem without a fix is auditable.** An agent could open the gate by closing every
 problem as `wontfix`, so the defense is a record: `wontfix` demands a reason posted on the issue,

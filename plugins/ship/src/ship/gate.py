@@ -1,25 +1,30 @@
 """The merge gate — pure decision logic, kept free of I/O so it's unit-testable.
 
-The gate has **three** outcomes, because a review loop has three real endings:
+Before the merge the gate has **four** outcomes:
 
   OPEN            — no problem is open, and a review has covered the code that is on the
                     branch right now, or by nothing since that needs one (`needs_review`).
                     Ship it.
   REVIEW_AGAIN    — open problems or unreviewed code are outstanding and there is review budget
                     left to spend.
-  NEEDS_DECISION  — the loop is not converging on its own: the budget is spent, or the trend
-                    says another round won't help. A human decides whether to buy another round,
-                    merge the fixes unreviewed, split the PR, or redesign. When a kind of bug came
-                    back after its fix, the gate recommends the redesign.
+  REDESIGN        — a kind of bug came back after its fix: the design keeps producing it, so the
+                    run redesigns instead of patching, closes the problems the redesign fixes, and
+                    reviews the result. No human is asked: the run makes the redesign it would
+                    otherwise recommend, unless it crosses a one-way door (a public API, stored
+                    data, a shared environment).
+  NEEDS_DECISION  — the loop is not converging on its own: the budget is spent, the trend says
+                    another round won't help, or a redesign already ran and the kind came back
+                    anyway. A human decides whether to buy another round, merge the fixes
+                    unreviewed, split the PR, or redesign again. The open problems are fixed first.
 
-Once the PR has merged none of them applies, so a fourth verdict ends the loop for good:
+Once the PR has merged none of them applies, so a fifth verdict ends the loop for good:
 
   MERGED          — the PR is in. There is nothing left to review or fix in it; what remains is
                     closing the feature out. The reasons still say what was outstanding when it
                     merged (an unreviewed tail, open problems), because the close-out must deal
                     with them.
 
-Why three. The old gate demanded a review run with *zero* findings. But the reviewer is built
+Why not just OPEN and REVIEW_AGAIN. The old gate demanded a review run with *zero* findings. But the reviewer is built
 to report at every altitude — real defects, nits, pre-existing issues in touched files — so a
 zero-finding run is an event that never happens, and the loop had no other exit. The gate asks
 instead whether every filed problem is closed (fixed, or `wontfix` as not relevant — see
@@ -27,10 +32,12 @@ instead whether every filed problem is closed (fixed, or `wontfix` as not releva
 settle it says so out loud instead of asking for one more expensive round forever.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from . import assess, budget
+from . import assess, budget, problems
+from .state import found_in
 
 # What to do next, per verdict — the gate's most useful output for an agent driving the loop.
 _NEXT_OPEN = "Human merges the PR, then close it out with `Skill(ship:close)`."
@@ -47,23 +54,31 @@ _NEXT_DECISION = (
     "whether to review the fixes in another round (`feature budget --set <n>`), merge with them "
     "unreviewed, or split/redesign the PR."
 )
-# A bug back after its fix means the design keeps producing it, so another fix-and-review round only
-# finds the next one, and patching the open problems first is work a redesign throws away. Why:
-# docs/motivation.md #15.
+# Why the run redesigns without asking: docs/motivation.md #15.
 _NEXT_REDESIGN = (
-    "STOP patching: the same kind of bug came back after its fix, so the design keeps producing it, "
-    "and another round of fixes and review will find the next one. Don't fix the open problems yet. "
-    "`feature escalate --reason '<what the recurring bugs have in common>'`, recommending a redesign "
-    "over another round: a few competing designs, each critiqued blind by a separate agent, then one "
-    "settled from the critiques. A human decides: redesign, fix the problems one by one, or split the "
-    "PR. Either way every open problem is closed before the PR ships, and `feature budget --set <n>` "
-    "buys the round that reviews the result."
+    "Redesign, don't patch, and don't stop to ask: the same kind of bug came back after its fix, so the design "
+    "keeps producing it, and another round of fixes and review would likely find the next one. A fix round that "
+    "redesigns (`Skill(ship:fix)` with `redesign: <the cause the recurring bugs share>`): a few competing "
+    "designs, each critiqued blind by a separate agent, then the one settled from the critiques, built. It "
+    "closes each open problem the redesign fixes with the redesign's commits, and fixes the rest at the root. "
+    "Only a design that crosses a one-way door (a public API, stored data, a shared environment) comes back "
+    "as a `Question:` before it is built, its problems left open for the user's call. "
+    "Then `feature redesign --reason '<the cause, and the design settled on>'`, which buys the round that "
+    "reviews it, and review again."
+)
+_NEXT_REDESIGN_FAILED = (
+    "STOP reviewing, but first close every open problem (`Skill(ship:fix)`: it fixes each at its root cause, "
+    "or closes it as `wontfix` if it isn't relevant). The run already redesigned, and the round that reviewed "
+    "the redesign found the same kind of bug again, so its diagnosis of the cause missed. Then `feature "
+    "escalate --reason '<what the redesign missed, and what you recommend>'`. A human decides: redesign again, "
+    "review the fixes in another round (`feature budget --set <n>` buys the round either way), or split the PR."
 )
 
 
 class Verdict(StrEnum):
     OPEN = "OPEN"
     REVIEW_AGAIN = "REVIEW_AGAIN"
+    REDESIGN = "REDESIGN"
     NEEDS_DECISION = "NEEDS_DECISION"
     MERGED = "MERGED"
 
@@ -72,7 +87,13 @@ class Verdict(StrEnum):
 # "the command failed" — an uncaught exception and `sys.exit("message")` exit 1, argparse usage
 # errors exit 2. If REVIEW_AGAIN were 1, a lost `feature-issue` git-config key or a `gh` 503 would
 # read as "spend another review round", and a mistyped flag would read as "escalate to a human".
-EXIT_CODES = {Verdict.OPEN: 0, Verdict.REVIEW_AGAIN: 10, Verdict.NEEDS_DECISION: 20, Verdict.MERGED: 30}
+EXIT_CODES = {
+    Verdict.OPEN: 0,
+    Verdict.REVIEW_AGAIN: 10,
+    Verdict.NEEDS_DECISION: 20,
+    Verdict.MERGED: 30,
+    Verdict.REDESIGN: 40,
+}
 
 
 @dataclass(frozen=True)
@@ -82,9 +103,6 @@ class GateDecision:
     next_step: str
     rounds_used: int
     budget: int
-    # NEEDS_DECISION because a kind of bug came back after its fix (`recurrence_reason`): the gate
-    # recommends a redesign, and the open problems wait for the human's call on it.
-    redesign: bool = False
 
     @property
     def open(self) -> bool:
@@ -126,33 +144,77 @@ def rounds_since_invalidation(history: list[dict]) -> list[dict]:
     return list(reversed(runs))
 
 
-def recurrence_reason(rounds: list[dict]) -> str | None:
-    """Why the last round says the fixes aren't holding, or None.
+def _links(history: list[dict]) -> dict[int, int]:
+    """Every `--repeats` link the recorded rounds of `history` keep: a problem -> the fixed one it repeats."""
+    return {int(problem): repeated for entry in history for problem, repeated in entry.get("repeats", {}).items()}
 
-    It found again what an earlier fix should have ruled out: the very problem, re-opened (a
-    regression), or a new problem of the same kind, which the review filed as repeating the fixed
-    one (`problem add --repeats`, kept per round as `repeats`). Either way a fix patched an instance
-    and the design still produces the bug, so the gate recommends a redesign over another round.
 
-    Only the last round counts: a human who saw an earlier recurrence and bought more rounds answered
-    it. Like the trend, it reads high/med finds only: a nit back again is not evidence the design is
-    wrong.
+def chain_root(problem: int, history: list[dict]) -> int:
+    """The first problem of `problem`'s recurrence chain: the one it repeats, and the one that one repeats,
+    back to a problem that repeats none."""
+    links = _links(history)
+    while problem in links:
+        problem = links[problem]
+    return problem
+
+
+def recurrences(history: list[dict], *, dismissed: frozenset[int]) -> dict[int, int]:
+    """What the last round of `history` found again of a kind an earlier fix should have ruled out, each
+    find with the problem it brings back: a fixed problem re-opened (a regression, `_regressed`, which brings
+    back itself), or a new one filed as repeating a fixed one (`problem add --repeats`, kept as `repeats`). A
+    find since closed as `wontfix` (`dismissed`) is no recurrence: it wasn't a bug.
+
+    Like the trend, it reads high/med finds only (`problems.serious`): a nit back again is not evidence
+    the design is wrong. A low find's link still counts in the chains it bridges (`chain_root`).
+    Rounds recorded before `repeats` existed name no repeat, so none recurs through one: kept ON PURPOSE,
+    as they are written into feature issues of PRs in flight.
     """
-    if not rounds or rounds[-1].get("placeholder"):
-        return None
-    last = rounds[-1]
-    back = []
-    if last["regressions"]:
-        back.append(f"re-opened {last['regressions']} fixed high/med problem(s)")
-    # Rounds recorded before `repeats` existed carry no links. Kept ON PURPOSE: they are already
-    # written into feature issues of PRs in flight.
-    if repeats := last.get("repeats"):
+    rounds = rounds_since_invalidation(history)
+    if not rounds:
+        return {}
+    entry = rounds[-1]
+    links = entry.get("repeats", {})
+    serious = problems.serious(entry.get("found", {}))
+    back = {int(problem): repeated for problem, repeated in links.items() if int(problem) in serious}
+    back |= {problem: problem for problem in _regressed(entry, serious, earlier=found_in(history[:-1]))}
+    return {problem: back[problem] for problem in sorted(back) if problem not in dismissed}
+
+
+def _regressed(entry: dict, serious: set[int], *, earlier: set[int]) -> list[int]:
+    """The fixed problems round `entry` re-opened, given its high/med finds (`serious`) and every problem
+    the rounds before it found (`earlier`).
+
+    A round recorded before `regressed` existed kept only their count (`regressions`), and is read ON
+    PURPOSE, as such rounds are written into feature issues of PRs in flight: its regressions are the high/med
+    finds an earlier round found, which is what a regression is (its `--found` named them too). Aborts if
+    those don't add up to the count, rather than drop or guess one.
+    """
+    if "regressed" in entry:
+        return entry["regressed"]
+    derived = sorted(serious & earlier)
+    if len(derived) != entry["regressions"]:
+        named = ", ".join(f"#{n}" for n in derived) or "none"
+        raise ValueError(
+            f"Run {entry['run']} recorded {entry['regressions']} regression(s) without naming them, and the "
+            f"high/med finds an earlier round found are {named}. Name them in the feature issue's state block: "
+            f'add `"regressed": [<problem#>, …]` to run {entry["run"]} in `review_history` and `last_review`.'
+        )
+    return derived
+
+
+def _recurrence_reason(entry: dict, back: dict[int, int]) -> str:
+    """Why round `entry`, which brought `back` (`recurrences`), says the fixes aren't holding: a fix
+    patched an instance and the design still produces the bug."""
+    regressed = [problem for problem, repeated in back.items() if problem == repeated]
+    repeats = {problem: repeated for problem, repeated in back.items() if problem != repeated}
+    said = []
+    if regressed:
+        said.append(f"re-opened {len(regressed)} fixed high/med problem(s) ({', '.join(f'#{n}' for n in regressed)})")
+    if repeats:
         pairs = ", ".join(f"#{problem} like #{repeated}" for problem, repeated in repeats.items())
-        back.append(f"found {len(repeats)} new high/med problem(s) of a kind already fixed ({pairs})")
-    if not back:
-        return None
+        said.append(f"found {len(repeats)} new high/med problem(s) of a kind already fixed ({pairs})")
     cause = "the fixes patch instances, not the cause, so redesign rather than review again"
-    return f"run {last['run']} {' and '.join(back)}: {cause}"
+    return f"run {entry['run']} {' and '.join(said)}: {cause}"
 
 
 def rising_reason(rounds: list[dict]) -> str | None:
@@ -209,11 +271,11 @@ def escalation_refusal(decision: GateDecision, *, open_problems: list[int], name
     """Why `feature escalate` must not hand this feature to a human yet, or None if it may.
 
     Escalating ends a held ship run (`hold.py`), so it is only for what a human really has to decide:
-    whether to review the fixes again once the budget is spent (every problem closed first: the budget
-    limits reviews, not fixes), a problem that needs the user's call, named with `--problem`, or
-    whether to redesign, when a kind of bug came back after its fix. That last call covers every open
-    problem, since fixing them first is the work a redesign throws away. Everything else stays in the
-    loop, or escalating would be the way around fixing.
+    whether to review the fixes again once the budget is spent, the loop churns or a redesign didn't
+    hold, and a problem that needs the user's call, named with `--problem`. Every other open problem is
+    closed first: the budget limits reviews, not fixes. A redesign is the run's to make, not the user's,
+    so a gate asking for one is no reason to escalate. Everything else stays in the loop, or escalating
+    would be the way around fixing.
     """
     if decision.verdict is Verdict.OPEN:
         return "the gate is OPEN: there is nothing to decide. Tell the user it's safe to merge."
@@ -221,17 +283,43 @@ def escalation_refusal(decision: GateDecision, *, open_problems: list[int], name
         return "the PR has merged: close the feature out with `Skill(ship:close)` instead."
     if stray := sorted(set(named) - set(open_problems)):
         return f"{', '.join(f'#{n}' for n in stray)} is not an open problem of this feature."
-    if decision.redesign:
-        return None
     if unnamed := sorted(set(open_problems) - set(named)):
         return (
             f"{', '.join(f'#{n}' for n in unnamed)} still open. Fix each (`feature problem resolve <#> --commit "
-            f"<sha>`) or close it as not relevant (`feature problem wontfix <#> --reason '<why>'`) first; the "
+            f"<sha>`) or close it as not relevant (`feature problem wontfix <#> --reason '<why>'`) first: the "
             f"budget limits reviews, not fixes. Name with `--problem` only a problem that needs the user's call."
         )
+    if decision.verdict is Verdict.REDESIGN and not named:
+        return f"the redesign is yours to make, not the user's: {_NEXT_REDESIGN}"
     if decision.verdict is Verdict.REVIEW_AGAIN and not named:
         return "review budget remains: review the fixes again (`Skill(ship:ship)`) instead of escalating."
     return None
+
+
+def redesign_refusal(decision: GateDecision, *, open_problems: list[int], commits: list[str]) -> str | None:
+    """Why `feature redesign` must not record a redesign yet, or None if it may.
+
+    Recording it buys the round that reviews it, so it needs a recurrence to answer, every problem
+    closed (by the redesign, or fixed or `wontfix` beside it), and `commits` since the last review,
+    which are the redesign.
+    """
+    if decision.verdict is not Verdict.REDESIGN:
+        return f"the gate is {decision.verdict}, not REDESIGN: no recurrence is waiting for a redesign."
+    if open_problems:
+        return (
+            f"{', '.join(f'#{n}' for n in sorted(open_problems))} still open. Close each the redesign fixes "
+            f"with its commits (`feature problem resolve <#> --commit <sha>…`), and fix or `wontfix` the rest."
+        )
+    if not commits:
+        return "no commit since the last review, so nothing was redesigned. Commit and push the redesign first."
+    return None
+
+
+def redesign_chains(history: list[dict], *, dismissed: frozenset[int]) -> list[int]:
+    """The recurrence chains (`chain_root`) the last round of `history` brought back, which a redesign
+    answering it covers."""
+    back = recurrences(history, dismissed=dismissed)
+    return sorted({chain_root(repeated, history) for repeated in back.values()})
 
 
 def evaluate(
@@ -242,6 +330,8 @@ def evaluate(
     budget: int,
     unreviewed: list[str],
     budget_answers: int | None = None,
+    redesigns: Sequence[dict] = (),
+    dismissed: frozenset[int] = frozenset(),
     pr_merged: bool = False,
 ) -> GateDecision:
     """Decide the gate from the open problems and whether a review covers the current code.
@@ -262,11 +352,21 @@ def evaluate(
     `budget_answers` is the run an explicit budget was set after (`feature budget --set`), or None
     when the budget is auto-sized.
 
+    `redesigns` are the run's redesigns (`state.redesigns`): each the run it answered and the
+    recurrence chains it covered. A recurrence stays REDESIGN, even with every problem closed and
+    nothing left for `needs_review`, until a redesign answers its round: the redesign may be all docs.
+    Then the round that reviews it is due whatever it touched. A chain back after its redesign is one
+    the redesign didn't stop, which goes to a human; another chain gets its own redesign.
+
+    `dismissed` are the problems closed as `wontfix`: a recurrence among them is none.
+
     `pr_merged` short-circuits to MERGED but keeps the reasons: the loop is over either way, and the
     close-out record names what was still outstanding when the PR went in.
     """
     rounds = rounds_since_invalidation(history)
     used = len(rounds)
+    last = rounds[-1] if rounds else None
+    redesigned = {r["run"] for r in redesigns}
 
     reasons: list[str] = []
     if blocking_open > 0:
@@ -278,26 +378,25 @@ def evaluate(
             f"{len(unreviewed)} commit(s) since the last review at {last_review['sha'][:9]} have never been "
             f"reviewed: {', '.join(sha[:9] for sha in unreviewed)}"
         )
+    if last is not None and last["run"] in redesigned:
+        reasons.append(f"the redesign after run {last['run']} has not been reviewed")
+
+    judged = last is not None and last["run"] not in {budget_answers, *redesigned}
+    back = recurrences(history, dismissed=dismissed) if judged else {}
 
     if pr_merged:
         return GateDecision(Verdict.MERGED, reasons, _NEXT_MERGED, used, budget)
-    if not reasons:
+    if not reasons and not back:
         return GateDecision(Verdict.OPEN, [], _NEXT_OPEN, used, budget)
-
-    # A budget raised after a round outranks that round's churn signals. They exist to escalate
-    # *early*, so a human who saw that escalation and chose to spend another round has answered it;
-    # re-deriving them from the same unchanged history would make `budget --set` a silent no-op. A
-    # round recorded after it is new evidence the human hasn't seen, judged on its own: a pinned
-    # budget once hid every later recurrence.
-    if not (rounds and rounds[-1]["run"] == budget_answers):
-        # The recurrence goes first, ahead of a spent budget too: it is the one signal that says what
-        # to do instead of another round.
-        if recurring := recurrence_reason(rounds):
-            return GateDecision(
-                Verdict.NEEDS_DECISION, [*reasons, recurring], _NEXT_REDESIGN, used, budget, redesign=True
-            )
-        if rising := rising_reason(rounds):
-            return GateDecision(Verdict.NEEDS_DECISION, [*reasons, rising], _NEXT_DECISION, used, budget)
+    if back:
+        recurring = _recurrence_reason(last, back)
+        chains = {chain_root(repeated, history) for repeated in back.values()}
+        if missed := [r["run"] for r in redesigns if r["run"] < last["run"] and chains & set(r["chains"])]:
+            again = f"{recurring}, though the run already redesigned for that kind after run {missed[-1]}"
+            return GateDecision(Verdict.NEEDS_DECISION, [*reasons, again], _NEXT_REDESIGN_FAILED, used, budget)
+        return GateDecision(Verdict.REDESIGN, [*reasons, recurring], _NEXT_REDESIGN, used, budget)
+    if judged and (rising := rising_reason(rounds)):
+        return GateDecision(Verdict.NEEDS_DECISION, [*reasons, rising], _NEXT_DECISION, used, budget)
     if used >= budget:
         return GateDecision(
             Verdict.NEEDS_DECISION,

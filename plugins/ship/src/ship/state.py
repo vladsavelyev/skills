@@ -102,6 +102,9 @@ def new_state(*, branch: str, base: str, updated: str) -> dict:
         # The run `review_budget` was set after: the override answers that round's escalation, not
         # a later round's (`gate.evaluate`).
         "review_budget_run": None,
+        # Each redesign the run made (`feature redesign`): the run it answered, the recurrence chains it
+        # covered, and why. A chain back after its redesign goes to a human (`gate.evaluate`).
+        "redesigns": [],
         "review_runs": 0,
         # Every review run ever, plus `{"event": ...}` markers when a base sync invalidates the
         # runs before it. The gate reads the trend from here; `last_review` is only the currently
@@ -128,6 +131,20 @@ def set_budget(state: dict, rounds: int | None) -> None:
     state["review_budget_run"] = None if rounds is None else state["review_runs"]
 
 
+def redesigns(state: dict) -> list[dict]:
+    """The redesigns the run made (`feature redesign`), oldest first. A block without the key made none:
+    kept ON PURPOSE, as blocks from before `redesigns` are in the feature issues of PRs in flight."""
+    return state.get("redesigns", [])
+
+
+def record_redesign(state: dict, *, rounds: int, chains: list[int], reason: str) -> None:
+    """Record a redesign answering the last recorded run's recurrence chains (`gate.chain_root`), with
+    the budget pinned at `rounds`, which covers the round that reviews it."""
+    set_budget(state, rounds)
+    entry = {"run": state["review_runs"], "chains": chains, "reason": reason}
+    state["redesigns"] = [*redesigns(state), entry]
+
+
 def fixes(state: dict) -> dict[str, list[int]]:
     """The recorded fix commits, each with the problems it fixed. A block without the key has none:
     kept ON PURPOSE, as blocks from before `fixes` are in the feature issues of PRs in flight."""
@@ -142,8 +159,8 @@ def record_fix(state: dict, problem: int, commits: list[str]) -> None:
             recorded[sha].append(problem)
 
 
-def found_before(history: list[dict]) -> set[int]:
-    """Every problem a recorded round found (its `found`). Rounds from before `found` existed, and
+def found_in(history: list[dict]) -> set[int]:
+    """Every problem the recorded rounds of `history` found (their `found`). Rounds from before `found` existed, and
     placeholders and markers, name none: kept ON PURPOSE, as they are in the feature issues of PRs
     in flight."""
     return {n for entry in history for nums in entry.get("found", {}).values() for n in nums}

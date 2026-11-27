@@ -119,16 +119,17 @@ open, deliberately.
 issue with the branch, so every feature carried review machinery from its first minute, long before
 anyone thought about review. Starting a feature now needs only a branch, a worktree and a draft PR
 (`feature start`, the `start` skill); the tracking issue appears when the user asks to ship, via
-`feature adopt`. At the same time the finder moved from Claude's `/code-review` in the fork to
-**Sol** (Codex, delegated through T3), at a reasoning effort sized per round. A reviewer from
-another model family doesn't share the author's blind spots, and sizing the depth stops a docs fix
-and a migration from costing the same review. The fork still triages; Sol finds.
+`feature adopt`. At the same time the finder moved from Claude's `/code-review` in the fork to a
+**reviewer** from another provider, delegated through T3, at a reasoning effort sized per round. A
+reviewer from another model family doesn't share the author's blind spots, and sizing the depth
+stops a docs fix and a migration from costing the same review. The fork still triages; the
+reviewer finds.
 
 The first sizing had the fork read the whole diff to judge risk and complexity, then pick the
-effort. We dropped it within the same PR: it spent an Opus read of the full diff on choosing a
-number, right before Sol read it again, and broke on PRs over 300 files. Round one is now sized from
-diff stats and paths alone, and Sol grades risk and complexity as part of its review; that grade
-goes into the PR body and sizes the rounds after it.
+effort. We dropped it within the same PR: it spent a full read of the diff by the author's model
+on choosing a number, right before the reviewer read it again, and broke on PRs over 300 files.
+Round one is now sized from diff stats and paths alone, and the reviewer grades risk and
+complexity as part of its review; that grade goes into the PR body and sizes the rounds after it.
 
 The through-line of all three subprocess/reviewer corrections: **don't reimplement or spawn what the
 surrounding tools already provide.** Delegate stacking to git-town, reviewing to `/code-review`, and run the review in the
@@ -152,14 +153,14 @@ ship under the split skills left two open under a closed parent, with no owner a
 now refuses until each open problem is a `follow-up` (backlog, on purpose) or `wontfix` (closed as
 not planned), and the human makes that call.
 
-**8. Bugs only → bugs, plus spec gaps and design smells as debt.** Sol was told to find defects and
+**8. Bugs only → bugs, plus spec gaps and design smells as debt.** The reviewer was told to find defects and
 skip style and taste, so a PR that left out part of what was asked for, or bolted a feature on
-where it should have been built in, passed as long as nothing crashed. Sol now also reports, under
+where it should have been built in, passed as long as nothing crashed. The reviewer now also reports, under
 their own headings, what the intent asked for that the diff lacks or never asked for, and breaches
 of the repo's documented rules plus a fixed list of Fowler's code smells. Both axes come from
 Matt Pocock's [`code-review`](https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review)
 skill (MIT, © 2026 Matt Pocock), whose smell list the brief adapts. His runs them as two separate
-reviewers and reports without triage; here they ride in the same Sol run, so a round costs no
+reviewers and reports without triage; here they ride in the same review run, so a round costs no
 extra review, and go through the same verify-and-dedup step. They're always filed `low`: a missing
 nice-to-have or a "possible Feature Envy" is a judgement call, and letting judgement calls hold the
 gate is the endless loop #5 got out of. Something asked for but built wrong stays a defect, at its
@@ -209,7 +210,7 @@ a forked subagent that reviewed one round and handed the fixes back as a `Next:`
 call `Skill(ship:ship)` again". The calling session didn't fix it, and at the user's next message
 ("admin-merge the PR") it merged the PR with #5400 open. Advice in a report is only as good as the
 caller's next turn. Now `ship` runs inline and drives the loop itself: each round is the forked
-`review` skill (Sol still finds blind, and a fresh fork still triages), and the fixes happen in the
+`review` skill (the reviewer still finds blind, and a fresh fork still triages), and the fixes happen in the
 caller's session, where the user sees them and the agent knows the code. Fixing inside the fork was
 the other option, but it would have hidden the fixes from the user, handed them to an agent with
 none of the feature's context, and left triage of round 2 to the agent whose fixes it was judging.
@@ -219,7 +220,7 @@ merge` of a tracked PR is refused while the gate is shut unless the user's reaso
 tracking issue. `feature escalate` refuses while a problem nobody asked the user about is open, so
 escalating isn't a way around fixing. Running inline had one side effect we missed at first: ship kept the fill-in report block it had written for its fork's caller, and that block now landed in the user's chat as the run's last message. The run now ends with a plain reply to the user; only the forked `review` round keeps a template, since an agent reads it.
 
-**15. A bug back after its fix → recommend a redesign, not another round.** On navari #5176 every
+**15. A bug back after its fix → redesign, not another round.** On navari #5176 every
 one of five rounds filed new high/med problems, mostly graded right, and nearly all of them were one
 kind of bug in a new place: the page said "Checked by RIO, nothing found" about data the run hadn't
 checked. The PR made a blanket "checked" claim over an open-ended set of data setups, so each round
@@ -231,8 +232,28 @@ What settled it, by hand, was several competing designs, each critiqued blind by
 and one approach settled from the critiques. Now the review files a problem with `--repeats` when
 a root-cause fix of an already-fixed one would have prevented it, and a round with such a
 high/med find, or a regression, gets a next step that says to stop patching and recommends that
-arena over another round. `feature escalate` takes it with the problems still open, since fixing
-them first is the work a redesign throws away. On #5176 that is round 2, not after round 5.
+arena over another round. On #5176 that is round 2, not after round 5.
+
+That first version escalated with the problems still open, on the theory that fixing them first is
+the work a redesign throws away. On navari-stack #23 round 2 filed a `--repeats` find, so
+the run escalated at once, fixing nothing, and nine problems sat open while the PR body already
+listed them. The user wants problems fixed as soon as they're found. So now the fixes come first at
+every verdict, and the recurrence only shapes the escalation that follows: the fixes' review is the
+round it recommends against, and a redesign the user picks can still replace the patches.
+
+That still stopped to ask. On navari-stack #23 the run fixed the nine problems, then escalated
+the redesign it recommended and waited, and the user's answer was that a redesign the run believes
+in is its to make, closing the problems it fixes. So a recurrence is now a verdict of its own,
+`REDESIGN`: the fix round builds the redesign (the arena above, inside the round), resolves the
+problems it fixes, and `feature redesign` records it and buys the round that reviews it. Fixing the
+problems one by one first is gone with the wait it filled: the redesign replaces those patches. A
+human is asked only when that round finds the kind again, since then the run's own diagnosis
+missed and redesigning again on its say-so would be a loop.
+
+The PR
+body's line for a round (`Findings: 2 med (#36, #37), 7 low (…)`) read as a done review, so it now
+waits until every problem it lists is closed, and the `problem` commands that close or reopen one
+rewrite the block.
 
 **16. Fixing in the caller's thread → in a fixer fork.** #14 kept the fixes inline, so the user saw
 them and the agent that knew the code made them. Measured on navari's first two inline runs (#5172
@@ -274,7 +295,7 @@ each of its steps had a ship variant: call `Skill(ship:ship)` after every push, 
 rather than `git town sync`, never merge. So a tracked PR had two loops, each deferring to the
 other, and a ship run ended at the gate whether CI was red or a colleague's comment unanswered.
 Now the ship run babysits the PR once the gate opens and ends at `READY`. A failed check or a
-reviewer's comment is filed as a problem, so the fixer fork fixes it like Sol's findings, the gate
+reviewer's comment is filed as a problem, so the fixer fork fixes it like the reviewer's findings, the gate
 decides whether its fix needs a review (a `low` one's doesn't, which keeps a lint fix from buying a
 round: #12), and a later round dedups against it. The run watches only at `OPEN`, since a gate
 holding the turn would keep it from ending to wait. The three skills' copies of the gh account rule
@@ -282,6 +303,44 @@ went too: `feature` applies it to its own calls, and the agent rules every sessi
 carry it for the agent's. So did what a model does unprompted (rerun a flake, act on the latest
 push, answer a question), and what the CLI already says: the ship skill leaves each
 `NEEDS_DECISION`'s options to the gate's next step, and the merge override to the guard's refusal.
+
+**19. Rounds as skills the caller calls → in background subagents.** Each round was a forked
+skill, `Skill(ship:review)` or `Skill(ship:fix)`, with `background: false` so the caller got its
+report in the same turn. A tool call holds its caller's turn until it returns, so the caller's
+thread was blocked for the whole round, and a review round runs for many minutes. On navari
+#4932 a user's two messages sat unread ("waiting to be read") through a 12-minute round: a question
+about a review comment, and a request to ship two other PRs in new threads, which waited for the
+round too. A forked skill can run in the background, but not under T3: Claude Code waits for every
+forked skill when it runs under the Agent SDK, as T3 runs it. A background subagent doesn't, under
+T3 too. So each round is an `Agent` call with `run_in_background: true` whose prompt calls the
+skill, and the caller ends its turn; the subagent's completion notification wakes it with the
+report. A first version ran each round in a T3 child thread instead (`delegate_task`), which
+worked but added a thread per round to the user's thread list.
+
+The caller now ends turns with the gate shut on purpose, while a round runs, so the hold (#14) has
+to tell a running round from a finished one. The Stop hook's input lists the session's in-flight
+background tasks: the caller names each round's subagent after the branch (`feature round` prints
+the description), and the hook lets a turn end while that subagent runs. The hook reads Claude
+Code's list rather than a flag the run sets and clears: a flag a crashed round never cleared would
+switch the hold off for good. The rounds' `review record` and `problem resolve` used to take the
+hold. A subagent's commands carry its caller's session id, so they'd still hold the right session,
+but they also held a review the user asked for alone, which needed a `--review-only` flag. Now only
+the run holds, as each round starts, and the flag is gone.
+
+**20. A review effort sized from low to max → high for every round.** The sizing (#6) let a PR
+graded high risk, high complexity and large climb to `max` and stay there: a navari PR in November
+2026 ran rounds 2 and 3 at `max` and announced a fourth. The user ruled that no review runs above
+`high`, and that every round runs at `high`. With one effort there is nothing to size, so
+`feature depth`, `--depth` and the `ultra` request went with it. The reviewer's grade of risk and
+complexity stays in the PR body, for the human.
+
+**21. One reviewer → two, side by side.** #6 swapped Claude's `/code-review` for a reviewer of another
+model family, so each round got that model's findings and no others. Asked whether the review should
+call `/code-review` again, the user chose to run both in every round: the reviewer with ship's
+brief, and Claude running `/code-review high`, each in its own T3 thread, with the fork merging
+their findings before it verifies and files them. Each round costs about twice as much, in exchange
+for a second set of finders. A round needs both reviewers, since a round recorded on one would read
+as the full sweep.
 
 ## Deliberately deferred
 

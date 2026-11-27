@@ -220,13 +220,16 @@ def pr_deployments(pr: int) -> list[tuple[str, str]]:
     ]
 
 
-def set_pr_description(pr: int, text: str, title: str | None, content: str) -> None:
+def set_pr_description(pr: int, text: str, title: str | None, content: str, attach: list[str]) -> None:
     """Replace the PR's description with `text` (and its title with `title`), with ship's block
     set to `content` below it. `text` may carry the block already (the body fetched and edited): the
-    PR still ends up with exactly one (`prbody.with_description`)."""
+    PR still ends up with exactly one (`prbody.with_description`). Each `attach` file (a screencast
+    or screenshot) is uploaded to GitHub, which rewrites a `![](./<file>)` in `text` to the asset."""
     cmd = ["gh", "pr", "edit", str(pr), "--body-file", "-"]
     if title:
         cmd += ["--title", title]
+    for path in attach:
+        cmd += ["--attach", path]
     run(cmd, input_text=prbody.with_description(text, content))
 
 
@@ -451,6 +454,25 @@ def link_sub_issue(parent: int, child: int) -> None:
     parent_id = _node_id(parent)
     child_id = _node_id(child)
     mutation = "mutation($p:ID!,$c:ID!){addSubIssue(input:{issueId:$p,subIssueId:$c}){issue{number}}}"
+    run(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={mutation}",
+            "-f",
+            f"p={parent_id}",
+            "-f",
+            f"c={child_id}",
+        ]
+    )
+
+
+def unlink_sub_issue(parent: int, child: int) -> None:
+    parent_id = _node_id(parent)
+    child_id = _node_id(child)
+    mutation = "mutation($p:ID!,$c:ID!){removeSubIssue(input:{issueId:$p,subIssueId:$c}){issue{number}}}"
     run(
         [
             "gh",

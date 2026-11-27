@@ -155,10 +155,10 @@ def test_a_review_of_the_head_needs_no_walk(repo, monkeypatch):
 @pytest.fixture
 def sync(repo, monkeypatch):
     record_review(repo, sha=git("rev-parse", "HEAD"), new_blocking=0, new_low=0, regressions=0, summary="clean")
-    monkeypatch.setattr(feature, "load_state", lambda branch: (7, repo, ""))
-    monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
+    monkeypatch.setattr(feature, "resolve_issue", lambda branch: 7)
+    monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, repo, ""))
     monkeypatch.setattr(github, "comment", lambda issue, note: None)
-    monkeypatch.setattr(cli, "_save_state", lambda issue, body, state: None)
+    monkeypatch.setattr(cli, "_save", lambda change, published=None: None)
 
     def run(git_town):
         monkeypatch.setattr(cli, "git_town_sync", lambda stack: git_town())

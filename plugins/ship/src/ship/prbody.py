@@ -7,13 +7,13 @@
     > **Blast radius:** ship's own block in this repo's PR bodies
     > **Complexity:** low, size M (8 files, 412 lines)
     > **Tracking issue:** closes #39
-    > **Review round 1** (medium). Findings: none. A re-review after new commits would run at low.
+    > **Review round 1**. Findings: none.
     <!-- /ship -->
 
     🤖 <model> in <harness>
 
-The CLI renders the block's whole content from the feature's state (`assess.render`) and sets it between
-the tags. Every body ship writes has exactly one block: written once, rewritten in place after
+The CLI renders the block's whole content from the feature's state and its problems (`assess.render`:
+a round's line waits until the problems it found are closed) and sets it between the tags. Every body ship writes has exactly one block: written once, rewritten in place after
 that. A body without one gets it above the author's signature (a trailing one-line paragraph
 starting with `🤖`), or at the end if there is none. A new description may come with or without
 the block (the natural round-trip fetches the body, edits it and passes it back): any block it
