@@ -618,7 +618,7 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
       delegate_task(<reviewer>, <options>, "<the brief> for PR #<n>, read only under <worktree>")
       ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
          (the reviewer gets the recorded request as intent, never tracked state)
-      delegate_task(<the /code-review reviewer>, <options>, "/code-review high <n>, read only, findings as text")
+      delegate_task(<the /code-review reviewer>, <options>, "/code-review high <n> --max-findings all, read only, findings as text")
       ─▶ raw defects from /code-review's own finders
    4. NOW load tracked state, merge the two reviewers' findings (the same defect from both is one),
       and for each finding decide (real code + problems):
@@ -691,7 +691,9 @@ Code's `/code-review` (`reviewer.CODE_REVIEW`), in its own Claude thread beside 
 merges what both found before it verifies and files anything. The two differ in more than the
 model. The reviewer works from ship's brief, which asks for spec gaps, design smells, comments and
 the grade. `/code-review` runs its own finders and is maintained with Claude Code, so ship doesn't
-hand-roll a second review prompt (motivation.md #2). A Claude child returns the findings as text: run
+hand-roll a second review prompt (motivation.md #2). It runs with `--max-findings all`: without
+it, `/code-review` reports only up to its level's limit, or up to the limit the user last typed in
+their own sessions, so a round would drop findings past it. A Claude child returns the findings as text: run
 on PR #264, it ran read-only and listed its three findings, each with file, failure scenario and fix.
 A round needs both: if either reviewer fails, the round records no review, because a round recorded
 on half its finders would read as the full sweep. Each round costs about twice as much as with one

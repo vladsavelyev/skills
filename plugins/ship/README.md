@@ -95,8 +95,9 @@ at high reasoning effort: a T3 provider instance and a model family, of which a 
 newest model the provider lists. **The reviewer** works from ship's own brief (defects, spec gaps,
 design smells, comments, and the grade); its default is of another model family than the author's
 (`reviewer.DEFAULT`), and the user picks another for one run by naming it: "ship it, review with
-Claude". **The `/code-review` reviewer** is Claude running Claude Code's `/code-review high`
-(`reviewer.CODE_REVIEW`), which brings its own finders. `feature reviewer` prints both. Models name
+Gemini". **The `/code-review` reviewer** is Claude running Claude Code's `/code-review high`
+with every finding it has (`reviewer.CODE_REVIEW`), which brings its own finders; it runs every
+round, so naming Claude as the reviewer makes both reviewers Claude. `feature reviewer` prints both. Models name
 their effort option differently, so `feature effort` reads it from the chosen model's options as
 T3 lists them. Both get the **PR by number** and nothing about earlier rounds, so each re-run finds
 blind; the `review` skill's forked subagent then merges the two reviewers' findings, dedups them

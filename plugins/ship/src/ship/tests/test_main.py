@@ -823,7 +823,7 @@ def test_reviewer_prints_both_reviewers_of_a_round(capsys):
     cli.main(["reviewer"])
     assert capsys.readouterr().out == (
         "Default reviewer: provider codex, model family sol\n"
-        "/code-review reviewer: provider claudeAgent, model family opus, runs `/code-review high <PR number>`\n"
+        "/code-review reviewer: provider claudeAgent, model family opus, runs `/code-review high <PR number> --max-findings all`\n"
     )
 
 

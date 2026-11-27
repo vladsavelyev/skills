@@ -25,6 +25,8 @@ CODE_REVIEW = Reviewer(provider="claudeAgent", family="opus")
 
 # The reasoning effort of every review round, whatever the PR's size or risk.
 EFFORT = "high"
+# `/code-review`'s own level, on a scale of its own (low…max) that sets how many finders it runs.
+CODE_REVIEW_LEVEL = "high"
 # The values that mark a model's option as its reasoning effort. Every model T3 listed on 2026-11-27
 # has an effort option with all of them, and none had another option with the whole scale: a
 # `low`/`medium`/`high` option alone could be something else.
@@ -42,3 +44,9 @@ def effort_options(model_options: list[dict]) -> dict[str, str]:
         )
     [effort] = efforts
     return {effort["id"]: EFFORT}
+
+
+def code_review_command(pr: str) -> str:
+    """The command the `/code-review` reviewer runs on a PR. `--max-findings all`, or it reports
+    only up to its level's limit, or up to whatever the user last typed in their own sessions."""
+    return f"/code-review {CODE_REVIEW_LEVEL} {pr} --max-findings all"

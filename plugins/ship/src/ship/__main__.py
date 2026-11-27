@@ -256,7 +256,7 @@ def cmd_reviewer(_args: argparse.Namespace) -> None:
     code = reviewer.CODE_REVIEW
     print(
         f"/code-review reviewer: provider {code.provider}, model family {code.family}, "
-        f"runs `/code-review {reviewer.EFFORT} <PR number>`"
+        f"runs `{reviewer.code_review_command('<PR number>')}`"
     )
 
 
@@ -1244,7 +1244,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser(
         "effort",
-        help=f"The delegate_task options that run the reviewer's model at the review effort ({reviewer.EFFORT})",
+        help=f"The delegate_task options that run a reviewer's model at the review effort ({reviewer.EFFORT})",
     )
     c.add_argument(
         "--model-options",

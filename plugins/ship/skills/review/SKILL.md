@@ -74,8 +74,9 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    reviewer and step 5 read this description to know the PR's intent, so it comes first.
 3. **Have both reviewers find, blind, side by side.** Every round runs two, and `feature
    reviewer` prints a T3 provider instance and a model family for each:
-   - **the reviewer**, with the brief below: the one your arguments name ("review with Claude"),
-     else the default;
+   - **the reviewer**, with the brief below: the one your arguments name ("review with Gemini"),
+     else the default. A name replaces only this reviewer: the `/code-review` reviewer runs
+     every round, so naming Claude makes both reviewers Claude;
    - **the `/code-review` reviewer**, running Claude Code's `/code-review` as `feature reviewer`
      prints it, with the task after the brief.
 
@@ -94,7 +95,7 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    runs finish, even where a result says to end your turn. You run as a subagent, so ending your
    turn ends the round without a review. Never cancel one or review yourself instead. If no model
    of a family is listed, `feature effort` refuses it, or either task comes back failed (an auth
-   or gateway error, a crash), stop: record no review, put that reviewer's error verbatim in the
+   or gateway error, a crash, or the `/code-review` reviewer's "review failed"), stop: record no review, put that reviewer's error verbatim in the
    report, and don't substitute another reviewer or record the round on one reviewer's findings.
 
    The reviewer's brief:
@@ -191,13 +192,16 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
      invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
-   The `/code-review` reviewer's task, with the command `feature reviewer` printed:
+   The `/code-review` reviewer's task, with the command `feature reviewer` printed, for PR #<n>:
    ```
-   Run `/code-review <effort> <n>` on PR #<n> in <owner/repo>. The PR's branch is checked out
-   at <worktree abs path>; read code only there, never another checkout. Read-only: no edits,
+   Run `<that command>` on PR #<n> in <owner/repo>. The PR's branch is checked out at
+   <worktree abs path>; read code only there, never another checkout. Read-only: no edits,
    commits, pushes or GitHub comments, and don't pass --comment or --fix. When it finishes,
    write every finding it reported in your final message as plain text, one per finding: title,
    severity, file:line, failure scenario, evidence and fix. If it reported none, say so.
+   If it couldn't read the PR's diff and reviewed the checked-out branch instead, it diffed
+   against the default branch. When the PR's base, <base>, isn't the default branch, that isn't
+   this PR's diff: report the review failed, quoting its sentence, and no findings.
    ```
 4. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
 5. **Verify and dedup each finding** of both reviewers against the real code:
