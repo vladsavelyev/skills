@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from . import assess, budget, problems
+from .state import found_in
 
 # What to do next, per verdict — the gate's most useful output for an agent driving the loop.
 _NEXT_OPEN = "Human merges the PR, then close it out with `Skill(ship:close)`."
@@ -159,22 +160,48 @@ def chain_root(problem: int, history: list[dict]) -> int:
     return problem
 
 
-def recurrences(entry: dict, *, dismissed: frozenset[int]) -> dict[int, int]:
-    """What round `entry` found again of a kind an earlier fix should have ruled out, each find with the
-    problem it brings back: a fixed problem re-opened (a regression, `regressed`, which brings back itself),
-    or a new one filed as repeating a fixed one (`problem add --repeats`, kept as `repeats`). A find since
-    closed as `wontfix` (`dismissed`) is no recurrence: it wasn't a bug.
+def recurrences(history: list[dict], *, dismissed: frozenset[int]) -> dict[int, int]:
+    """What the last round of `history` found again of a kind an earlier fix should have ruled out, each
+    find with the problem it brings back: a fixed problem re-opened (a regression, `_regressed`, which brings
+    back itself), or a new one filed as repeating a fixed one (`problem add --repeats`, kept as `repeats`). A
+    find since closed as `wontfix` (`dismissed`) is no recurrence: it wasn't a bug.
 
     Like the trend, it reads high/med finds only (`problems.serious`): a nit back again is not evidence
     the design is wrong. A low find's link still counts in the chains it bridges (`chain_root`).
-    Rounds recorded before `repeats` or `regressed` existed name no find, so nothing recurs in them:
-    kept ON PURPOSE, as they are written into feature issues of PRs in flight.
+    Rounds recorded before `repeats` existed name no repeat, so none recurs through one: kept ON PURPOSE,
+    as they are written into feature issues of PRs in flight.
     """
+    rounds = rounds_since_invalidation(history)
+    if not rounds:
+        return {}
+    entry = rounds[-1]
     links = entry.get("repeats", {})
-    serious = problems.serious(entry["found"]) if links else set()
+    serious = problems.serious(entry.get("found", {}))
     back = {int(problem): repeated for problem, repeated in links.items() if int(problem) in serious}
-    back |= {problem: problem for problem in entry.get("regressed", [])}
+    back |= {problem: problem for problem in _regressed(entry, serious, earlier=found_in(history[:-1]))}
     return {problem: back[problem] for problem in sorted(back) if problem not in dismissed}
+
+
+def _regressed(entry: dict, serious: set[int], *, earlier: set[int]) -> list[int]:
+    """The fixed problems round `entry` re-opened, given its high/med finds (`serious`) and every problem
+    the rounds before it found (`earlier`).
+
+    A round recorded before `regressed` existed kept only their count (`regressions`), and is read ON
+    PURPOSE, as such rounds are written into feature issues of PRs in flight: its regressions are the high/med
+    finds an earlier round found, which is what a regression is (its `--found` named them too). Aborts if
+    those don't add up to the count, rather than drop or guess one.
+    """
+    if "regressed" in entry:
+        return entry["regressed"]
+    derived = sorted(serious & earlier)
+    if len(derived) != entry["regressions"]:
+        named = ", ".join(f"#{n}" for n in derived) or "none"
+        raise ValueError(
+            f"Run {entry['run']} recorded {entry['regressions']} regression(s) without naming them, and the "
+            f"high/med finds an earlier round found are {named}. Name them in the feature issue's state block: "
+            f'add `"regressed": [<problem#>, …]` to run {entry["run"]} in `review_history` and `last_review`.'
+        )
+    return derived
 
 
 def _recurrence_reason(entry: dict, back: dict[int, int]) -> str:
@@ -293,8 +320,7 @@ def redesign_refusal(decision: GateDecision, *, open_problems: list[int], commit
 def redesign_chains(history: list[dict], *, dismissed: frozenset[int]) -> list[int]:
     """The recurrence chains (`chain_root`) the last round of `history` brought back, which a redesign
     answering it covers."""
-    rounds = rounds_since_invalidation(history)
-    back = recurrences(rounds[-1], dismissed=dismissed) if rounds else {}
+    back = recurrences(history, dismissed=dismissed)
     return sorted({chain_root(repeated, history) for repeated in back.values()})
 
 
@@ -362,7 +388,7 @@ def evaluate(
     # --set` a silent no-op and send the run to redesign again what it just redesigned. A round
     # recorded after it is new evidence, judged on its own.
     judged = last is not None and last["run"] not in {budget_answers, *redesigned}
-    back = recurrences(last, dismissed=dismissed) if judged else {}
+    back = recurrences(history, dismissed=dismissed) if judged else {}
 
     if pr_merged:
         return GateDecision(Verdict.MERGED, reasons, _NEXT_MERGED, used, budget)

@@ -271,7 +271,7 @@ def test_the_kind_back_after_a_redesign_through_a_low_find_goes_to_a_human():
 def test_a_low_find_repeating_a_fixed_one_is_no_recurrence():
     """A nit back again is not evidence the design is wrong, though its link stays in the chain."""
     history = [run(1, blocking=1), run(2, low=1, low_repeats={"12": 10})]
-    assert recurrences(history[-1], dismissed=frozenset()) == {}
+    assert recurrences(history, dismissed=frozenset()) == {}
     assert gate(blocking_open=1, last_review=history[-1], history=history, budget=4).verdict is Verdict.REVIEW_AGAIN
 
 
@@ -299,9 +299,46 @@ def test_a_human_who_buys_a_round_after_a_failed_redesign_answers_it():
 
 
 def test_a_round_whose_finds_repeat_nothing_is_not_a_recurrence():
-    assert recurrences(run(2, blocking=2, repeats={}), dismissed=frozenset()) == {}
+    assert recurrences([run(1, blocking=1), run(2, blocking=2, repeats={})], dismissed=frozenset()) == {}
     # Rounds recorded before `repeats` existed have no links, so nothing recurs in them.
-    assert recurrences(run(2, blocking=2), dismissed=frozenset()) == {}
+    assert recurrences([run(1, blocking=1), run(2, blocking=2)], dismissed=frozenset()) == {}
+
+
+def _old_cli_round(n: int, *, found: dict, regressions: int) -> dict:
+    """Round `n` as the CLI recorded it before `regressed` existed: only the count of its regressions."""
+    return {
+        "run": n,
+        "sha": f"s{n}",
+        "new_blocking": len(found.get("med", [])),
+        "new_low": len(found.get("low", [])),
+        "regressions": regressions,
+        "summary": "",
+        "found": found,
+        "repeats": {},
+    }
+
+
+def test_a_regression_the_old_cli_counted_without_naming_it_still_asks_for_a_redesign():
+    """#240: a feature in flight whose last round was recorded before `regressed` existed. Its regression
+    is the high/med find an earlier round found."""
+    history = [
+        _old_cli_round(1, found={"med": [7]}, regressions=0),
+        _old_cli_round(2, found={"med": [7, 9]}, regressions=1),
+    ]
+    assert recurrences(history, dismissed=frozenset()) == {7: 7}
+    d = gate(blocking_open=0, last_review=history[-1], history=history, unreviewed=["c3"])
+    assert d.verdict is Verdict.REDESIGN
+    assert any("re-opened 1 fixed high/med problem(s) (#7)" in r for r in d.reasons)
+
+
+def test_an_old_cli_regression_count_the_finds_dont_account_for_aborts():
+    """Dropping the count would hide the regression, and guessing which find it was would invent a chain."""
+    history = [
+        _old_cli_round(1, found={"med": [5]}, regressions=0),
+        _old_cli_round(2, found={"med": [7]}, regressions=1),
+    ]
+    with pytest.raises(ValueError, match=r"Run 2 recorded 1 regression\(s\) without naming them.*are none"):
+        gate(blocking_open=0, last_review=history[-1], history=history)
 
 
 def test_a_recurrence_chain_starts_at_the_first_problem_of_its_kind():
