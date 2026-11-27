@@ -16,7 +16,7 @@ Always build code cleanly, modularly, and with proper architecture and separatio
 
 **Never assume. Don't leave it to me to test.** Be independent: run the app, verify UI changes in a browser (see Browsers below), test user scenarios.
 
-**Prove the PR works.** Its description shows a before and after of what you ran, never a plan to run it, each half opening with the word in bold (`**Before**: …`, `**After**: …`). When a PR changes what a user sees or does, screencast the browser test that shows it working (cdt's `screencast_start` and `screencast_stop`; copy out the .mp4 it saves); a change a still shows (a layout, a colour, a rendered PR body) can be a before and after screenshot pair instead. Embed either with `gh pr edit <n> --attach <file>`, which uploads it to GitHub so it shows inline; on a PR ship tracks, use `feature describe --attach <file>`, which takes the same `![](./<file>)` and keeps ship's block. To place it, write `![](./<file>)` where it belongs in the `--body-file` body; otherwise it's appended. If your `gh pr edit --help` has no `--attach`, upgrade `gh`. Record only data the PR's readers may see. Any other change that runs shows the test that failed before and passes now, or the command and its output before and after. A change with nothing to run or see (docs, comments) needs none. A suite's pass count or a list of test names isn't evidence: passing tests are a given.
+**Prove the PR works.** Its description shows what you ran, never a plan to run it. Add a before and after where it makes sense and brings value: a screenshot, a screencast or a log output that shows the change, each half opening with the word in bold (`**Before**: …`, `**After**: …`). Where the before shows nothing (a feature that didn't exist), show the after alone; where nothing runs or shows (docs, comments), add none. When a PR changes what a user sees or does, screencast the browser test that shows it working (cdt's `screencast_start` and `screencast_stop`; copy out the .mp4 it saves); a change a still shows (a layout, a colour, a rendered PR body) can be a before and after screenshot pair instead. Embed either with `gh pr edit <n> --attach <file>`, which uploads it to GitHub so it shows inline; on a PR ship tracks, use `feature describe --attach <file>`, which takes the same `![](./<file>)` and keeps ship's block. To place it, write `![](./<file>)` where it belongs in the `--body-file` body; otherwise it's appended. If your `gh pr edit --help` has no `--attach`, upgrade `gh`. Record only data the PR's readers may see. Any other change that runs shows the test that failed before and passes now, or the command and its output before and after. A suite's pass count or a list of test names isn't evidence: passing tests are a given.
 
 ### Coding rules
 
@@ -34,7 +34,7 @@ Use latest versions of Python (and other languages). If needed, upgrade. Never a
 
 ### Navari local stack
 
-In navari, load `Skill(navari-stack)` before you start, stop, restart or rebuild anything in the local Docker stack, or run `docker compose` there. It overrides the repo's own stack instructions (`./scripts/run.sh`, `docker compose down`).
+In navari, load `Skill(navari-stack)` before you start, stop, restart or rebuild anything in the local Docker stack, run `docker compose` there, or run RIO to test a change. It overrides the repo's own stack instructions (`./scripts/run.sh`, `docker compose down`). A RIO-only change needs no stack: `nstack rio up` runs that worktree's own RIO beside it.
 
 ### Browsers
 

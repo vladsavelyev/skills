@@ -427,6 +427,25 @@ def link_sub_issue(parent: int, child: int) -> None:
     )
 
 
+def unlink_sub_issue(parent: int, child: int) -> None:
+    parent_id = _node_id(parent)
+    child_id = _node_id(child)
+    mutation = "mutation($p:ID!,$c:ID!){removeSubIssue(input:{issueId:$p,subIssueId:$c}){issue{number}}}"
+    run(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={mutation}",
+            "-f",
+            f"p={parent_id}",
+            "-f",
+            f"c={child_id}",
+        ]
+    )
+
+
 def sub_issues(parent: int) -> list[dict]:
     """Return [{number, title, state, labels:[...]}] for ALL of a feature's sub-issues.
 

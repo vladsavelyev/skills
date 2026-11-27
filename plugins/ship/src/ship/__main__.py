@@ -399,12 +399,35 @@ def cmd_review_record(args: argparse.Namespace) -> None:
     print(f"  → {decision.next_step}")
 
 
+# GitHub refuses a 101st sub-issue on one parent.
+SUB_ISSUE_LIMIT = 100
+
+
 def _add_problem(parent: int, title: str, sev: str, detail: str) -> int:
     """Create a problem sub-issue linked to the feature. Dedup across runs is semantic (the
     reviewing agent judges by meaning), so no fingerprint is stamped in the body."""
+    _make_room(parent)
     child = github.create_issue(title, detail, labels=["problem", SEV_LABELS[sev]])
     github.link_sub_issue(parent, child)
     return child
+
+
+def _make_room(parent: int) -> None:
+    """Unlink the oldest closed problem while the feature is at GitHub's sub-issue limit.
+
+    An unlinked problem stays closed on GitHub, but ship no longer sees it: it can't be repeated
+    (`--repeats`) or reopened (`problem block`), and a review no longer dedups against it. The oldest
+    goes first, as the least likely to come back (human call, 2026-11-26, over a continuation issue).
+    """
+    subs = github.sub_issues(parent)
+    if len(subs) < SUB_ISSUE_LIMIT:
+        return
+    closed = sorted(s["number"] for s in subs if s["state"] == "CLOSED")
+    if not closed:
+        sys.exit(f"Feature #{parent} has {len(subs)} open problems, GitHub's limit: close some before filing more.")
+    oldest = closed[0]
+    github.unlink_sub_issue(parent, oldest)
+    print(f"Unlinked closed problem #{oldest} from #{parent}: GitHub allows {SUB_ISSUE_LIMIT} sub-issues.")
 
 
 def _require_fixed(branch: str, number: int) -> None:
