@@ -6,7 +6,15 @@ base origin lacks) rather than ending the process, so each caller says it its ow
 prints it and exits, the merge guard denies the merge, the Stop hook reports it.
 """
 
+import fcntl
+import json
+import os
+import sys
+import urllib.parse
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import budget, gate, github, problems
 from .errors import Refusal
@@ -22,7 +30,7 @@ from .gitwiring import (
     remote_ref,
     sensitive_patterns,
 )
-from .state import budget_run, fixes, parse_block, redesigns
+from .state import budget_run, fixes, parse_block, parse_block_raw, redesigns, replace_block
 
 
 def resolve_issue(branch: str) -> int:
@@ -68,6 +76,86 @@ class Snapshot:
 def snapshot(branch: str) -> Snapshot:
     issue, state, body = load_state(branch)
     return Snapshot(issue, state, body, github.sub_issues(issue))
+
+
+class StateChanged(Refusal):
+    """The state block changed between a command's read and its write."""
+
+
+def locks_dir() -> Path:
+    state_home = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(state_home) / "ship" / "locks"
+
+
+@contextmanager
+def locked(branch: str) -> Iterator[None]:
+    """This machine's lock on the feature of `branch`, held by every command that changes it, from its read to its
+    last write: its state block, its problems and its PR's ship block. GitHub replaces an issue or PR body whole and
+    has no conditional write, so two commands interleaving would each write back what it read, and the later would
+    undo the earlier. A branch of the same name in another repo shares the lock, which only makes one wait."""
+    path = locks_dir() / f"{urllib.parse.quote(branch, safe='')}.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(f"Waiting for another `feature` command changing '{branch}' to finish…", file=sys.stderr, flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+@dataclass
+class Draft:
+    """A feature's state as a command changing it read it, under `locked`, and what it will write back (`save`)."""
+
+    issue: int
+    state: dict
+    body: str
+    # The state as read, to tell at the write whether anything else changed it since.
+    read: str
+
+    def snapshot(self) -> Snapshot:
+        return Snapshot(self.issue, self.state, self.body, github.sub_issues(self.issue))
+
+
+def _canonical(state: dict) -> str:
+    return json.dumps(state, sort_keys=True)
+
+
+def draft(issue: int, body: str, *, raw: bool = False) -> Draft:
+    state = (parse_block_raw if raw else parse_block)(body)
+    return Draft(issue, state, body, _canonical(state))
+
+
+@contextmanager
+def changing(branch: str, *, raw: bool = False) -> Iterator[Draft]:
+    """The feature of `branch`, read under its lock for a command that changes it. `raw` skips the schema check, for
+    `feature migrate`, which upgrades the block."""
+    with locked(branch):
+        issue, state, body = load_state_raw(branch) if raw else load_state(branch)
+        yield Draft(issue, state, body, _canonical(state))
+
+
+def load_state_raw(branch: str) -> tuple[int, dict, str]:
+    issue = resolve_issue(branch)
+    body = github.get_issue_body(issue)
+    return issue, parse_block_raw(body), body
+
+
+def save(change: Draft, *, updated: str) -> None:
+    """Write `change`'s state into its issue's body as it is now, so an edit to the prose around the block is kept.
+    Refuses if the block changed since the read: a command on another machine, which the lock doesn't reach, or a
+    hand edit. Writing it back would undo that change."""
+    current = github.get_issue_body(change.issue)
+    if _canonical(parse_block_raw(current)) != change.read:
+        raise StateChanged(
+            f"#{change.issue}'s state changed since this command read it, by another machine or by hand. Writing it "
+            f"back would undo that change, so nothing was written: run the command again."
+        )
+    change.state["updated"] = updated
+    change.body = replace_block(current, change.state)
+    github.set_issue_body(change.issue, change.body)
+    change.read = _canonical(change.state)
 
 
 def resolve_budget(state: dict) -> tuple[int, bool, list[str]]:
@@ -175,8 +263,13 @@ def decide(branch: str, state: dict, subs: list[dict], merged: bool, *, head: st
 
 def gate_for(branch: str) -> tuple[int, dict, list[dict], gate.GateDecision]:
     issue, state, _ = load_state(branch)
+    return issue, state, *judge(branch, issue, state)
+
+
+def judge(branch: str, issue: int, state: dict) -> tuple[list[dict], gate.GateDecision]:
+    """The open problems of the feature whose state is `state`, and its gate."""
     subs = github.sub_issues(issue)
-    return issue, state, problems.blocking(subs), decide(branch, state, subs, pr_merged(state))
+    return problems.blocking(subs), decide(branch, state, subs, pr_merged(state))
 
 
 def blocking_refs(blocking: list[dict]) -> str:

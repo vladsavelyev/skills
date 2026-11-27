@@ -108,6 +108,15 @@ write after the issue was filed, and a failed one lost the link for good.
 Old schema-1 blocks are refused with a pointer to `feature migrate` (a one-way upgrade) rather
 than read with guessed-at defaults.
 
+**Writes.** GitHub replaces an issue or PR body whole and has no conditional write, so a command that
+read the block, spent a few network calls, and wrote it back would undo whatever another command wrote
+in between. Every command that changes a feature runs inside `feature.changing` (or `feature.locked`,
+for one that changes only problems and the PR's block): this machine's lock on the feature, held from
+its read to its last write, so two sessions here take turns. Its write (`feature.save`) re-reads the
+issue, keeps the prose around the block as it is now, and refuses if the block changed since the
+read, which is a command on another machine or a hand edit: writing back would undo it. What no check
+can cover is a write from another machine in the instant between that re-read and the edit.
+
 ### The PR body
 
 Ship owns one tagged block in the PR body, and it is the only part of the body the CLI edits.
