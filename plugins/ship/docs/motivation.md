@@ -329,10 +329,18 @@ the run holds, as each round starts, and the flag is gone.
 
 **20. A review effort sized from low to max → high for every round.** The sizing (#6) let a PR
 graded high risk, high complexity and large climb to `max` and stay there: a navari PR in November
-2026 ran rounds 2 and 3 at `max` and announced a fourth. The user ruled that reviews never run at
-`max`, and that every round runs at `high`. With one effort there is nothing to size, so
+2026 ran rounds 2 and 3 at `max` and announced a fourth. The user ruled that no review runs above
+`high`, and that every round runs at `high`. With one effort there is nothing to size, so
 `feature depth`, `--depth` and the `ultra` request went with it. The reviewer's grade of risk and
 complexity stays in the PR body, for the human.
+
+**21. One reviewer → two, side by side.** #6 swapped Claude's `/code-review` for a reviewer of another
+model family, so each round got that model's findings and no others. Asked whether the review should
+call `/code-review` again, the user chose to run both in every round: the reviewer with ship's
+brief, and Claude running `/code-review high`, each in its own T3 thread, with the fork merging
+their findings before it verifies and files them. Each round costs about twice as much, in exchange
+for a second set of finders. A round needs both reviewers, since a round recorded on one would read
+as the full sweep.
 
 ## Deliberately deferred
 

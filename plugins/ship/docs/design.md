@@ -611,13 +611,17 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
       takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
       PR's base isn't the tracked parent
    2. `feature describe` ─▶ title + description from the motivation and commit messages
-   3. the reviewer the user named, else `feature reviewer` ─▶ provider + model family
-      orchestrator_capabilities ─▶ its newest model and that model's options
+   3. two reviewers, started together; `feature reviewer` ─▶ provider + model family of each
+      (the reviewer: the one the user named, else the default; the `/code-review` reviewer: Claude)
+      orchestrator_capabilities ─▶ each one's newest model and that model's options
       `feature effort --model-options <json>` ─▶ the option that sets its effort to high
-      delegate_task(<reviewer>, <options>, "review PR #<n>, read only under <worktree>")
+      delegate_task(<reviewer>, <options>, "<the brief> for PR #<n>, read only under <worktree>")
       ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
          (the reviewer gets the recorded request as intent, never tracked state)
-   4. NOW load tracked state, and for each finding decide (real code + problems):
+      delegate_task(<the /code-review reviewer>, <options>, "/code-review high <n>, read only, findings as text")
+      ─▶ raw defects from /code-review's own finders
+   4. NOW load tracked state, merge the two reviewers' findings (the same defect from both is one),
+      and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
        ├─ caused by THIS PR? no ─▶ not a problem: reported as pre-existing; the user picks a
        │                           separate fix PR or a plain issue
@@ -681,6 +685,17 @@ passes that name to every round of the run. T3 lists each model's options, and m
 what they call their effort, so `feature effort` finds the effort option by its values
 (`low`…`max`) rather than by a provider's name for it. A table of each provider's spelling broke
 twice in review: a provider-wide entry gave one model a value it didn't list.
+
+**Why two reviewers.** One reviewer finds what one model finds. So every round also runs Claude
+Code's `/code-review` (`reviewer.CODE_REVIEW`), in its own Claude thread beside the reviewer, and the fork
+merges what both found before it verifies and files anything. The two differ in more than the
+model. The reviewer works from ship's brief, which asks for spec gaps, design smells, comments and
+the grade. `/code-review` runs its own finders and is maintained with Claude Code, so ship doesn't
+hand-roll a second review prompt (motivation.md #2). A Claude child returns the findings as text: run
+on PR #264, it ran read-only and listed its three findings, each with file, failure scenario and fix.
+A round needs both: if either reviewer fails, the round records no review, because a round recorded
+on half its finders would read as the full sweep. Each round costs about twice as much as with one
+reviewer, which was the trade chosen.
 
 **Why every round runs at high.** Rounds used to be sized from `low` to `max` (`assess.py`): risk set
 the base effort, and a large or complex diff bought one or two steps more, first from the diff's

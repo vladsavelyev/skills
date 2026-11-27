@@ -1,4 +1,8 @@
-"""Who reviews a PR, and the `delegate_task` option that runs it at the review effort.
+"""Who reviews a PR, and the `delegate_task` option that runs each reviewer at the review effort.
+
+Every round runs two reviewers side by side: the reviewer, of another model family than the
+author's, with ship's own brief (the user can name another for a run); and Claude running Claude
+Code's `/code-review`, which brings its own finders.
 
 T3 lists each model's options (`orchestrator_capabilities`), and models name their effort
 differently: one calls it `reasoningEffort` and another `effort`. So the effort option is found by
@@ -17,11 +21,13 @@ class Reviewer:
 
 
 DEFAULT = Reviewer(provider="codex", family="sol")
+CODE_REVIEW = Reviewer(provider="claudeAgent", family="opus")
 
 # The reasoning effort of every review round, whatever the PR's size or risk.
 EFFORT = "high"
-# The values that mark a model's option as its reasoning effort: every provider's effort option
-# lists all of them, and no other option does.
+# The values that mark a model's option as its reasoning effort. Every model T3 listed on 2026-11-27
+# has an effort option with all of them, and none had another option with the whole scale: a
+# `low`/`medium`/`high` option alone could be something else.
 _EFFORT_SCALE = ("low", "medium", "high", "xhigh", "max")
 
 
