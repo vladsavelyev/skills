@@ -7,7 +7,7 @@
     > **Blast radius:** ship's own block in this repo's PR bodies
     > **Complexity:** low, size M (8 files, 412 lines)
     > **Tracking issue:** closes #39
-    > **Review round 1** (medium). Findings: none. A re-review after new commits would run at low.
+    > **Review round 1**. Findings: none.
     <!-- /ship -->
 
     🤖 <model> in <harness>

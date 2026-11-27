@@ -10,7 +10,7 @@ background: false
 You run in a forked subagent and do one review round of a PR: the reviewer finds, blind; you verify, dedup
 and file what it found, and record the round. Then end with the **report** below: the caller,
 usually `Skill(ship:ship)`, sees only that. Your arguments name the PR (else take the current
-branch's) and anything the user asked of this round (a deeper review, a fresh one past an OPEN
+branch's) and anything the user asked of this round (a fresh review past an OPEN
 gate, another reviewer).
 
 **Never ship debt.** Every problem a review files, at every severity including `low`, is closed
@@ -34,10 +34,9 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
 | Record the user's request | `feature prompt "<request>"` |
 | Link the PR | `feature pr <number>` |
 | Rewrite the PR description | `feature describe [--title "<t>"] [--attach <file>]… --body-file - <<'EOF' … EOF` |
-| Depth for the next round | `feature depth` |
 | Default reviewer | `feature reviewer` |
-| Options for the reviewer's effort | `feature effort --depth <depth> --model-options '<json>'` |
-| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <problem#> ...] --summary "<sentence>" --depth <effort the reviewer ran at> --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
+| Options for the reviewer's effort | `feature effort --model-options '<json>'` |
+| Record a review | `feature review record --sha <sha> --found [<problem#> ...] [--regressions <problem#> ...] --summary "<sentence>" --risk <r> --door <one-way\|two-way> --blast-radius "<words>" --complexity <c> --why "<sentence>"` |
 | Problems | `feature problem list [--open]`, `add [--repeats <fixed #>]`, `block <#> --reason "…"` |
 | Merge check | `feature gate`: exit 0 OPEN, 10 REVIEW_AGAIN, 20 NEEDS_DECISION, 30 MERGED, 40 REDESIGN; 1/2 mean the command failed |
 | Old repo/issue after a CLI upgrade | `feature migrate` |
@@ -72,17 +71,14 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    The title says what the PR does, in plain words. End the description with your signature
    line if your harness asks for one. `feature describe` takes the text with or without ship's
    block (editing the fetched body is fine) and writes exactly one, above that signature. The
-   reviewer and step 6 read this description to know the PR's intent, so it comes first.
-3. **Pick the depth**: `feature depth` prints the reasoning effort for this round. Before any
-   review it comes from the diff stats and the paths touched; after one, from the last review's
-   grade. Don't read the diff to second-guess it. Go higher only when your arguments ask for a
-   deeper review (`ultra` only on request), and say so in the report.
-4. **Have the reviewer find, blind.** The reviewer is the one your arguments name ("review with
+   reviewer and step 5 read this description to know the PR's intent, so it comes first.
+3. **Have the reviewer find, blind.** The reviewer is the one your arguments name ("review with
    Claude"), else the default `feature reviewer` prints: a T3 provider instance and a model
    family. Load the T3 tools with ToolSearch, call `orchestrator_capabilities` with `search:
    "<the name or family>"`, and take the provider that offers it and the newest model of that
-   family it lists. `feature effort --depth <depth> --model-options '<that model's options array,
-   as listed>'` prints the `delegate_task` options that run it at the depth. Then `delegate_task`
+   family it lists. `feature effort --model-options '<that model's options array, as listed>'`
+   prints the `delegate_task` options that run it at high reasoning effort, the effort of every
+   round: never set another, whatever the PR. Then `delegate_task`
    with `mode: "wait"`, `role: "review"`, `timeoutMs: 45000` (the most the tool takes; a timeout
    doesn't cancel the child), and `target: {providerInstanceId: "<provider>", model: <model>,
    options: <the printed options>}`.
@@ -188,8 +184,8 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
    - complexity, how hard the change is to get right. high: subtle state, ordering, caching, new
      invariants, many interacting parts. med: real logic in a few places. low: mechanical or local.
    ```
-5. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
-6. **Verify and dedup each finding** against the real code:
+4. **Now load state**: `feature problem list --open`, plus closed problems for regression checks.
+5. **Verify and dedup each finding** against the real code:
    - Take its evidence at least to traced, and to ran when a script or test against the real
      code is cheap. Stuck at cited → drop it.
    - Never run `sudo`, not even `sudo -n`: it stops for the user's approval. To make a file owned by
@@ -227,27 +223,26 @@ every command with `cd <worktree> &&`, and never read from the main checkout or 
      instead, with its redesign. A constraint to enforce is a `Comments: …` problem of its own.
      The comments that only need deleting go in one `Comments: …` problem, listing each
      `file:line`.
-7. **File new ones**: `feature problem add --title "…" --sev … [--repeats <#>] --body-file - <<'EOF' … EOF`, with
+6. **File new ones**: `feature problem add --title "…" --sev … [--repeats <#>] --body-file - <<'EOF' … EOF`, with
    the repro, its evidence (traced or ran, with the script if ran; for a spec gap, the quoted
    intent; for a design finding, the rule or smell and the code; for a comment, the comment, which kind
    it is and why no keep clause covers it), `file:line` and the suggested
    root-cause fix.
-8. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
-   `--found` listing every problem steps 6–7 filed or blocked this round (bare `--found` if none);
+7. **Record**: `feature review record --sha $(git rev-parse HEAD) --found <#> … …`, with
+   `--found` listing every problem steps 5–6 filed or blocked this round (bare `--found` if none);
    the CLI counts them by severity and lists them on the round's line in the PR body, which shows
    once they're all closed. Write
    `--summary` as a real sentence about what was reviewed and found, never a bare "clean pass";
-   name any spec, design and comment findings in it. Pass the effort the reviewer ran at as
-   `--depth`, and its grade as `--risk`, `--door`, `--blast-radius`, `--complexity` and `--why`,
-   never lowered. Raise complexity when the findings show the change was harder to get right than
-   the reviewer graded. Raise risk only when a finding shows a bug costs more than it graded: it
-   reaches further (widen the blast radius) or is harder to undo (the door turns one-way). Many
-   findings in a low-risk change still mean low risk. The CLI writes the grade into the PR body
-   and sizes the next round's depth from it: low risk always reviews at low.
+   name any spec, design and comment findings in it. Pass the reviewer's grade as `--risk`,
+   `--door`, `--blast-radius`, `--complexity` and `--why`, never lowered. Raise complexity when
+   the findings show the change was harder to get right than the reviewer graded. Raise risk only
+   when a finding shows a bug costs more than it graded: it reaches further (widen the blast
+   radius) or is harder to undo (the door turns one-way). Many findings in a low-risk change still
+   mean low risk. The CLI writes the grade into the PR body for the human.
 
 ## Rules
 
-- Never lower a severity, or the reviewer's risk or complexity grade, to buy a cheaper review.
+- Never lower a severity, or the reviewer's risk or complexity grade.
 - Never ship debt. `wontfix` is only for a problem that isn't relevant (a false positive, by design,
   outside this PR's scope), never for a real problem nobody has fixed yet.
 - Never fix, commit, close a feature out or merge here.
@@ -261,7 +256,7 @@ End with only this, filled in:
 ```
 Feature: <name>  Branch: <branch>  PR: <url or none>  Worktree: <abs path>
 Did: <one line>
-Review: <provider> <model> at <depth>; graded risk <…> (<door> door, blast radius <…>), complexity <…>; next round at <depth>   (or not run: <why>, with the reviewer's error verbatim if it failed)
+Review: <provider> <model>; graded risk <…> (<door> door, blast radius <…>), complexity <…>   (or not run: <why>, with the reviewer's error verbatim if it failed)
 Gate: <the gate line from `feature review record` or `feature gate`, its reasons included, or not run>
 Open: #<n> [sev] <title> — <file:line>, fix: <root-cause fix>   (every open problem, low included, one per line; or none)
 Pre-existing: [sev] <title> — <file:line>, <failure scenario>, fix: <root-cause fix>   (bugs this PR didn't cause, one per line; or none)

@@ -327,6 +327,13 @@ hold. A subagent's commands carry its caller's session id, so they'd still hold 
 but they also held a review the user asked for alone, which needed a `--review-only` flag. Now only
 the run holds, as each round starts, and the flag is gone.
 
+**20. A review effort sized from low to max → high for every round.** The sizing (#6) let a PR
+graded high risk, high complexity and large climb to `max` and stay there: a navari PR in November
+2026 ran rounds 2 and 3 at `max` and announced a fourth. The user ruled that reviews never run at
+`max`, and that every round runs at `high`. With one effort there is nothing to size, so
+`feature depth`, `--depth` and the `ultra` request went with it. The reviewer's grade of risk and
+complexity stays in the PR body, for the human.
+
 ## Deliberately deferred
 
 - Mirroring problems to PR review threads (native resolved-thread UX).
