@@ -133,7 +133,6 @@ class Review:
     changed_lines: int
     history: list[dict]
     next_depth: str
-    # The feature's problems still open. A round's line waits until every problem it found is closed.
     open_problems: frozenset[int]
 
 

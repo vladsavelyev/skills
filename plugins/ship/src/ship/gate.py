@@ -66,8 +66,6 @@ _NEXT_REDESIGN = (
     "Then `feature redesign --reason '<the cause, and the design settled on>'`, which buys the round that "
     "reviews it, and review again."
 )
-# The one recurrence a human sees: the run redesigned once and the kind of bug came back anyway, so the
-# run's own diagnosis was wrong and a second try on its say-so would be a loop.
 _NEXT_REDESIGN_FAILED = (
     "STOP reviewing, but first close every open problem (`Skill(ship:fix)`: it fixes each at its root cause, "
     "or closes it as `wontfix` if it isn't relevant). The run already redesigned, and the round that reviewed "
@@ -383,10 +381,6 @@ def evaluate(
     if last is not None and last["run"] in redesigned:
         reasons.append(f"the redesign after run {last['run']} has not been reviewed")
 
-    # A budget raised, or a redesign made, after a round outranks that round's churn signals: they
-    # answered it, and re-deriving the signals from the same unchanged history would make `budget
-    # --set` a silent no-op and send the run to redesign again what it just redesigned. A round
-    # recorded after it is new evidence, judged on its own.
     judged = last is not None and last["run"] not in {budget_answers, *redesigned}
     back = recurrences(history, dismissed=dismissed) if judged else {}
 
@@ -394,8 +388,6 @@ def evaluate(
         return GateDecision(Verdict.MERGED, reasons, _NEXT_MERGED, used, budget)
     if not reasons and not back:
         return GateDecision(Verdict.OPEN, [], _NEXT_OPEN, used, budget)
-    # The recurrence goes first, ahead of a spent budget too: it is the one signal that says what to do
-    # instead of another round.
     if back:
         recurring = _recurrence_reason(last, back)
         chains = {chain_root(repeated, history) for repeated in back.values()}

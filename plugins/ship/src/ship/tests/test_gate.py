@@ -204,7 +204,6 @@ def test_the_redesign_step_points_to_an_arena_and_does_not_stop_to_ask():
     assert "competing designs" in _NEXT_REDESIGN and "critiqued blind" in _NEXT_REDESIGN
     assert "feature escalate" not in _NEXT_REDESIGN and "human" not in _NEXT_REDESIGN
     assert _NEXT_REDESIGN.index("Skill(ship:fix)") < _NEXT_REDESIGN.index("feature redesign")
-    # The one exception: a redesign that crosses a one-way door is asked before it is built.
     assert "one-way door" in _NEXT_REDESIGN and "`Question:`" in _NEXT_REDESIGN
 
 
