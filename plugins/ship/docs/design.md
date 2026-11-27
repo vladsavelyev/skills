@@ -137,9 +137,9 @@ for GitHub to close the tracking issue:
 > **Blast radius:** ship's own block in this repo's PR bodies
 > **Complexity:** low, size M (8 files, 412 lines)
 > **Tracking issue:** closes #39
-> **Review round 1** (high). Findings: 1 low (#40).
-> **Review round 2** (xhigh). Findings: 4 med (#41, #42, #43, #44).
-> **Review round 3** (medium). Findings: none. A re-review after new commits would run at low.
+> **Review round 1**. Findings: 1 low (#40).
+> **Review round 2**. Findings: 4 med (#41, #42, #43, #44).
+> **Review round 3**. Findings: none.
 <!-- /ship -->
 
 🤖 Claude Opus 5.5 in Claude Code (T3 Code)
@@ -168,10 +168,7 @@ problems are open, so the writers pass in the sub-issues they read anyway: `revi
 `problem` commands, which read them to check the number; `pr`, `describe` and `reconcile` read them
 once a round is graded. A problem closed or reopened outside ship (by hand on GitHub) shows at the
 block's next write. Handed-off problems are still open, so a merged PR's round that left one keeps
-its line hidden. The latest round's line ends with the depth the reviewer's grade buys the next
-round; while that line waits, so does the depth. After a round
-that found no high or med problem no round is due (low problems' fixes need none), so it reads `A
-re-review after new commits would run at <depth>` instead of `Next round would run at <depth>`.
+its line hidden.
 
 Every body ship writes has exactly one block. It is created once; every later write finds it and
 rewrites what is between its tags. `feature describe` accepts the new description with or without
@@ -421,12 +418,11 @@ All commands are `feature <cmd>` (or the `feature` console script).
 | --- | --- |
 | `feature start <name> --body <motivation> [--base <branch>] [--title <t>] [--allow-local-base]` | Create the branch (git-town parent `--base`, else main) off the freshly fetched `origin/<base>` (the base must be on origin), a worktree under `.claude/worktrees/<name>/`, an empty first commit pushed with upstream, and a draft PR against the base. No tracking issue: that waits for `adopt` at ship time. Aborts if the base has local-only commits (they'd leak into the PR diff, which is against the *remote* base) unless `--allow-local-base` is given, in which case it branches off the local base. |
 | `feature describe --body-file <f\|-> [--title <t>] [--branch <b>]` | Replace the PR description (and optionally the title). The input may carry ship's block or not; the body gets exactly one, rendered fresh (see "The PR body"). `ship` runs it on a branch's first ship, because `feature start` wrote the description before any code existed. |
-| `feature depth [--branch <b>]` | Print the reasoning effort for the next review round (`assess.py`): size from the diff stats; risk from the paths touched (sensitive → high, docs/tests only → low) until a review has graded the PR, then the last grade's risk and complexity. |
 | `feature adopt [--branch <b>] [--base <branch>]` | Wire an *existing* branch into tracking (no new branch/worktree): opens the tracking issue and links the open PR. The `review` skill runs it on a feature's first ship, and it works the same for a branch never started with `feature start`. |
 | `feature pr <number>` | Link an existing PR number to the current branch: record it in the state block and move status to `in-review`. (Open the PR yourself with `gh`/`git town propose`; `adopt` auto-links an already-open PR.) |
 | `feature status [--branch <b>] [--json]` | Print reconstructed state for a branch (used by the SessionStart hook). |
 | `feature prompt <text>` | Record the latest prompt into the state block. |
-| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <problem#> ...] --summary <text> --depth <effort> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body; sizes the next round's depth): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
+| `feature review record --sha <sha> --found [<problem#> ...] [--regressions <problem#> ...] --summary <text> --risk <r> --door <one-way\|two-way> --blast-radius <text> --complexity <c> --why <text>` | Record a review run with the reviewer's grade (written into the PR body): append to `review_history`, set `last_review`, post a timeline comment, and print the resulting gate verdict + next step. Refuses if no PR is linked, or if the PR's base branch ≠ the feature's tracked parent (either means a wrongly-scoped review). See "The in-session review". |
 | `feature problem add --title <t> --sev <high\|med\|low> [--body <b> \| --body-file <path\|->] [--repeats <number>]` | Create a problem sub-issue linked to the feature. It blocks the gate until closed, at any severity. `--body-file -` reads the detail from stdin (multi-line failure scenarios with code snippets survive intact); mutually exclusive with `--body`. `--repeats` names a fixed problem this one is the same kind of bug as: its body says so, and a round that finds it (high/med) tells the gate to recommend a redesign. Refuses a problem that is open or `wontfix`. |
 | `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue, recording its fix commits in `fixes`. If a review round found it, rewrite the PR's ship block, which shows that round's line once all its problems are closed. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of this PR's scope): creates the workflow labels if the repo lacks them, labels it `wontfix` and closes it as not planned with the reason. The only way besides a fix to close a problem. Rewrites the PR's ship block like `resolve`; run again on a problem it already closed, it only rewrites the block. |
@@ -615,14 +611,13 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
       takes the PR's base as the parent), `feature pr` if tracked but unlinked; stop if the
       PR's base isn't the tracked parent
    2. `feature describe` ─▶ title + description from the motivation and commit messages
-   3. `feature depth` ─▶ effort (stats + paths, or the last review's grade); no diff reading
-   4. the reviewer the user named, else `feature reviewer` ─▶ provider + model family
+   3. the reviewer the user named, else `feature reviewer` ─▶ provider + model family
       orchestrator_capabilities ─▶ its newest model and that model's options
-      `feature effort --depth <depth> --model-options <json>` ─▶ the option that sets its effort
+      `feature effort --model-options <json>` ─▶ the option that sets its effort to high
       delegate_task(<reviewer>, <options>, "review PR #<n>, read only under <worktree>")
       ─▶ raw defects, spec gaps, design smells, flaws comments cover + the reviewer's grade of risk and complexity
          (the reviewer gets the recorded request as intent, never tracked state)
-   5. NOW load tracked state, and for each finding decide (real code + problems):
+   4. NOW load tracked state, and for each finding decide (real code + problems):
        ├─ traced or ran?     no ─▶ drop (only cited: a false positive until shown)
        ├─ caused by THIS PR? no ─▶ not a problem: reported as pre-existing; the user picks a
        │                           separate fix PR or a plain issue
@@ -634,10 +629,10 @@ Skill(ship:ship) ─▶ background subagent ─▶ Skill(ship:review) ─▶ for
               ├─ matches a WONTFIX one      ─▶ skip, unless the repro answers its reason
               └─ distinct                   ─▶ `feature problem add --sev high|med|low`
                                                     (spec, design and comment findings: always low)
-   6. `feature review record --found <problems filed & regressed>
-                             --regressions <high/med reopened #s> --depth --risk --door --blast-radius --complexity --why`   (refuses if no PR linked;
+   5. `feature review record --found <problems filed & regressed>
+                             --regressions <high/med reopened #s> --risk --door --blast-radius --complexity --why`   (refuses if no PR linked;
                              idempotent per sha, so a retry after a failed call spends no extra round)
-   7. report ─▶ the ship run: the verdict and every open problem, which it fixes before the next round
+   6. report ─▶ the ship run: the verdict and every open problem, which it fixes before the next round
       or an escalation, whatever the verdict (a merged PR stops at step 1: the ship run hands it to
       Skill(ship:close))
 ```
@@ -683,23 +678,21 @@ rigor. The default reviewer is also a different model family from the agent that
 so it doesn't share the author's blind spots. The default is a constant (`reviewer.DEFAULT`);
 the user overrides it for one run by naming a reviewer when they ask to ship, and the ship skill
 passes that name to every round of the run. T3 lists each model's options, and models differ in
-what they call their effort and whether it goes above `max`, so `feature effort` finds the effort
-option by its values (`low`…`max`) rather than by a provider's name for it. A table of each
-provider's spelling broke twice in review: a provider-wide entry gave one model a value it didn't
-list.
+what they call their effort, so `feature effort` finds the effort option by its values
+(`low`…`max`) rather than by a provider's name for it. A table of each provider's spelling broke
+twice in review: a provider-wide entry gave one model a value it didn't list.
 
-**Why the depth is sized, and by whom.** A review round used to cost the same for a two-line docs
-fix and a migration, so the reviewer's reasoning effort is sized per round (`assess.py`). The first version
-had the fork read the whole diff to judge risk and complexity before the reviewer ran. That spent the most
-expensive, most context-heavy read on the least important decision, ahead of the reviewer reading the same
-diff properly, and `gh pr diff` refuses PRs over 300 files anyway. Now the first round is sized
-without reading the diff: size from its stats, risk from the paths it touches. The reviewer, which reads
-every line, grades risk and complexity as part of its review; the grade is recorded with the round,
-written into the PR body for the human, and sizes every later round. A cheap first guess that was
-too low gets corrected by the reviewer that found out. The mapping is code, not prose, so the same
-inputs always buy the same depth.
+**Why every round runs at high.** Rounds used to be sized from `low` to `max` (`assess.py`): risk set
+the base effort, and a large or complex diff bought one or two steps more, first from the diff's
+stats and paths, then from the reviewer's grade. A PR the reviewer graded high risk, high
+complexity and large ran every round after the first at `max`, and so did the next round it
+announced (a navari PR in November 2026 ran rounds 2 and 3 there, with a fourth due). The user ruled that no review runs above
+`high`, and one effort for every round needs no sizing, so the sizing went: every round runs at
+`reviewer.EFFORT`, and the round's line in the PR body no longer names an effort. Rounds recorded
+before then keep their `depth` in the feature issue, and the block ignores it. The reviewer still
+grades risk and complexity, for the human reading the PR body.
 
-**Why risk is about stakes, and caps the depth.** PR #38 changed only how ship formats its own
+**Why risk is about stakes.** PR #38 changed only how ship formats its own
 block in PR bodies, in this personal repo, where a bad write is visible and fixed by hand. The
 reviewer still graded it high twice ("whole-body rewrites can corrupt persistent author content"), so its
 rounds ran at high, then xhigh, with max next. The rubric listed "data loss or corruption" and
@@ -707,10 +700,9 @@ rounds ran at high, then xhigh, with max next. The rubric listed "data loss or c
 reviewer matched the subject, not the stakes. Its reasoning also mixed in how hard the parser was to get
 right, which is complexity. Now risk is the cost of a missed bug, judged from the repo's stakes:
 reach and reversibility, which the reviewer names as the grade's blast radius and door (borrowed from
-mattpocock's `pr` skill), so a reader sees what the level rests on. Each risk level starts at the
-depth of the same name, and a low-risk PR reviews at low whatever its size or complexity: a big,
-intricate change still costs little to get wrong if nobody else is hit and it is easy to undo. For
-the same reason, many findings in a round raise complexity, not risk.
+mattpocock's `pr` skill), so a reader sees what the level rests on. A big, intricate change still
+costs little to get wrong if nobody else is hit and it is easy to undo, so many findings in a round
+raise complexity, not risk.
 
 **Why a subagent, not a headless `claude`.** An earlier design spawned `claude -p "/code-review"`
 as a *subprocess* and forced its findings into a JSON schema. That second, long-lived `claude`

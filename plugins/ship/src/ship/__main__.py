@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from enum import Enum, auto
 from pathlib import Path
 
-from . import assess, budget, feature, gate, github, hold, problems, reviewer, tidy
+from . import assess, feature, gate, github, hold, problems, reviewer, tidy
 from .errors import Refusal
 from .shell import run, try_run
 from .gitwiring import (
@@ -30,7 +30,6 @@ from .gitwiring import (
     parent_branch,
     remote_ref,
     run_head_sha,
-    sensitive_patterns,
     set_feature_issue,
     set_parent_branch,
     start_commit_and_push,
@@ -201,24 +200,6 @@ def cmd_pr(args: argparse.Namespace) -> None:
     print(f"Linked PR #{args.number} to feature #{change.issue}")
 
 
-def _next_depth(state: dict) -> tuple[str, str, int, int, str]:
-    """(depth, size, files, lines, why) for the next review round of a linked PR."""
-    files, lines = github.pr_diff_stats(state["pr"])
-    size = assess.size_bucket(files, lines)
-    grade = assess.last_grade(state["review_history"])
-    if grade is not None:
-        depth = assess.review_depth(size=size, risk=grade["risk"], complexity=grade["complexity"])
-        why = f"the last review graded it risk {grade['risk']}, complexity {grade['complexity']}"
-        return depth, size, files, lines, why
-    paths = github.pr_changed_paths(state["pr"], expected=files)
-    hits = budget.sensitive_matches(paths, sensitive_patterns())
-    risk = assess.path_risk(paths, hits)
-    complexity = "low" if risk == "low" else "med"
-    depth = assess.review_depth(size=size, risk=risk, complexity=complexity)
-    why = f"no review yet; risk {risk} from the paths touched" + (f" ({', '.join(hits[:3])})" if hits else "")
-    return depth, size, files, lines, why
-
-
 def _block_content(feat: feature.Snapshot) -> str:
     """The content of the PR body's ship block, rendered from `feat`: the reference to its issue, and
     once a review has graded the PR, the reviewer's latest grade and every round whose problems are
@@ -231,15 +212,14 @@ def _block_content(feat: feature.Snapshot) -> str:
     grade = assess.last_grade(history)
     if grade is None:
         return assess.render(issue=feat.issue, review=None)
-    next_depth, size, files, lines, _ = _next_depth(state)
+    files, lines = github.pr_diff_stats(state["pr"])
     still_open = problems.blocking(feat.subs)
     review = assess.Review(
         grade=grade,
-        size=size,
+        size=assess.size_bucket(files, lines),
         changed_files=files,
         changed_lines=lines,
         history=history,
-        next_depth=next_depth,
         open_problems=frozenset(s["number"] for s in still_open),
     )
     return assess.render(issue=feat.issue, review=review)
@@ -276,17 +256,7 @@ def cmd_reviewer(_args: argparse.Namespace) -> None:
 
 
 def cmd_effort(args: argparse.Namespace) -> None:
-    print(json.dumps(reviewer.effort_options(json.loads(args.model_options), args.depth)))
-
-
-def cmd_depth(args: argparse.Namespace) -> None:
-    branch = args.branch or current_branch()
-    _, state, _ = feature.load_state(branch)
-    if state["pr"] is None:
-        sys.exit(f"No PR linked to '{branch}'. Run `feature pr <number>` first.")
-    depth, size, files, lines, why = _next_depth(state)
-    print(f"Review depth: {depth}")
-    print(f"  size {size} ({files} files, {lines} lines); {why}")
+    print(json.dumps(reviewer.effort_options(json.loads(args.model_options))))
 
 
 def _round_finds(issue: int, subs: list[dict], numbers: list[int]) -> tuple[dict[str, list[int]], int, int]:
@@ -359,7 +329,6 @@ def _record_review(args: argparse.Namespace, branch: str, change: feature.Draft)
     entry["found"] = found
     entry["regressed"] = regressed
     entry["repeats"] = problems.repeat_links(found, earlier=earlier, body=github.get_issue_body)
-    entry["depth"] = args.depth
     entry["grade"] = {
         "risk": args.risk,
         "door": args.door,
@@ -1263,15 +1232,13 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--branch")
     c.set_defaults(func=cmd_describe)
 
-    c = sub.add_parser("depth", help="Reasoning effort for the next review round")
-    c.add_argument("--branch")
-    c.set_defaults(func=cmd_depth)
-
     c = sub.add_parser("reviewer", help="T3 provider and model family that review a PR when the user names none")
     c.set_defaults(func=cmd_reviewer)
 
-    c = sub.add_parser("effort", help="The delegate_task options that run the reviewer's model at a depth")
-    c.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="The round's depth")
+    c = sub.add_parser(
+        "effort",
+        help=f"The delegate_task options that run the reviewer's model at the review effort ({reviewer.EFFORT})",
+    )
     c.add_argument(
         "--model-options",
         required=True,
@@ -1300,7 +1267,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="The high/med problems in --found that were fixed and are back (`problem block`): a fix that didn't hold",
     )
     r.add_argument("--summary", required=True)
-    r.add_argument("--depth", required=True, choices=assess.DEPTHS + ("ultra",), help="Effort the reviewer ran at")
     r.add_argument("--risk", required=True, choices=assess.LEVELS, help="The reviewer's grade of the PR's risk")
     r.add_argument("--door", required=True, choices=assess.DOORS, help="Whether reverting the PR undoes a bug in it")
     r.add_argument("--blast-radius", required=True, help="A few words: who or what a bug in the PR would reach")

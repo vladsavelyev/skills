@@ -2,8 +2,8 @@
 
 A CLI and hooks for running multiple Claude features in parallel. A feature starts as
 a branch, a worktree and a draft PR (the `start` skill); when it's shipped (the `ship` skill) it
-gets a GitHub tracking issue and a review by another model, through T3, at a reasoning effort
-sized from the PR: real defects, plus spec gaps, design smells and the flaws its new comments
+gets a GitHub tracking issue and a review by another model, through T3, at high reasoning
+effort: real defects, plus spec gaps, design smells and the flaws its new comments
 cover, and the reviewer's grade of the PR's risk and complexity goes into the PR body. Features can be **stacked** on each
 other (via git-town). Review-found problems are tracked as GitHub sub-issues, and a **merge
 gate** blocks until every one is closed and a review covers the branch head. A new Claude
@@ -90,11 +90,11 @@ chmod +x ~/.local/bin/feature
   git config --add feature.sensitive-path 'migrations/*'
   ```
 
-Reviews are run by the **reviewer**, delegated through T3 Code (`delegate_task`) at the reasoning
-effort `feature depth` picked: a T3 provider instance and a model family, of which a round takes
+Reviews are run by the **reviewer**, delegated through T3 Code (`delegate_task`) at high reasoning
+effort, every round: a T3 provider instance and a model family, of which a round takes
 the newest model the provider lists. The default is in code (`reviewer.DEFAULT`, printed by
 `feature reviewer`); the user picks another for one run by naming it: "ship it, review with
-Claude". Models name their effort option differently and not all go above `max`, so `feature
+Claude". Models name their effort option differently, so `feature
 effort` reads it from the chosen model's options as T3 lists them. The reviewer gets the **PR by number** and nothing about
 earlier rounds, so each re-run finds blind; the `review` skill's forked subagent then dedups the findings against tracked problems, files the new ones, and records the run
 via this CLI. A linked PR is required — the PR diff defines the review scope (correct even for
@@ -107,12 +107,11 @@ review subcommand.
 feature start add-oauth --body "Users want Google login."   # branch + worktree + draft PR
 # ... work, commit, push; then, to ship:
 feature adopt                                  # labels, tracking issue; links the open PR
-feature depth                                  # effort for the reviewer: from stats + paths, later its grade
-# the reviewer reviews PR #123 at that depth, the skill dedups vs tracked problems, then:
+# the reviewer reviews PR #123 at high effort, the skill dedups vs tracked problems, then:
 feature problem add --title "…" --sev high    # file each genuinely-new problem
 feature review record --sha $(git rev-parse HEAD) --found 46 47 48 49 50 \
     --summary "Token refresh race + unchecked PKCE verifier; 3 nits filed as low" \
-    --depth xhigh --risk high --door one-way --blast-radius "every signed-in user" \
+    --risk high --door one-way --blast-radius "every signed-in user" \
     --complexity med --why "Token handling; refresh has ordering"
 feature problem list --open                    # every one holds the merge, low included
 # ... fix each, or close the ones that aren't relevant:
@@ -121,7 +120,7 @@ feature problem wontfix 48 --reason "verifier is validated upstream in middlewar
 # #46 is high, so its fix gets a review (a low problem's fix wouldn't); record it:
 feature review record --sha $(git rev-parse HEAD) --found 51 \
     --summary "Re-reviewed oauth.py; #46 fixed; one naming nit filed" \
-    --depth max --risk high --door one-way --blast-radius "every signed-in user" \
+    --risk high --door one-way --blast-radius "every signed-in user" \
     --complexity med --why "Token handling; refresh has ordering"
 feature gate                                   # exit 0 = safe to merge, 20 = ask a human
 ```
@@ -135,12 +134,11 @@ feature gate                                   # exit 0 = safe to merge, 20 = as
 | `feature start <name> --body <motivation> [--base <b>] [--title <t>]` | Branch (off the fetched remote base) + worktree + empty first commit, pushed, + draft PR. No tracking issue. |
 | `feature adopt [--branch <b>] [--base <b>]` | Wire an existing branch into tracking: tracking issue, linked PR. |
 | `feature describe --body-file <f\|-> [--title <t>] [--attach <file>]…` | Replace the PR's description (and title). Pass it with or without ship's block (e.g. the fetched body, edited); the PR keeps exactly one. Each `--attach` uploads a screencast or screenshot, and `![](./<file>)` in the body becomes it. |
-| `feature depth` | Reasoning effort for the next review: from diff stats and paths before any review, then from the last review's grade. |
 | `feature reviewer` | The T3 provider and model family that review a PR when the user names none. |
-| `feature effort --depth <d> --model-options <json>` | The `delegate_task` options that run a model at `<d>`, from its `options` as `orchestrator_capabilities` lists them: the option whose values run `low`…`max`, and for `ultra` the value listed after `max`. Refuses a model that has neither. |
+| `feature effort --model-options <json>` | The `delegate_task` options that run a model at high reasoning effort, from its `options` as `orchestrator_capabilities` lists them: the option whose values run `low`…`max`. Refuses a model that has none. |
 | `feature prompt <text>` | Record the latest prompt. |
 | `feature pr <number>` | Link a PR to the feature. |
-| `feature review record --sha <s> --found [<problem#> ...] [--regressions <problem#> ...] --summary <t> --depth <d> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with the reviewer's grade (moves the gate, writes the grade and one line per round into the PR body, each shown once the problems it found are closed) and print the resulting verdict. |
+| `feature review record --sha <s> --found [<problem#> ...] [--regressions <problem#> ...] --summary <t> --risk <r> --door <one-way\|two-way> --blast-radius <t> --complexity <c> --why <t>` | Record a review run with the reviewer's grade (moves the gate, writes the grade and one line per round into the PR body, each shown once the problems it found are closed) and print the resulting verdict. |
 | `feature problem add --title <t> --sev <high\|med\|low> [--repeats <number>]` | Add a problem sub-issue (it blocks the gate until closed, at any severity). `--repeats` names a fixed problem a root-cause fix of which would have prevented this one: a round that finds it recommends a redesign. |
 | `feature problem resolve <number> [--commit <sha> …]` | Close a problem sub-issue as fixed, recording its fix commits: one that fixed only low problems needs no review. Closing a round's last open problem shows its line in the PR body. |
 | `feature problem wontfix <number> --reason <why>` | Not relevant (false positive, by design, out of scope): label it `wontfix` (creating the label if the repo lacks it) and close it as not planned, with the reason. Like `resolve`, it can show a round's line in the PR body. |
@@ -207,7 +205,7 @@ See "Driving the loop to the end" and "The merge guard" in [docs/design.md](docs
 ## Claude skills
 
 `skills/start/SKILL.md` starts a feature; `skills/ship/SKILL.md` ships it (review, fix, review
-again to the gate, then babysit it to ready); `skills/review/SKILL.md` is one round of that (the reviewer's review at a sized depth,
+again to the gate, then babysit it to ready); `skills/review/SKILL.md` is one round of that (the reviewer's review,
 triage, filing, in a fork); `skills/close/SKILL.md` closes it out after the merge. Keep them in sync with the
 CLI: when you add or change a command, update the SKILL.md files in the same commit.
 

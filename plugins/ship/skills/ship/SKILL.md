@@ -48,7 +48,7 @@ the same way twice.
 ## The run
 
 1. **Review.** A review round, with `args` naming the PR and anything the user asked of the
-   review (a deeper one, a fresh one past an `OPEN` gate). If the user named a reviewer ("ship
+   review (a fresh one past an `OPEN` gate). If the user named a reviewer ("ship
    it, review with Claude"), name it in every round's `args` for the whole run; otherwise the
    round takes the default. Then `EnterWorktree` with `path: <worktree>` from its report (never
    `name:`), unless you're in it.
@@ -135,5 +135,4 @@ each applies:
 - the pre-existing bugs, each with the choice the Rules give the user;
 - what the user does next.
 
-Link the PR. Leave out what the PR body and the tracking issue already show, like the grade and
-each round's depth.
+Link the PR. Leave out what the PR body and the tracking issue already show, like the grade.

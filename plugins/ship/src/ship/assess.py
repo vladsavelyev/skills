@@ -1,16 +1,10 @@
-"""How deep a PR's review should go — pure sizing logic.
+"""The reviewer's grade of a PR, and the ship block that shows it in the PR body — pure logic.
 
-The depth is the reasoning effort the reviewer runs at, so a two-line docs fix doesn't pay
-for a max-effort sweep and a migration doesn't get a skim. It comes from size, risk and complexity:
-
-- Before any review, nobody has read the change, so nothing is guessed from the diff's content:
-  size comes from the diff stats and risk from which paths it touches (`path_risk`). Reading a
-  whole diff just to pick an effort cost more than it bought, and did not scale to big PRs.
-- After a review, the reviewer has read every line, so its grade of risk and complexity (recorded with the
-  round, and written into the PR body) sets the depth of the next round. A first guess that was
-  too low gets corrected by the reviewer that found out.
-
-The mapping lives here, not in the skill, so the same inputs always buy the same depth.
+Every round runs at the same reasoning effort (`reviewer.EFFORT`), whatever the PR's size or risk.
+The reviewer, which reads every line, grades the PR's risk and complexity as part of its review;
+the grade is recorded with the round and shown to the human beside the PR's size from its diff
+stats. Before anyone has read a change, `path_risk` judges it from the paths it touches, for the
+gate's question of whether a commit needs a review at all.
 """
 
 from dataclasses import dataclass
@@ -18,14 +12,10 @@ from fnmatch import fnmatch
 
 from .state import found_in
 
-SIZES = ("S", "M", "L", "XL")
 LEVELS = ("low", "med", "high")
 # Whether reverting the PR undoes what a bug in it did: a two-way door can be walked back through,
 # a one-way door can't (stored data rewritten, data sent out, a cutover others now depend on).
 DOORS = ("one-way", "two-way")
-# Reviewer reasoning efforts, cheapest first. A reviewer may also offer `ultra`; it's never picked
-# automatically, only when the user asks for it.
-DEPTHS = ("low", "medium", "high", "xhigh", "max")
 
 # (max files, max changed lines) per size bucket; anything beyond L is XL. M's ceiling matches
 # budget.py's "large diff" threshold, so the size label and the extra review round agree.
@@ -71,19 +61,6 @@ def last_grade(history: list[dict]) -> dict | None:
     return next((e["grade"] for e in reversed(history) if "grade" in e), None)
 
 
-def review_depth(*, size: str, risk: str, complexity: str) -> str:
-    """Risk sets the base depth: low risk reviews at low, med at medium, high at high. A missed
-    bug in a low-risk change costs little however big or hard the change is, so size and
-    complexity never lift it. Above that, a big or complex diff buys one more step, and both
-    together buy two only when the risk is high."""
-    if size not in SIZES or risk not in LEVELS or complexity not in LEVELS:
-        raise ValueError(f"unknown assessment: size={size!r} risk={risk!r} complexity={complexity!r}")
-    if risk == "low":
-        return DEPTHS[0]
-    bumps = int(size in ("L", "XL")) + int(complexity == "high")
-    return DEPTHS[LEVELS.index(risk) + (bumps if risk == "high" else min(bumps, 1))]
-
-
 # The severities a round's finds are listed under, worst first. `?` is an unlabelled problem.
 FOUND_SEVS = ("high", "med", "low", "?")
 # How a grade level reads in the PR body.
@@ -118,9 +95,7 @@ def _round_line(entry: dict) -> str:
     title = f"**Review round {entry['run']}**"
     if entry.get("placeholder"):
         return f"{title}. Not recorded."
-    # Rounds from before review sizing carry no depth; also already written into feature issues.
-    depth = f" ({entry['depth']})" if "depth" in entry else ""
-    return f"{title}{depth}. Findings: {_found(entry)}."
+    return f"{title}. Findings: {_found(entry)}."
 
 
 @dataclass(frozen=True)
@@ -132,17 +107,7 @@ class Review:
     changed_files: int
     changed_lines: int
     history: list[dict]
-    next_depth: str
     open_problems: frozenset[int]
-
-
-def _next_round(last: dict, depth: str) -> str:
-    """The depth the next round would run at. After a round that found no high or med problem no
-    round is due (low problems' fixes need none, see `gate.needs_review`), so the line says one only
-    follows new commits, rather than read as if another round were pending."""
-    if last.get("placeholder") or last["new_blocking"]:
-        return f" Next round would run at {depth}."
-    return f" A re-review after new commits would run at {depth}."
 
 
 def _grade_lines(review: Review) -> list[str]:
@@ -177,6 +142,4 @@ def render(*, issue: int, review: Review | None) -> str:
     runs = [e for e in review.history if "run" in e]
     shown = [e for e in runs if not found_in([e]) & review.open_problems]
     rounds = [_round_line(e) for e in shown]
-    if shown and shown[-1] is runs[-1]:
-        rounds[-1] += _next_round(runs[-1], review.next_depth)
     return "\n".join(f"> {line}" for line in [*_grade_lines(review), reference, *rounds])

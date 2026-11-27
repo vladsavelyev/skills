@@ -514,7 +514,7 @@ def test_resolve_without_a_commit_records_no_fix(monkeypatch):
 
 
 _RECORD = (
-    "review record --sha abc --found 8 --summary s --depth low --risk low --door two-way "
+    "review record --sha abc --found 8 --summary s --risk low --door two-way "
     "--blast-radius b --complexity low --why w --branch add-oauth"
 ).split()
 
@@ -838,42 +838,35 @@ BEDROCK_FABLE = [{"id": "effort", "values": ["default", "low", "medium", "high",
 
 
 @pytest.mark.parametrize(
-    ("options", "depth", "printed"),
+    ("options", "printed"),
     [
-        (SOL, "high", {"reasoningEffort": "high"}),
-        (SOL, "ultra", {"reasoningEffort": "ultra"}),
-        (FABLE, "max", {"effort": "max"}),
+        (SOL, {"reasoningEffort": "high"}),
         # Claude rejects `reasoningEffort` ("Unknown option reasoningEffort; supported options: effort, …").
-        (FABLE, "ultra", {"effort": "ultrathink"}),
-        (BEDROCK_FABLE, "low", {"effort": "low"}),
+        (FABLE, {"effort": "high"}),
+        (BEDROCK_FABLE, {"effort": "high"}),
     ],
 )
-def test_effort_sets_the_option_the_model_lists_for_it(capsys, options, depth, printed):
-    cli.main(["effort", "--depth", depth, "--model-options", json.dumps(options)])
+def test_effort_runs_every_review_at_high_on_the_option_the_model_lists_for_it(capsys, options, printed):
+    cli.main(["effort", "--model-options", json.dumps(options)])
     assert json.loads(capsys.readouterr().out) == printed
-
-
-def test_effort_refuses_ultra_for_a_model_with_nothing_above_max():
-    with pytest.raises(SystemExit, match="nothing above max"):
-        cli.main(["effort", "--depth", "ultra", "--model-options", json.dumps(BEDROCK_FABLE)])
 
 
 def test_effort_refuses_a_model_without_an_effort_option():
     no_effort = [{"id": "serviceTier", "values": ["default", "priority"]}]
     with pytest.raises(SystemExit, match="no option"):
-        cli.main(["effort", "--depth", "high", "--model-options", json.dumps(no_effort)])
+        cli.main(["effort", "--model-options", json.dumps(no_effort)])
 
 
 # navari-stack #23 in small: round 1's #30 is fixed; round 2 filed #36 (med) and #38 (low).
-_ROUND_2 = "**Review round 2** (high). Findings: 1 med (#36), 1 low (#38)."
+_ROUND_2 = "**Review round 2**. Findings: 1 med (#36), 1 low (#38)."
 
 
 def _graded_state() -> dict:
     state = _merged_state()
     grade = {"risk": "med", "door": "two-way", "blast_radius": "b", "complexity": "med", "why": "w"}
     state["review_history"] = [
-        {"run": 1, "sha": "a1", "depth": "high", "found": {"med": [30]}, "new_blocking": 1, "regressions": 0},
-        {"run": 2, "sha": "b2", "depth": "high", "found": {"med": [36], "low": [38]}, "new_blocking": 1},
+        {"run": 1, "sha": "a1", "found": {"med": [30]}, "new_blocking": 1, "regressions": 0},
+        {"run": 2, "sha": "b2", "found": {"med": [36], "low": [38]}, "new_blocking": 1},
     ]
     state["review_history"][-1] |= {"new_low": 1, "regressions": 0, "summary": "", "grade": grade}
     state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
@@ -1029,7 +1022,7 @@ def test_a_round_recorded_while_a_problem_closes_stays_in_the_block(monkeypatch)
     state = _graded_state()
     blocks = _stub_pr_block(monkeypatch, state, subs)
     later = json.loads(json.dumps(state))
-    round_3 = {"run": 3, "sha": "c3", "depth": "xhigh", "found": {}, "new_blocking": 0, "new_low": 0}
+    round_3 = {"run": 3, "sha": "c3", "found": {}, "new_blocking": 0, "new_low": 0}
     later["review_history"].append(round_3 | {"regressions": 0, "regressed": [], "summary": "", "grade": {}})
     later["review_history"][-1]["grade"] = state["review_history"][-1]["grade"] | {"risk": "high"}
     later["review_runs"], later["last_review"] = 3, later["review_history"][-1]
