@@ -514,38 +514,26 @@ _RECORD = (
 ).split()
 
 
-def _stub_review_record(
-    monkeypatch,
-    state: dict | None = None,
-    subs: list[dict] | None = None,
-    *,
-    stub_block: bool = True,
-    on_github: bool = False,
-) -> list[str]:
-    """`on_github` keeps the feature's issue as `_stub_issue` does, for `review record` to read and write; else the
-    command changes `state` in place and writes nothing."""
+def _stub_review_record(monkeypatch, state: dict | None = None, subs: list[dict] | None = None) -> tuple[dict, list]:
+    stored = _stub_issue(monkeypatch, state or _merged_state())
     did: list[str] = []
-    monkeypatch.setattr(github, "use_owner_account", lambda: None)
-    state = state or _merged_state()
-    if on_github:
-        _stub_issue(monkeypatch, state)
-    else:
-        monkeypatch.setattr(feature, "load_state", lambda branch, raw=False: (7, state, ""))
-        monkeypatch.setattr(github, "get_issue_body", lambda issue: "")
-        monkeypatch.setattr(feature, "check", lambda change: None)
-        monkeypatch.setattr(cli, "_save", lambda change, published=None: did.append("save"))
     monkeypatch.setattr(cli, "parent_branch", lambda branch: "main")
     monkeypatch.setattr(github, "pr_base_branch", lambda number: "main")
     monkeypatch.setattr(github, "sub_issues", lambda issue: subs or [_problem(8, "sev:med")])
-    if stub_block:
-        monkeypatch.setattr(cli, "_block_content", lambda feat: "")
-        monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: did.append("block") or True)
+    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
+    monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: did.append("block") or True)
     decision = cli.gate.GateDecision(cli.gate.Verdict.REVIEW_AGAIN, ["open"], "fix", 1, 2)
     monkeypatch.setattr(feature, "decide", lambda *a, **k: decision)
     monkeypatch.setattr(feature, "pr_merged", lambda state: False)
     monkeypatch.setattr(cli, "worktree_for_branch", lambda branch: None)
     monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment"))
-    return did
+    return stored, did
+
+
+def _stub_problem_bodies(monkeypatch, bodies: dict[int, str]) -> None:
+    """Each problem's body by its number; a problem not in `bodies` was filed as plain "repro"."""
+    feature_body = github.get_issue_body
+    monkeypatch.setattr(github, "get_issue_body", lambda n: feature_body(n) if n == 7 else bodies.get(n, "repro"))
 
 
 def _changed_on_the_laptop() -> None:
@@ -553,7 +541,7 @@ def _changed_on_the_laptop() -> None:
 
 
 def test_review_record_refuses_before_publishing_anything_when_the_state_changed_since_its_read(monkeypatch):
-    did = _stub_review_record(monkeypatch, on_github=True)
+    _, did = _stub_review_record(monkeypatch)
     monkeypatch.setattr(github, "pr_base_branch", lambda number: _changed_on_the_laptop() or "main")
     with pytest.raises(SystemExit, match="so nothing was written"):
         cli.main(_RECORD)
@@ -561,7 +549,7 @@ def test_review_record_refuses_before_publishing_anything_when_the_state_changed
 
 
 def test_review_record_says_what_went_out_when_the_state_changes_while_it_publishes(monkeypatch):
-    did = _stub_review_record(monkeypatch, on_github=True)
+    _, did = _stub_review_record(monkeypatch)
     monkeypatch.setattr(github, "comment", lambda issue, text: did.append("comment") or _changed_on_the_laptop())
     with pytest.raises(
         SystemExit, match="the state wasn't written, though the PR's ship block and the round's comment"
@@ -572,9 +560,9 @@ def test_review_record_says_what_went_out_when_the_state_changes_while_it_publis
 
 def test_recording_a_review_holds_nobody(monkeypatch, tmp_path):
     _in_session(monkeypatch, tmp_path)
-    did = _stub_review_record(monkeypatch)
+    stored, _ = _stub_review_record(monkeypatch)
     cli.main(_RECORD)
-    assert "save" in did and hold.held("s1") == []
+    assert parse_block(stored["body"])["review_runs"] == 1 and hold.held("s1") == []
 
 
 def _add_args(repeats: int | None = None):
@@ -636,36 +624,38 @@ def test_problem_add_refuses_to_repeat_a_problem_that_was_never_fixed(monkeypatc
 def test_review_record_keeps_the_rounds_finds_filed_as_repeating_a_fixed_problem(monkeypatch):
     state = _merged_state()
     # #50 repeats a fixed problem too, but an earlier round found it: it's back as a regression.
-    state["review_history"] = [{"run": 1, "sha": "a1", "found": {"med": [50]}}]
+    state["review_history"] = [_round(1, {}) | {"found": {"med": [50]}}]
     state["review_runs"] = 1
     subs = [_problem(40, "sev:low"), _problem(41, "sev:high"), _problem(42, "sev:med"), _problem(50, "sev:med")]
-    _stub_review_record(monkeypatch, state, subs)
-    bodies = {7: "", 40: problems.with_repeat("repro", 30), 41: problems.with_repeat("repro", 31), 42: "repro"}
-    monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
+    stored, _ = _stub_review_record(monkeypatch, state, subs)
+    _stub_problem_bodies(monkeypatch, {40: problems.with_repeat("repro", 30), 41: problems.with_repeat("repro", 31)})
     found = _RECORD.index("8")
     cli.main([*_RECORD[:found], "40", "41", "42", "50", *_RECORD[found + 1 :], "--regressions", "50"])
-    assert state["review_history"][-1]["repeats"] == {"40": 30, "41": 31}
-    assert state["review_history"][-1]["regressed"] == [50] and state["review_history"][-1]["regressions"] == 1
+    recorded = parse_block(stored["body"])["review_history"][-1]
+    assert recorded["repeats"] == {"40": 30, "41": 31}
+    assert recorded["regressed"] == [50] and recorded["regressions"] == 1
 
 
 def test_a_low_find_bridges_the_recurrence_chain_its_redesign_covered(monkeypatch):
     """Round 2's #12 repeats #10 and is redesigned; round 3's low #14 repeats #12; round 4's #16
     repeats #14. That is the redesigned kind back, so a human decides."""
     state = _merged_state()
-    state["review_history"] = [{"run": 1, "sha": "a1", "found": {"med": [10]}}]
+    state["review_history"] = [_round(1, {}) | {"found": {"med": [10]}}]
     state["review_runs"] = 1
     subs = [_problem(10, "sev:med", state="CLOSED"), _problem(12, "sev:med", state="CLOSED")]
     subs += [_problem(14, "sev:low", state="CLOSED"), _problem(16, "sev:med")]
-    _stub_review_record(monkeypatch, state, subs)
-    bodies = {7: "", 12: problems.with_repeat("repro", 10), 14: problems.with_repeat("repro", 12)}
-    bodies[16] = problems.with_repeat("repro", 14)
-    monkeypatch.setattr(github, "get_issue_body", bodies.__getitem__)
+    stored, _ = _stub_review_record(monkeypatch, state, subs)
+    repeats = {12: 10, 14: 12, 16: 14}
+    _stub_problem_bodies(monkeypatch, {n: problems.with_repeat("repro", r) for n, r in repeats.items()})
     found = _RECORD.index("8")
     for number in ("12", "14", "16"):
         cli.main([*_RECORD[:found], number, *_RECORD[found + 1 :]])
         if number == "12":
+            state = parse_block(stored["body"])
             chains = cli.gate.redesign_chains(state["review_history"], dismissed=frozenset())
             cli.record_redesign(state, rounds=5, chains=chains, reason="r")
+            stored["body"] = render_block(state)
+    state = parse_block(stored["body"])
     history = state["review_history"]
     d = cli.gate.evaluate(
         blocking_open=1,
@@ -683,11 +673,12 @@ def test_a_low_find_bridges_the_recurrence_chain_its_redesign_covered(monkeypatc
 @pytest.mark.parametrize("regressed", ["40", "9"])
 def test_review_record_refuses_a_regression_that_is_not_a_high_or_med_find(monkeypatch, regressed):
     subs = [_problem(40, "sev:low"), _problem(41, "sev:high")]
-    did = _stub_review_record(monkeypatch, _merged_state(), subs)
+    stored, did = _stub_review_record(monkeypatch, _merged_state(), subs)
+    body = stored["body"]
     found = _RECORD.index("8")
     with pytest.raises(SystemExit, match=f"--regressions #{regressed} is not a high/med problem in --found"):
         cli.main([*_RECORD[:found], "40", "41", *_RECORD[found + 1 :], "--regressions", regressed])
-    assert did == []
+    assert (did, stored["body"]) == ([], body)
 
 
 def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bought(monkeypatch, tmp_path):
@@ -924,8 +915,7 @@ def test_a_round_is_recorded_without_its_line_while_its_problems_are_open(monkey
     state["review_history"].pop()
     state["review_runs"], state["last_review"] = 1, state["review_history"][-1]
     subs = [_problem(30, "sev:med", state="CLOSED"), _problem(8, "sev:med")]
-    _stub_review_record(monkeypatch, state, subs, stub_block=False)
-    monkeypatch.setattr(github, "pr_diff_stats", lambda pr: (3, 40))
+    _stub_review_record(monkeypatch, state, subs)
     written: list[str] = []
     monkeypatch.setattr(github, "set_pr_block", lambda pr, content, issue: written.append(content) or True)
     cli.main(_RECORD)
