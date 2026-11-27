@@ -5,6 +5,7 @@ import pytest
 from ship.gate import (
     _NEXT_DECISION,
     _NEXT_REDESIGN,
+    _NEXT_REDESIGN_FAILED,
     EXIT_CODES,
     GateDecision,
     Verdict,
@@ -13,6 +14,7 @@ from ship.gate import (
     evaluate,
     needs_review,
     recurrence_reason,
+    redesign_refusal,
     rising_reason,
     rounds_since_invalidation,
 )
@@ -37,8 +39,9 @@ def run(
     return entry
 
 
-def gate(*, blocking_open, last_review, history, budget=3, unreviewed=(), answered=None, merged=False):
-    """`answered` is the run a `feature budget --set` came after (None: the budget is auto-sized)."""
+def gate(*, blocking_open, last_review, history, budget=3, unreviewed=(), answered=None, redesigned=None, merged=False):
+    """`answered` is the run a `feature budget --set` came after (None: the budget is auto-sized), and
+    `redesigned` the run a `feature redesign` answered (None: the run never redesigned)."""
     return evaluate(
         blocking_open=blocking_open,
         last_review=last_review,
@@ -46,6 +49,7 @@ def gate(*, blocking_open, last_review, history, budget=3, unreviewed=(), answer
         budget=budget,
         unreviewed=list(unreviewed),
         budget_answers=answered,
+        redesign_answers=redesigned,
         pr_merged=merged,
     )
 
@@ -161,7 +165,7 @@ def test_a_regression_is_a_fix_that_didnt_hold_so_it_asks_for_a_redesign():
     """The same bug back after its fix is the narrowest case of a kind of bug coming back."""
     history = [run(1, blocking=2), run(2, blocking=1, regressions=1)]
     d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4)
-    assert d.verdict is Verdict.NEEDS_DECISION
+    assert d.verdict is Verdict.REDESIGN
     assert any("re-opened 1 fixed high/med problem(s)" in r for r in d.reasons)
     assert d.next_step == _NEXT_REDESIGN
 
@@ -170,22 +174,46 @@ def test_a_new_bug_of_a_kind_already_fixed_asks_for_a_redesign_not_another_round
     """The fix patched one instance; the design still produces the kind, so the next round finds the next."""
     history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
     d = gate(blocking_open=1, last_review=history[-1], history=history, budget=4)
-    assert d.verdict is Verdict.NEEDS_DECISION
+    assert d.verdict is Verdict.REDESIGN
     assert any("#12 like #10" in r and "redesign" in r for r in d.reasons)
     assert d.next_step == _NEXT_REDESIGN
 
 
-def test_the_redesign_step_points_to_an_arena_and_leaves_the_call_to_a_human():
+def test_the_redesign_step_points_to_an_arena_and_does_not_stop_to_ask():
+    """navari-stack #23: nine problems sat open while the run waited for a yes to the redesign it
+    recommended. A redesign the run believes in is its to make."""
     assert "competing designs" in _NEXT_REDESIGN and "critiqued blind" in _NEXT_REDESIGN
-    assert "human decides" in _NEXT_REDESIGN and "feature escalate" in _NEXT_REDESIGN
+    assert "feature escalate" not in _NEXT_REDESIGN and "human" not in _NEXT_REDESIGN
+    assert _NEXT_REDESIGN.index("Skill(ship:fix)") < _NEXT_REDESIGN.index("feature redesign")
 
 
-def test_the_redesign_step_fixes_the_open_problems_before_it_escalates():
-    """navari-stack #23: round 2 filed a repeat, the step said "Don't fix the open problems
-    yet", and nine problems sat open while the PR body listed them. The user wants them fixed now; a
-    redesign that follows can still replace the patches."""
-    assert "Don't fix" not in _NEXT_REDESIGN
-    assert _NEXT_REDESIGN.index("Skill(ship:fix)") < _NEXT_REDESIGN.index("feature escalate")
+def test_a_redesign_answers_its_recurrence_and_its_review_round_follows():
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    d = gate(blocking_open=0, last_review=history[-1], history=history, budget=3, unreviewed=["redesign"], redesigned=2)
+    assert d.verdict is Verdict.REVIEW_AGAIN
+
+
+def test_a_clean_review_of_the_redesign_opens_the_gate():
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, sha=HEAD)]
+    assert gate(blocking_open=0, last_review=history[-1], history=history, redesigned=2).verdict is Verdict.OPEN
+
+
+def test_the_kind_back_after_a_redesign_goes_to_a_human():
+    """The run's own diagnosis missed: a second redesign on its say-so would be a loop."""
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"20": 12})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, budget=3, answered=2, redesigned=2)
+    assert d.verdict is Verdict.NEEDS_DECISION
+    assert d.next_step == _NEXT_REDESIGN_FAILED
+    assert any("#20 like #12" in r and "already redesigned after run 2" in r for r in d.reasons)
+    assert _NEXT_REDESIGN_FAILED.index("Skill(ship:fix)") < _NEXT_REDESIGN_FAILED.index("feature escalate")
+
+
+def test_a_human_who_buys_a_round_after_a_failed_redesign_answers_it():
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10}), run(3, blocking=1, repeats={"20": 12})]
+    d = gate(
+        blocking_open=0, last_review=history[-1], history=history, budget=5, unreviewed=["x"], answered=3, redesigned=2
+    )
+    assert d.verdict is Verdict.REVIEW_AGAIN
 
 
 def test_a_round_whose_finds_repeat_nothing_is_not_a_recurrence():
@@ -251,7 +279,7 @@ def test_navari_5176_asks_for_a_redesign_at_round_2():
     """Every one of its five rounds found the same kind of bug somewhere new, and each time the gate's
     next step was to fix them all and buy another round. Round 2 is when the kind first came back."""
     d = gate(blocking_open=5, last_review=NAVARI_5176[-1], history=NAVARI_5176, budget=3)
-    assert d.verdict is Verdict.NEEDS_DECISION
+    assert d.verdict is Verdict.REDESIGN
     assert d.next_step == _NEXT_REDESIGN
     assert any("#5214 like #5201, #5215 like #5201, #5216 like #5202, #5217 like #5203" in r for r in d.reasons)
     # Rising too (3 then 4), but the recurrence is the specific diagnosis, so it's the one named.
@@ -393,13 +421,22 @@ def test_there_is_nothing_to_escalate_once_the_gate_is_open_or_the_pr_merged():
     assert "ship:close" in _refusal(Verdict.MERGED, [], [])
 
 
-def test_a_redesign_waits_for_the_fixes_like_any_other_escalation():
-    """navari-stack #23: a recurrence used to let the run escalate with every problem still open."""
+def test_a_redesign_is_not_escalated_but_made():
+    """navari-stack #23: the run escalated the redesign it recommended, and waited for a yes."""
     history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
     d = gate(blocking_open=1, last_review=history[-1], history=history)
     assert "#12 still open" in escalation_refusal(d, open_problems=[12], named=[])
-    # Once they're fixed, the fixes need a review the human hasn't bought, and the redesign is still
-    # what the gate recommends.
-    fixed = gate(blocking_open=0, last_review=history[-1], history=history, unreviewed=["fix12"])
-    assert fixed.next_step == _NEXT_REDESIGN
-    assert escalation_refusal(fixed, open_problems=[], named=[]) is None
+    fixed = gate(blocking_open=0, last_review=history[-1], history=history, unreviewed=["redesign"])
+    assert fixed.verdict is Verdict.REDESIGN
+    assert "yours to make" in escalation_refusal(fixed, open_problems=[], named=[])
+    # A problem that needs the user's call still goes to them.
+    assert escalation_refusal(d, open_problems=[12], named=[12]) is None
+
+
+def test_a_redesign_is_recorded_once_its_problems_are_closed():
+    history = [run(1, blocking=1), run(2, blocking=1, repeats={"12": 10})]
+    d = gate(blocking_open=1, last_review=history[-1], history=history, unreviewed=["redesign"])
+    assert "#12 still open" in redesign_refusal(d, open_problems=[12])
+    assert redesign_refusal(d, open_problems=[]) is None
+    reviewing = gate(blocking_open=0, last_review=history[-1], history=history, unreviewed=["redesign"], redesigned=2)
+    assert "not REDESIGN" in redesign_refusal(reviewing, open_problems=[])

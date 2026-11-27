@@ -43,6 +43,7 @@ from .state import (
     render_block,
     replace_block,
     record_fix,
+    record_redesign,
     record_review,
     set_budget,
     set_status,
@@ -710,6 +711,34 @@ def cmd_escalate(args: argparse.Namespace) -> None:
     print(f"Escalated #{issue} for a human decision; status is now needs-decision.")
 
 
+def cmd_redesign(args: argparse.Namespace) -> None:
+    """Record the redesign a recurrence asked for, once it is pushed, and buy the round that reviews it.
+
+    The run makes the redesign itself (`gate._NEXT_REDESIGN`); this is its record on the tracking
+    issue, and what tells the gate the recurrence is answered.
+    """
+    branch = args.branch or current_branch()
+    issue, state, body = feature.load_state(branch)
+    subs = github.sub_issues(issue)
+    decision = feature.decide(branch, state, subs, feature.pr_merged(state))
+    blocking = problems.blocking(subs)
+    if refusal := gate.redesign_refusal(decision, open_problems=[s["number"] for s in blocking]):
+        sys.exit(f"Refusing to record a redesign on #{issue}: {refusal}")
+    unreviewed = feature.unreviewed(state, feature.review_head(branch, state, False), subs)
+    used = len(gate.rounds_since_invalidation(state["review_history"]))
+    rounds = max(decision.budget, used + 1)
+    record_redesign(state, rounds)
+    _save_state(issue, body, state)
+    github.comment(
+        issue,
+        f"🔁 **Redesigned** after run {state['review_runs']}. {args.reason}\n\n"
+        f"Why: {'; '.join(decision.reasons)}\n\n"
+        f"Review budget {rounds} round(s), so a review covers the redesign: "
+        f"{', '.join(sha[:9] for sha in unreviewed)}.",
+    )
+    print(f"Recorded the redesign on #{issue}; review budget {rounds} round(s). Review it next.")
+
+
 def cmd_round(args: argparse.Namespace) -> None:
     branch = args.branch or current_branch()
     session = hold.current_session()
@@ -1222,7 +1251,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser(
         "gate",
-        help="Merge verdict. Exit 0 = OPEN (ship), 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION (human), 30 = MERGED (close out)",
+        help=(
+            "Merge verdict. Exit 0 = OPEN (ship), 10 = REVIEW_AGAIN, 20 = NEEDS_DECISION (human), 30 = MERGED "
+            "(close out), 40 = REDESIGN"
+        ),
     )
     c.add_argument("--branch")
     c.set_defaults(func=cmd_gate)
@@ -1246,6 +1278,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     c.add_argument("--branch")
     c.set_defaults(func=cmd_escalate)
+
+    c = sub.add_parser(
+        "redesign", help="Record the redesign a recurring bug asked for, and buy the round that reviews it"
+    )
+    c.add_argument("--reason", required=True, help="The cause the recurring bugs share, and the design settled on")
+    c.add_argument("--branch")
+    c.set_defaults(func=cmd_redesign)
 
     c = sub.add_parser("round", help="Hold the branch for this session, and name the round of its ship run it starts")
     c.add_argument("kind", choices=hold.ROUND_KINDS, help="The round: a review or a batch of fixes")

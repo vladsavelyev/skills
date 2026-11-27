@@ -28,6 +28,26 @@ worktree.
 Resolve it first, keeping what each side meant, then `git add` the files, `git town continue`, which
 finishes the sync and pushes, and `feature sync` again: only it records the merge for the review.
 
+## A redesign
+
+When your arguments say `redesign: <cause>`, a kind of bug came back after its fix: the design
+keeps producing it, so patching each problem would leave the next one. Replace the design instead,
+before you take any problem on its own.
+
+1. Have a few agents each propose a design that removes the cause, working apart from each other.
+   Give each the cause, the problems it produced (`feature problem list`, closed ones too) and the
+   code, not your own idea of the fix.
+2. Have a separate agent critique each design blind: it sees the design, not who wrote it or the
+   others. Ask what the design still lets through, of the cause and of every problem.
+3. Settle one design from the critiques, borrowing from the others where a critique says to. Build
+   it, with tests that fail on the old design, and commit and push it.
+4. Resolve each open problem the redesign fixes with its commits (`feature problem resolve <#>
+   --commit <sha>…`), each shown fixed by a test or a repro. Take every problem it leaves as
+   **Each problem** says.
+
+The report's first line is then `Redesign: <the cause> — <sha>…: <the design settled on, and why
+the critiques picked it>`.
+
 ## Each problem
 
 1. Fix it at its root cause, not the symptom. Prefer deleting or narrowing over new code. Show the
@@ -62,6 +82,7 @@ End with only this block, one line per problem, each as short as it can be and s
 caller passes on to the user:
 
 ```
+Redesign: <cause> — <sha>…: <the design settled on>   (only when the caller asked for one)
 Fixed: #<n> <title> — <sha>…: <the root cause, and what shows the fix works>
 Won't fix: #<n> <title> — <why it isn't relevant>
 Question: #<n> <title> — <the question>; options: <…>; recommend: <…>

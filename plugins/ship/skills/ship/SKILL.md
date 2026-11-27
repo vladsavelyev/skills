@@ -16,8 +16,8 @@ The run ends at one of these **end states**, and your reply names which. Before 
 them, `unwatch_pull_request` if you watched the PR.
 
 - `READY`: the gate is `OPEN` and the PR is ready to merge (step 5).
-- `NEEDS_DECISION`: the review budget is spent or the loop churns, escalated with your
-  recommendation.
+- `NEEDS_DECISION`: the review budget is spent, the loop churns, or a redesign didn't hold,
+  escalated with your recommendation.
 - `YOUR CALL`: something only the user can decide, asked with its options and your recommendation.
 - `MERGED`: the PR is in; `Skill(ship:close)` closes it out.
 - `STOPPED`: the reviewer can't run, the fix waits on something only the user has, or the user
@@ -58,6 +58,7 @@ the same way twice.
    - `Blocked:` the reviewer unavailable or failing: end `STOPPED` with its error, releasing the
      branch if this session holds it.
    - `Gate: MERGED`: end `MERGED`.
+   - `Gate: REDESIGN`: step 3's fix round is a redesign.
 2. **Take in what the PR raised.**
    - A check this PR fails: file it.
    - A requested change or a finding in a review comment, from a person or a bot: file it, unless
@@ -76,6 +77,12 @@ the same way twice.
    - `Not done:`, or a `Conflict:` it couldn't resolve: start another with what stopped it, or end
      `STOPPED` if only the user can unblock it.
 
+   - At `Gate: REDESIGN`, a kind of bug came back after its fix, so the design keeps producing
+     it: the round redesigns instead of patching. Don't ask the user first; the redesign is yours
+     to make. Put `redesign: <the cause the recurring bugs share>` in its `args`. Once it reports,
+     `feature redesign --reason "<the cause, and the design it settled on>"`, which buys the round
+     that reviews it.
+
    Then answer each comment you filed or matched, once its problem is closed, and resolve the
    thread. Done when every open problem is resolved, `wontfix`, or has its question.
 4. **Gate.** `feature gate`:
@@ -83,11 +90,9 @@ the same way twice.
    - A problem left for the user: `feature escalate --problem <#>… --reason "<question, options,
      recommendation>"`, and end `YOUR CALL`.
    - `REVIEW_AGAIN`: step 1.
-   - `NEEDS_DECISION`: once step 3 has closed every open problem, a redesign recommended or not,
-     follow its next step and end `NEEDS_DECISION`. Recommending a redesign, name the cause the
-     recurring bugs share, not a design of your own. If the user picks the redesign, run its arena
-     with agents, build what it settles on, replacing the fixes where it must, then `feature budget
-     --set <n>` and ship again.
+   - `REDESIGN`: step 3, as a redesign.
+   - `NEEDS_DECISION`: once step 3 has closed every open problem, follow its next step and end
+     `NEEDS_DECISION`. After a redesign that didn't hold, say what it missed.
    - `OPEN`: step 5.
 5. **Babysit.** If the description shows no proof the change works and it can be run or seen, run
    it and add the before and after, laid out as "Prove the PR works" in your instructions says,
@@ -123,8 +128,9 @@ each applies:
 
 - what the run fixed or closed as won't-fix: each problem's number and title, with its commit or
   the reason;
-- at `YOUR CALL`, each question with its options and your recommendation; at a redesign, which
-  problems came back after their fix;
+- at `YOUR CALL`, each question with its options and your recommendation;
+- after a redesign, the cause it answered (which problems came back after their fix), the design
+  it settled on, and the problems it closed;
 - the pre-existing bugs, each with the choice the Rules give the user;
 - what the user does next.
 

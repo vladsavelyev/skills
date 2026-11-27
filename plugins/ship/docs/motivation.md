@@ -220,7 +220,7 @@ merge` of a tracked PR is refused while the gate is shut unless the user's reaso
 tracking issue. `feature escalate` refuses while a problem nobody asked the user about is open, so
 escalating isn't a way around fixing. Running inline had one side effect we missed at first: ship kept the fill-in report block it had written for its fork's caller, and that block now landed in the user's chat as the run's last message. The run now ends with a plain reply to the user; only the forked `review` round keeps a template, since an agent reads it.
 
-**15. A bug back after its fix → recommend a redesign, not another round.** On navari #5176 every
+**15. A bug back after its fix → redesign, not another round.** On navari #5176 every
 one of five rounds filed new high/med problems, mostly graded right, and nearly all of them were one
 kind of bug in a new place: the page said "Checked by RIO, nothing found" about data the run hadn't
 checked. The PR made a blanket "checked" claim over an open-ended set of data setups, so each round
@@ -239,7 +239,18 @@ the work a redesign throws away. On navari-stack #23 round 2 filed a `--repeats`
 the run escalated at once, fixing nothing, and nine problems sat open while the PR body already
 listed them. The user wants problems fixed as soon as they're found. So now the fixes come first at
 every verdict, and the recurrence only shapes the escalation that follows: the fixes' review is the
-round it recommends against, and a redesign the user picks can still replace the patches. The PR
+round it recommends against, and a redesign the user picks can still replace the patches.
+
+That still stopped to ask. On navari-stack #23 the run fixed the nine problems, then escalated
+the redesign it recommended and waited, and the user's answer was that a redesign the run believes
+in is its to make, closing the problems it fixes. So a recurrence is now a verdict of its own,
+`REDESIGN`: the fix round builds the redesign (the arena above, inside the round), resolves the
+problems it fixes, and `feature redesign` records it and buys the round that reviews it. Fixing the
+problems one by one first is gone with the wait it filled: the redesign replaces those patches. A
+human is asked only when that round finds the kind again, since then the run's own diagnosis
+missed and redesigning again on its say-so would be a loop.
+
+The PR
 body's line for a round (`Findings: 2 med (#36, #37), 7 low (…)`) read as a done review, so it now
 waits until every problem it lists is closed, and the `problem` commands that close or reopen one
 rewrite the block.

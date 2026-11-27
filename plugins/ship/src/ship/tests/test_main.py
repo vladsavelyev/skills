@@ -591,36 +591,47 @@ def test_review_record_keeps_the_rounds_high_and_med_finds_filed_as_repeating_a_
     assert state["review_history"][-1]["repeats"] == {"41": 31}
 
 
-def test_escalating_a_recurring_bug_recommends_a_redesign_once_its_problems_are_fixed(monkeypatch, tmp_path):
+def test_a_recurring_bug_is_redesigned_without_asking_and_its_review_round_bought(monkeypatch, tmp_path):
     """navari #5176: each escalation recommended fixing them all and one more round, five rounds
-    running. navari-stack #23: escalating before the fixes left nine problems open. Now the problems are
-    fixed first, and the escalation still recommends the redesign over reviewing those fixes."""
-    history = [
-        {"run": 1, "sha": "a1", "new_blocking": 1, "new_low": 0, "regressions": 0, "summary": "", "repeats": {}},
-        {
-            "run": 2,
-            "sha": "b2",
-            "new_blocking": 1,
-            "new_low": 0,
-            "regressions": 0,
-            "summary": "",
-            "repeats": {"12": 10},
-        },
-    ]
-    unfixed = cli.gate.evaluate(blocking_open=1, last_review=history[-1], history=history, budget=3, unreviewed=[])
-    posted = _stub_escalate(monkeypatch, tmp_path, unfixed.verdict, [_problem(12, "sev:high")], decision=unfixed)
+    running. navari-stack #23: the run escalated the redesign it recommended, and nine problems sat open
+    while it waited for a yes. Now the run redesigns, closes the problems, and records it."""
+    state = _merged_state()
+    state["review_history"] = [_round(1, {}), _round(2, {"12": 10})]
+    state["review_runs"], state["last_review"] = 2, state["review_history"][-1]
+    subs = [_problem(12, "sev:high")]
+    unreviewed = []
+    comments = []
+    monkeypatch.setattr(feature, "load_state", lambda branch: (7, state, render_block(state)))
+    monkeypatch.setattr(feature, "resolve_budget", lambda state: (state["review_budget"] or 2, False, []))
+    monkeypatch.setattr(feature, "pr_merged", lambda state: False)
+    monkeypatch.setattr(feature, "review_head", lambda branch, state, merged: "head")
+    monkeypatch.setattr(feature, "unreviewed", lambda state, head, subs: list(unreviewed))
+    monkeypatch.setattr(github, "sub_issues", lambda issue: subs)
+    monkeypatch.setattr(github, "set_issue_body", lambda issue, body: None)
+    monkeypatch.setattr(github, "comment", lambda issue, text: comments.append(text))
+    redesign = ["redesign", "--branch", "add-oauth", "--reason", "Every claim of checked covers unread data."]
+
     with pytest.raises(SystemExit, match="#12 still open"):
-        cli.cmd_escalate(
-            cli.argparse.Namespace(branch="add-oauth", reason="Both say checked of unread data.", problem=[])
-        )
-    assert posted == []
+        cli.main(redesign)
+    subs[0] = _problem(12, "sev:high", state="CLOSED")
+    unreviewed.append("c3c3c3c3c3")
+    cli.main(redesign)
+
+    assert state["redesign_run"] == 2 and state["review_budget"] == 3
+    assert "Redesigned" in comments[-1] and "#12 like #10" in comments[-1] and "c3c3c3c3c" in comments[-1]
+    decision = feature.decide("add-oauth", state, subs, False)
+    assert decision.verdict is cli.gate.Verdict.REVIEW_AGAIN
+    with pytest.raises(SystemExit, match="not REDESIGN"):
+        cli.main(redesign)
+
+
+def test_escalating_a_redesign_is_refused_as_the_runs_to_make(monkeypatch, tmp_path):
+    history = [_round(1, {}), _round(2, {"12": 10})]
     fixed = cli.gate.evaluate(blocking_open=0, last_review=history[-1], history=history, budget=3, unreviewed=["c3"])
     posted = _stub_escalate(monkeypatch, tmp_path, fixed.verdict, [], decision=fixed)
-    cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="Both say checked of unread data.", problem=[]))
-    comment = posted[-1][1]
-    assert "#12 like #10" in comment
-    assert "redesign over another round" in comment and "critiqued blind" in comment
-    assert hold.held("s1") == []
+    with pytest.raises(SystemExit, match="yours to make"):
+        cli.cmd_escalate(cli.argparse.Namespace(branch="add-oauth", reason="Redesign it?", problem=[]))
+    assert posted == []
 
 
 def _round(run: int, repeats: dict) -> dict:

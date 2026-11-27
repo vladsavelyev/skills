@@ -20,7 +20,7 @@ from .gitwiring import (
     remote_ref,
     sensitive_patterns,
 )
-from .state import budget_run, fixes, parse_block
+from .state import budget_run, fixes, parse_block, redesign_run
 
 
 def resolve_issue(branch: str) -> int:
@@ -132,6 +132,7 @@ def decide(branch: str, state: dict, subs: list[dict], merged: bool, *, head: st
         budget=rounds,
         unreviewed=unreviewed(state, head or review_head(branch, state, merged), subs),
         budget_answers=budget_run(state) if pinned else None,
+        redesign_answers=redesign_run(state),
         pr_merged=merged,
     )
 
