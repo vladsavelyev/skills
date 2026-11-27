@@ -39,8 +39,11 @@ before you take any problem on its own.
    code, not your own idea of the fix.
 2. Have a separate agent critique each design blind: it sees the design, not who wrote it or the
    others. Ask what the design still lets through, of the cause and of every problem.
-3. Settle one design from the critiques, borrowing from the others where a critique says to. Build
-   it, with tests that fail on the old design, and commit and push it.
+3. Settle one design from the critiques, borrowing from the others where a critique says to. If it
+   crosses a one-way door (a public API, stored data, a shared environment), don't build it: leave
+   the problems it would fix open, and report it as a `Question:` with the designs and your
+   recommendation. Otherwise build it, with tests that fail on the old design, and commit and push
+   it.
 4. Resolve each open problem the redesign fixes with its commits (`feature problem resolve <#>
    --commit <sha>…`), each shown fixed by a test or a repro. Take every problem it leaves as
    **Each problem** says.

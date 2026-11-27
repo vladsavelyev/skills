@@ -289,7 +289,8 @@ design is wrong.
   instance and the design still produces the bug, so another round of review would likely find
   the next one. The verdict is `REDESIGN`, and the run makes it without asking: a fix round in
   which a few competing designs are each critiqued blind by a separate agent, and the one settled
-  from the critiques is built. It closes the problems the redesign fixes and fixes the rest, then
+  from the critiques is built. Only a design that crosses a one-way door (a public API, stored data,
+  a shared environment) comes back as a question before it is built. It closes the problems the redesign fixes and fixes the rest, then
   `feature redesign` records it and pins the budget at one round more than used, so a round
   reviews it. The gate stays at `REDESIGN` until `feature redesign` records it, even once every
   problem is closed and nothing waits for `needs_review` (a redesign may be all docs), and the round

@@ -79,9 +79,10 @@ the same way twice.
 
    - At `Gate: REDESIGN`, a kind of bug came back after its fix, so the design keeps producing
      it: the round redesigns instead of patching. Don't ask the user first; the redesign is yours
-     to make. Put `redesign: <the cause the recurring bugs share>` in its `args`. Once it reports,
-     `feature redesign --reason "<the cause, and the design it settled on>"`, which buys the round
-     that reviews it.
+     to make, unless it crosses a one-way door (a public API, stored data, a shared environment),
+     which the round reports as a `Question:` before building it. Put `redesign: <the cause the
+     recurring bugs share>` in its `args`. Once it reports the redesign built, `feature redesign
+     --reason "<the cause, and the design it settled on>"`, which buys the round that reviews it.
 
    Then answer each comment you filed or matched, once its problem is closed, and resolve the
    thread. Done when every open problem is resolved, `wontfix`, or has its question.

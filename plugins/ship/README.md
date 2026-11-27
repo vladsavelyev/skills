@@ -29,7 +29,7 @@ terminates — a real reviewer always finds *something*. After it, a fourth ends
 | `REVIEW_AGAIN` | 10 | Open problems or unreviewed code left, review budget remains. |
 | `NEEDS_DECISION` | 20 | Budget spent, the loop is churning, or a redesign didn't hold. Open problems still get closed; a human decides whether to review the fixes in another round, merge, split, or redesign again. |
 | `MERGED` | 30 | The PR is in. Nothing left to review; close the feature out. |
-| `REDESIGN` | 40 | A kind of bug came back after its fix. The run redesigns without asking: competing designs, each critiqued blind, one built, closing the problems it fixes; then `feature redesign` buys the round that reviews it. |
+| `REDESIGN` | 40 | A kind of bug came back after its fix. The run redesigns without asking, unless the design crosses a one-way door (a public API, stored data, a shared environment): competing designs, each critiqued blind, one built, closing the problems it fixes; then `feature redesign` buys the round that reviews it. |
 
 **Nothing ships as debt.** Every open problem blocks the gate, at every severity including `low`.
 It's either fixed (`feature problem resolve` with its commit) or, if it isn't relevant, closed with

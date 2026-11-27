@@ -10,7 +10,8 @@ Before the merge the gate has **four** outcomes:
   REDESIGN        — a kind of bug came back after its fix: the design keeps producing it, so the
                     run redesigns instead of patching, closes the problems the redesign fixes, and
                     reviews the result. No human is asked: the run makes the redesign it would
-                    otherwise recommend.
+                    otherwise recommend, unless it crosses a one-way door (a public API, stored
+                    data, a shared environment).
   NEEDS_DECISION  — the loop is not converging on its own: the budget is spent, the trend says
                     another round won't help, or a redesign already ran and the kind came back
                     anyway. A human decides whether to buy another round, merge the fixes
@@ -63,6 +64,8 @@ _NEXT_REDESIGN = (
     "redesigns (`Skill(ship:fix)` with `redesign: <the cause the recurring bugs share>`): a few competing "
     "designs, each critiqued blind by a separate agent, then the one settled from the critiques, built. It "
     "closes each open problem the redesign fixes with the redesign's commits, and fixes the rest at the root. "
+    "Only a design that crosses a one-way door (a public API, stored data, a shared environment) comes back "
+    "as a `Question:` before it is built, its problems left open for the user's call. "
     "Then `feature redesign --reason '<the cause, and the design settled on>'`, which buys the round that "
     "reviews it, and review again."
 )
